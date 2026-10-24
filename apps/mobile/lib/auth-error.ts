@@ -23,3 +23,11 @@ export function mapAuthError(err: unknown, fallback: string, t?: Translate): str
   }
   return fallback;
 }
+
+export function mapFeishuAuthError(err: unknown, fallback: string, t?: Translate): string {
+  if (!(err instanceof Error)) return fallback;
+  if (/network|fetch|timeout|unreachable/.test(err.message.toLowerCase())) {
+    return t ? t("verify.network") : "Can't reach Multica. Check your connection and retry.";
+  }
+  return fallback;
+}

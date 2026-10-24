@@ -510,6 +510,21 @@ export const EMPTY_USER: User = {
   updated_at: "",
 };
 
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
+export const LoginResponseSchema: z.ZodType<LoginResponse> = z.object({
+  token: z.string(),
+  user: UserSchema,
+}).loose();
+
+export const EMPTY_LOGIN_RESPONSE: LoginResponse = {
+  token: "",
+  user: EMPTY_USER,
+};
+
 export const WorkspaceSchema: z.ZodType<Workspace> = z.object({
   id: z.string(),
   name: z.string().default(""),

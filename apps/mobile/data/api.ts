@@ -103,6 +103,7 @@ import {
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_LOGIN_RESPONSE,
   EMPTY_MEMBER_LIST,
   EMPTY_NOTIFICATION_PREFERENCES,
   EMPTY_PIN_LIST,
@@ -119,6 +120,7 @@ import {
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
   ListProjectsResponseSchema,
+  LoginResponseSchema,
   MemberListSchema,
   PinListSchema,
   PinnedItemSchema,
@@ -133,11 +135,14 @@ import {
   UserSchema,
   WorkspaceListSchema,
 } from "./schemas";
+import type { LoginResponse } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
+
+export type { LoginResponse } from "./schemas";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -146,11 +151,6 @@ if (!API_URL) {
     "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
       "the variant you are running (see apps/mobile/README.md).",
   );
-}
-
-export interface LoginResponse {
-  token: string;
-  user: User;
 }
 
 /** Mobile file payload for `uploadFile`. RN doesn't have a browser `File`
@@ -394,10 +394,16 @@ class ApiClient {
   }
 
   async verifyCode(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch<LoginResponse>("/auth/verify-code", {
-      method: "POST",
-      body: JSON.stringify({ email, code }),
-    });
+    return this.fetchValidatedWith<LoginResponse>(
+      "/auth/verify-code",
+      LoginResponseSchema,
+      EMPTY_LOGIN_RESPONSE,
+      {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      },
+      { endpoint: "verifyCode" },
+    );
   }
 
   /**

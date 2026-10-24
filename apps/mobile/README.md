@@ -149,9 +149,18 @@ A free Apple ID signs builds for **7 days only**, Debug and Release both. After 
 
 ## Pointing at a different backend
 
-Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` (whichever variant you're running). Then:
+Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` (whichever variant you're running). Set `EXPO_PUBLIC_WEB_URL` too when the Web app uses a different origin; Feishu sign-in falls back to the API origin when it is unset. For a single-origin self-hosted deployment, set both to the same URL, for example:
 
-- For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new value.
-- For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
+```bash
+EXPO_PUBLIC_API_URL=https://fde.lumistedu.com
+EXPO_PUBLIC_WEB_URL=https://fde.lumistedu.com
+```
+
+The Feishu developer console must allow `<EXPO_PUBLIC_WEB_URL>/auth/callback` as a redirect URL. Mobile reuses that Web callback and returns through `multica://auth/callback`; the Feishu App Secret stays on the server and is never part of the app environment.
+
+Then:
+
+- For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new values.
+- For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the values are baked into the embedded bundle at build time.
 
 For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.

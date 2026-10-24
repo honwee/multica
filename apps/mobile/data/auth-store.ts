@@ -1,6 +1,6 @@
 /**
  * Mobile auth store — Zustand. Logic mirrors packages/core/auth/store.ts:
- *   - Token written ONLY on successful verifyCode
+ *   - Token written only after email verification or external token validation
  *   - 401 → clear token; non-401 (5xx / network blip) → preserve token so
  *     the next launch can retry
  *   - logout = clear token + clear in-memory user + setToken(null)
@@ -22,10 +22,17 @@ interface AuthState {
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
+  loginWithToken: (token: string) => Promise<User>;
   logout: () => Promise<void>;
   /** Overwrite the in-memory user — call after PATCH /api/me so name/avatar
    *  edits land without a refetch. Server response is the source of truth. */
   setUser: (user: User) => void;
+}
+
+function assertValidSession(token: string, user: User): void {
+  if (!token.trim() || !user.id) {
+    throw new Error("Invalid authentication response");
+  }
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -68,6 +75,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   verifyCode: async (email, code) => {
     const { token, user } = await api.verifyCode(email, code);
+    assertValidSession(token, user);
     // Signing in replaces the credential just as decisively as signing out:
     // a renewal still in flight for the previous account must not write its
     // result over this one.
@@ -76,6 +84,26 @@ export const useAuthStore = create<AuthState>((set) => ({
     api.setToken(token);
     set({ user });
     return user;
+  },
+
+  loginWithToken: async (token) => {
+    const normalizedToken = token.trim();
+    if (!normalizedToken) throw new Error("Invalid authentication response");
+
+    const previousToken = api.getToken();
+    invalidateSessionEpoch();
+    api.setToken(normalizedToken);
+    try {
+      const user = await api.getMe();
+      assertValidSession(normalizedToken, user);
+      await setToken(normalizedToken);
+      api.setToken(normalizedToken);
+      set({ user });
+      return user;
+    } catch (error) {
+      api.setToken(previousToken);
+      throw error;
+    }
   },
 
   logout: async () => {
