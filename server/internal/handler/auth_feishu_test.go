@@ -114,7 +114,7 @@ func TestFeishuLoginUserInfoFailures(t *testing.T) {
 		{name: "provider unavailable", status: 503, body: `<html>bad gateway</html>`, wantStatus: 502},
 		{name: "ok status with non-zero code", status: 200, body: `{"code":99991668,"msg":"invalid token"}`, wantStatus: 502},
 		{name: "missing data on a successful response", status: 200, body: `{"code":0,"msg":"success"}`, wantStatus: 502},
-		{name: "missing email on a successful response", status: 200, body: `{"code":0,"data":{"name":"No Email","open_id":"ou_x"}}`, wantStatus: 400, wantCode: "feishu_account_no_email"},
+		{name: "missing email and open id on a successful response", status: 200, body: `{"code":0,"data":{"name":"No Email"}}`, wantStatus: 400, wantCode: "feishu_account_no_email"},
 		{name: "blank emails on a successful response", status: 200, body: `{"code":0,"data":{"email":"   ","enterprise_email":"  "}}`, wantStatus: 400, wantCode: "feishu_account_no_email"},
 		{name: "null profile", status: 200, body: `null`, wantStatus: 502},
 		{name: "malformed profile", status: 200, body: `{`, wantStatus: 502},
@@ -179,6 +179,35 @@ func TestFeishuLoginEnterpriseEmailPreferred(t *testing.T) {
 		t.Fatalf("got email %q, want the lowercased enterprise email %q", got.User.Email, email)
 	}
 	if got.User.Name != "企业 用户" {
+		t.Fatalf("got name %q, want the Feishu profile name", got.User.Name)
+	}
+}
+
+// TestFeishuLoginWithoutEmailUsesOpenID verifies that tenants without employee
+// mailboxes can still sign in with a stable, non-deliverable internal account.
+func TestFeishuLoginWithoutEmailUsesOpenID(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	email := "ou_no_email@feishu.invalid"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1`, email)
+	h := *testHandler
+	h.cfg = Config{AllowSignup: true}
+	h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+			return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+		}
+		return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"无邮箱用户","open_id":"ou_no_email"}}`), nil
+	})}
+	req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+	var got LoginResponse
+	testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+	if got.Token == "" {
+		t.Fatal("expected a session token")
+	}
+	if got.User.Email != email {
+		t.Fatalf("got email %q, want the Open ID based internal account %q", got.User.Email, email)
+	}
+	if got.User.Name != "无邮箱用户" {
 		t.Fatalf("got name %q, want the Feishu profile name", got.User.Name)
 	}
 }

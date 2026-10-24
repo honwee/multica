@@ -192,8 +192,23 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		email = strings.ToLower(strings.TrimSpace(fUser.Data.Email))
 	}
 	if email == "" {
-		writeErrorCode(w, http.StatusBadRequest, feishuLoginCodeAccountWithoutEmail, "Feishu did not provide an email address for this sign-in")
-		return
+		// Many tenants do not assign mailboxes to employees. In that case use
+		// the stable Feishu identity as a non-deliverable internal account key
+		// instead of rejecting every login. The reserved .invalid TLD makes it
+		// explicit that this identifier is not a routable email address.
+		openID := strings.ToLower(strings.TrimSpace(fUser.Data.OpenID))
+		validOpenID := openID != ""
+		for _, char := range openID {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
+				validOpenID = false
+				break
+			}
+		}
+		if !validOpenID {
+			writeErrorCode(w, http.StatusBadRequest, feishuLoginCodeAccountWithoutEmail, "Feishu did not provide an email address or a valid Open ID for this sign-in")
+			return
+		}
+		email = openID + "@feishu.invalid"
 	}
 
 	if auth.IsTemporarilyDisabledUserEmail(email) {
