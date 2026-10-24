@@ -571,7 +571,7 @@ class ApiClient {
     });
   }
 
-  // --- Members & Agents (for actor name/avatar lookup) ---
+  // --- Members & Agents (actor lookup and workspace directories) ---
   async listMembers(
     workspaceId: string,
     opts?: { signal?: AbortSignal },

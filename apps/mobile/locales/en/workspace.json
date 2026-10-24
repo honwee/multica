@@ -12,10 +12,28 @@
   },
   "empty": "You don't belong to any workspaces yet. Contact your workspace admin to be invited.",
   "agent": {
-    "coming_soon": "Agents coming soon.",
     "title": "Agents",
     "empty": "No agents yet",
-    "search_placeholder": "Search agents..."
+    "empty_detail": "Create an agent on web or desktop to start chatting.",
+    "search_placeholder": "Search agents...",
+    "model": "Model: {{model}}",
+    "runtime_default": "Runtime default model",
+    "runtime_required": "Runtime required",
+    "permission_unavailable": "You don't have permission to chat with this agent",
+    "status": {
+      "online": "Runtime online",
+      "unstable": "Runtime connection unstable",
+      "offline": "Runtime offline",
+      "checking": "Checking runtime..."
+    },
+    "access": {
+      "workspace": "Workspace members",
+      "specific_people": "Specific people",
+      "owner_only": "Owner only"
+    },
+    "errors": {
+      "load_failed": "Failed to load agents: {{message}}"
+    }
   },
   "actions": {
     "retry": "Retry",

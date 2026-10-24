@@ -43,7 +43,7 @@
     "no_agent": "没有可用智能体",
     "runtime_required": "该智能体需要先配置运行时才能运行。",
     "offline": "{{name}} 已离线。消息会等待其运行时恢复后发送。",
-    "no_agent_action": "在 \"更多 → 智能体\" 中添加或启用智能体即可开始聊天。",
+    "no_agent_action": "在 \"更多 → 智能体\" 中查看状态；添加智能体或绑定运行时请使用网页端或桌面端。",
     "offline_unstable": "{{name}} 可能刚断开连接，你的消息会先排队。",
     "runtime_required_name": "{{name}} 需要先配置运行时才能运行。请在网页端或桌面端绑定。"
   },

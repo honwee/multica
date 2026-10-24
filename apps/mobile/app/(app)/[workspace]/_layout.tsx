@@ -17,6 +17,7 @@ import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
+import { useChatAgentPickerResetOnWorkspaceChange } from "@/data/stores/chat-agent-picker-store";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -120,6 +121,7 @@ export default function WorkspaceLayout() {
   useNewIssueDraftResetOnWorkspaceChange(matched?.id ?? null);
   useNewProjectDraftResetOnWorkspaceChange(matched?.id ?? null);
   useChatSessionPickerResetOnWorkspaceChange(matched?.id ?? null);
+  useChatAgentPickerResetOnWorkspaceChange(matched?.id ?? null);
 
   // Wait for the workspaces list before deciding membership — otherwise a
   // valid deep link would briefly redirect away on cold start.

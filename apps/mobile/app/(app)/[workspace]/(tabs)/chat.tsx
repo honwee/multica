@@ -10,14 +10,14 @@
  *                                ─ OfflineBanner
  *                                ─ ChatComposer
  *
- * Session switching, agent selection, and session deletion all happen
- * inside this screen via Modal sheets — there is no `/chat/[id]` sub-route.
+ * Session switching and deletion use Modal sheets; the agents page can also
+ * request a new chat with a preselected agent. There is no `/chat/[id]` route.
  *
- * State (all local, none in Zustand):
+ * Session and agent selection stay local; one-shot cross-route requests arrive
+ * through small Zustand picker stores:
  *   - activeSessionId   — which session is being viewed (null = new chat blank)
  *   - selectedAgentId   — overrides currentSession.agent_id when set (used
  *                         when starting a new chat with a freshly-picked agent)
- *   - sessionSheetOpen  — bottom modal visibility
  *   - agentPickerOpen   — bottom modal visibility
  *
  * Side effects:
@@ -72,6 +72,7 @@ import {
   useChatDraftsStore,
 } from "@/data/stores/chat-drafts-store";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
+import { useChatAgentPickerStore } from "@/data/stores/chat-agent-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
   invalidatePendingTask,
@@ -135,19 +136,60 @@ export default function ChatTab() {
 
   // ── Server state ───────────────────────────────────────────────────────
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isFetched: agentsFetched } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], isFetched: membersFetched } = useQuery(
+    memberListOptions(wsId),
+  );
+  const agentSelectRequest = useChatAgentPickerStore((s) => s.selectRequest);
+  const consumeAgentSelect = useChatAgentPickerStore((s) => s.consumeSelect);
 
   // ── Auto-hydrate active session on first Chat tab entry ────────────────
   // Mobile-only deviation from web: web's chat-window opens to an empty
   // state when no `activeSessionId` is persisted; on a phone, picking
   // a session is 4 taps, so jump straight to the most recent session.
-  // Hydration is one-shot per workspace.
+  // A pending agent selection takes precedence over recent-session hydration.
   const [hydratedWs, setHydratedWs] = useState<string | null>(null);
-  if (wsId && hydratedWs !== wsId) {
+  const [appliedAgentSelect, setAppliedAgentSelect] = useState<
+    typeof agentSelectRequest
+  >(null);
+  const pendingAgentSelect =
+    agentSelectRequest && agentSelectRequest !== appliedAgentSelect
+      ? agentSelectRequest
+      : null;
+
+  if (pendingAgentSelect && agentsFetched && membersFetched) {
+    const requestedAgent = agents.find(
+      (agent) => agent.id === pendingAgentSelect.id,
+    );
+    const role =
+      members.find((member) => member.user_id === userId)?.role ?? null;
+    const canOpen =
+      requestedAgent &&
+      !requestedAgent.archived_at &&
+      canAssignAgentToIssue(requestedAgent, {
+        userId: userId ?? null,
+        role,
+      }).allowed;
+
+    setAppliedAgentSelect(pendingAgentSelect);
+    if (canOpen) {
+      setSelectedAgentId(requestedAgent.id);
+      setActiveSessionId(null);
+      if (wsId && hydratedWs !== wsId) setHydratedWs(wsId);
+    }
+  }
+
+  if (wsId && hydratedWs !== wsId && !pendingAgentSelect) {
     setHydratedWs(wsId);
     if (sessions.length > 0) setActiveSessionId(sessions[0].id);
   }
+  useEffect(() => {
+    if (agentSelectRequest && agentSelectRequest === appliedAgentSelect) {
+      consumeAgentSelect();
+    }
+  }, [agentSelectRequest, appliedAgentSelect, consumeAgentSelect]);
   const { data: messages = [], isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId),
   );

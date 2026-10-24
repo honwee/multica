@@ -14,8 +14,26 @@
   "agent": {
     "title": "智能体",
     "empty": "还没有智能体",
+    "empty_detail": "在 Web 或桌面端创建智能体后即可开始聊天。",
     "search_placeholder": "搜索智能体...",
-    "coming_soon": "智能体功能即将上线。"
+    "model": "模型：{{model}}",
+    "runtime_default": "使用运行时默认模型",
+    "runtime_required": "需绑定运行时",
+    "permission_unavailable": "你没有权限与此智能体聊天",
+    "status": {
+      "online": "运行时在线",
+      "unstable": "运行时连接不稳定",
+      "offline": "运行时离线",
+      "checking": "正在检查运行时..."
+    },
+    "access": {
+      "workspace": "工作区成员",
+      "specific_people": "指定成员",
+      "owner_only": "仅所有者"
+    },
+    "errors": {
+      "load_failed": "智能体加载失败：{{message}}"
+    }
   },
   "actions": {
     "retry": "重试",

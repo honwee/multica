@@ -1,8 +1,7 @@
 /**
  * Banner shown when the workspace has zero usable agents for the current
  * user. Mirrors the role of packages/views/chat/components/no-agent-banner.tsx
- * on web — distinct visual cue + a route into the place where users can
- * add agents.
+ * on web — distinct visual cue + a route into the workspace agent directory.
  *
  * Rendered just under ChatHeader. Tap → More → Agents.
  */
