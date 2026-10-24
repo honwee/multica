@@ -10,6 +10,7 @@ export type CallbackError =
         | "signup_prohibited"
         | "email_not_allowed"
         | "google_account_no_email"
+        | "feishu_account_no_email"
         | "oauth_code_invalid";
     }
   | { kind: "raw"; text: string };
@@ -30,6 +31,8 @@ export function callbackErrorFrom(err: unknown): CallbackError {
       return { kind: "email_not_allowed" };
     case "google_account_no_email":
       return { kind: "google_account_no_email" };
+    case "feishu_account_no_email":
+      return { kind: "feishu_account_no_email" };
     case "oauth_code_invalid":
       return { kind: "oauth_code_invalid" };
     default:

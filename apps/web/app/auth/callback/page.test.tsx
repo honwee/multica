@@ -11,6 +11,7 @@ const {
   mockRouter,
   mockSearchParams,
   mockLoginWithGoogle,
+  mockLoginWithFeishu,
   mockListWorkspaces,
   mockListMyInvitations,
   mockSetQueryData,
@@ -23,6 +24,7 @@ const {
     mockRouter: { push: mockPush },
     mockSearchParams: new URLSearchParams(),
     mockLoginWithGoogle: vi.fn(),
+    mockLoginWithFeishu: vi.fn(),
     mockListWorkspaces: vi.fn(),
     mockListMyInvitations: vi.fn(),
     mockSetQueryData,
@@ -82,7 +84,7 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({ loginWithGoogle: mockLoginWithGoogle, loginWithFeishu: mockLoginWithFeishu }),
   };
 });
 
@@ -103,6 +105,7 @@ vi.mock("@multica/core/api", async () => {
       listWorkspaces: mockListWorkspaces,
       listMyInvitations: mockListMyInvitations,
       googleLogin: vi.fn(),
+      feishuLogin: vi.fn(),
     },
   };
 });
@@ -136,6 +139,7 @@ describe("CallbackPage", () => {
     );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithFeishu.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
@@ -411,6 +415,64 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
+  });
+
+  it("exchanges the code with Feishu when state carries provider:feishu", async () => {
+    mockSearchParams.set("state", "provider:feishu");
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(mockLoginWithFeishu).toHaveBeenCalledWith(
+        "test-code",
+        expect.stringContaining("/auth/callback"),
+      );
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("redirects a Feishu CLI login back to the CLI listener with the token", async () => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockFeishuLogin = mockedApi.feishuLogin as ReturnType<typeof vi.fn>;
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      mockSearchParams.set(
+        "state",
+        "provider:feishu,cli_callback:http://127.0.0.1:46233/callback,cli_state:abc123",
+      );
+      mockFeishuLogin.mockResolvedValue({ token: "cli-jwt-token" });
+
+      renderCallback();
+
+      await waitFor(() => {
+        expect(mockFeishuLogin).toHaveBeenCalledWith(
+          "test-code",
+          expect.stringContaining("/auth/callback"),
+        );
+      });
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "http://127.0.0.1:46233/callback?token=cli-jwt-token&state=abc123",
+        );
+      });
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("redirects to CLI callback even when state also contains platform:desktop", async () => {

@@ -34,6 +34,13 @@ interface GoogleAuthConfig {
   state?: string;
 }
 
+interface FeishuAuthConfig {
+  appId: string;
+  redirectUri: string;
+  /** Opaque state passed through Feishu OAuth (e.g. "provider:feishu"). */
+  state?: string;
+}
+
 interface CliCallbackConfig {
   /** Validated localhost callback URL */
   url: string;
@@ -49,6 +56,8 @@ interface LoginPageProps {
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
   google?: GoogleAuthConfig;
+  /** Feishu OAuth config. Omit to disable Feishu login. */
+  feishu?: FeishuAuthConfig;
   /** CLI callback config for authorizing CLI tools. */
   cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
@@ -96,6 +105,7 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
+  feishu,
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
@@ -291,6 +301,17 @@ export function LoginPage({
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
+  const handleFeishuLogin = () => {
+    if (!feishu) return;
+    const params = new URLSearchParams({
+      client_id: feishu.appId,
+      redirect_uri: feishu.redirectUri,
+      response_type: "code",
+    });
+    if (feishu.state) params.set("state", feishu.state);
+    window.location.href = `https://accounts.feishu.cn/open-apis/authen/v1/authorize?${params}`;
+  };
+
   // CLI confirm step
 
   if (step === "cli_confirm" && existingUser) {
@@ -483,6 +504,28 @@ export function LoginPage({
                 />
               </svg>
               {t(($) => $.signin.google)}
+            </Button>
+          )}
+          {feishu && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              size="lg"
+              onClick={handleFeishuLogin}
+              disabled={loading}
+            >
+              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M3 7.5c3.2 2.9 6.8 5.2 10.8 6.7l3.4-3.9c.5-.6 1.3-.8 2-.5l1.8.8c-2.1 4.6-5.9 8.2-10.7 9.9-2.6.9-5.1.6-6.4-.6L3 7.5z"
+                  fill="#3370FF"
+                />
+                <path
+                  d="M13.8 14.2c-4-1.5-7.6-3.8-10.8-6.7h8.1c.6 0 1.2.3 1.6.8l3.3 4.3-2.2 1.6z"
+                  fill="#133C9A"
+                />
+              </svg>
+              {t(($) => $.signin.feishu)}
             </Button>
           )}
           {extra && <div className="w-full pt-1 text-center">{extra}</div>}
