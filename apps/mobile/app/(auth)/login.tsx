@@ -17,8 +17,8 @@ import { mapAuthError, mapFeishuAuthError } from "@/lib/auth-error";
 import {
   buildFeishuAuthorizationUrl,
   FeishuCallbackError,
+  getFeishuTokenFromAuthSession,
   MULTICA_AUTH_CALLBACK_URL,
-  parseFeishuCallbackUrl,
   resolveFeishuWebUrl,
 } from "@/lib/feishu-auth";
 
@@ -70,12 +70,8 @@ export default function Login() {
         buildFeishuAuthorizationUrl({ appId: feishuAppId, webUrl: feishuWebUrl }),
         MULTICA_AUTH_CALLBACK_URL,
       );
-      if (result.type === "cancel" || result.type === "dismiss") return;
-      if (result.type !== "success") {
-        throw new Error("Feishu authorization did not complete");
-      }
-
-      const token = parseFeishuCallbackUrl(result.url);
+      const token = getFeishuTokenFromAuthSession(result);
+      if (token === null) return;
       await loginWithToken(token);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/");

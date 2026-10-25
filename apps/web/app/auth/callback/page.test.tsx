@@ -434,6 +434,45 @@ describe("CallbackPage", () => {
     });
   });
 
+  it("returns a Feishu native handoff through the Multica deep link", async () => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockFeishuLogin = mockedApi.feishuLogin as ReturnType<typeof vi.fn>;
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      mockSearchParams.set("state", "provider:feishu,platform:desktop");
+      mockFeishuLogin.mockResolvedValue({ token: "native-jwt-token" });
+
+      renderCallback();
+
+      await waitFor(() => {
+        expect(mockFeishuLogin).toHaveBeenCalledWith(
+          "test-code",
+          expect.stringContaining("/auth/callback"),
+        );
+      });
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "multica://auth/callback?token=native-jwt-token",
+        );
+      });
+      expect(mockLoginWithFeishu).not.toHaveBeenCalled();
+      expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
   it("redirects a Feishu CLI login back to the CLI listener with the token", async () => {
     const { api: mockedApi } = await import("@multica/core/api");
     const mockFeishuLogin = mockedApi.feishuLogin as ReturnType<typeof vi.fn>;

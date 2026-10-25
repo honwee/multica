@@ -54,6 +54,18 @@ export function buildFeishuAuthorizationUrl({
   return `${FEISHU_AUTHORIZE_URL}?${params.toString()}`;
 }
 
+export function getFeishuTokenFromAuthSession(result: {
+  type: string;
+  url?: string;
+}): string | null {
+  if (result.type === "cancel" || result.type === "dismiss") return null;
+  if (result.type !== "success") {
+    throw new Error("Feishu authorization did not complete");
+  }
+  if (!result.url) throw new FeishuCallbackError();
+  return parseFeishuCallbackUrl(result.url);
+}
+
 export function parseFeishuCallbackUrl(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
