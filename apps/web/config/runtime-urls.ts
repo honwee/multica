@@ -150,6 +150,9 @@ export function runtimeRewriteDestination(
 }
 
 function isBackendAuthPath(pathname: string): boolean {
+  if (pathname === "/auth/native" || pathname.startsWith("/auth/native/")) {
+    return false;
+  }
   if (pathname === "/auth/callback") return false;
   if (pathname.startsWith("/auth/callback/")) return false;
   if (pathname === "/auth/hg-sso/callback") return false;
