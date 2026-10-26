@@ -3,7 +3,7 @@ export const MULTICA_AUTH_CALLBACK_URL = "multica://auth/callback";
 const FEISHU_AUTHORIZE_URL =
   "https://accounts.feishu.cn/open-apis/authen/v1/authorize";
 // The existing Web callback uses this marker for its native bearer-token handoff.
-const FEISHU_NATIVE_HANDOFF_STATE = "provider:feishu,platform:desktop";
+const FEISHU_NATIVE_HANDOFF_STATE = "provider:feishu,platform:mobile";
 
 export class FeishuCallbackError extends Error {
   constructor() {

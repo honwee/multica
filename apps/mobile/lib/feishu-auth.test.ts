@@ -79,7 +79,7 @@ describe("buildFeishuAuthorizationUrl", () => {
       client_id: "cli_fde",
       redirect_uri: "https://fde.lumistedu.com/auth/callback",
       response_type: "code",
-      state: "provider:feishu,platform:desktop",
+      state: "provider:feishu,platform:mobile",
     });
     expect(authorizationUrl).not.toContain("secret");
   });

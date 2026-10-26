@@ -20,6 +20,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "lucide-react";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
+import { redirectToNativeAuth } from "./native-handoff";
 
 const authLogger = createLogger("auth.callback");
 
@@ -54,6 +55,7 @@ function CallbackContent() {
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
+    const isMobile = stateParts.includes("platform:mobile");
     // The login page marks Feishu-initiated flows in the opaque state; the
     // code is then exchanged with Feishu instead of Google.
     const isFeishu = stateParts.includes("provider:feishu");
@@ -96,15 +98,21 @@ function CallbackContent() {
           authLogger.error("CLI OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
-    } else if (isDesktop) {
-      // Desktop flow: exchange code for token, then redirect via deep link
+    } else if (isDesktop || isMobile) {
+      // Native flow: exchange code for token, then hand it to the app. Mobile
+      // uses an HTTP 303 because direct JavaScript navigation to a custom
+      // scheme is rejected by ASWebAuthenticationSession on current iOS.
       exchangeLogin(code, redirectUri)
         .then(({ token }) => {
           setDesktopToken(token);
-          window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          if (isMobile) {
+            redirectToNativeAuth(token);
+          } else {
+            window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          }
         })
         .catch((err) => {
-          authLogger.error("Desktop OAuth callback failed", err);
+          authLogger.error("Native OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     } else {

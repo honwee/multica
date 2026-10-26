@@ -473,6 +473,35 @@ describe("CallbackPage", () => {
     }
   });
 
+  it("uses the HTTP 303 handoff for a Feishu mobile login", async () => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockFeishuLogin = mockedApi.feishuLogin as ReturnType<typeof vi.fn>;
+    const submit = vi
+      .spyOn(HTMLFormElement.prototype, "submit")
+      .mockImplementation(() => undefined);
+
+    try {
+      mockSearchParams.set("state", "provider:feishu,platform:mobile");
+      mockFeishuLogin.mockResolvedValue({ token: "mobile-jwt-token" });
+
+      renderCallback();
+
+      await waitFor(() => {
+        expect(mockFeishuLogin).toHaveBeenCalledWith(
+          "test-code",
+          expect.stringContaining("/auth/callback"),
+        );
+      });
+      await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+      const form = document.querySelector("form");
+      expect(form?.getAttribute("action")).toBe("/auth/native");
+      expect(form?.querySelector("input")?.value).toBe("mobile-jwt-token");
+      expect(mockLoginWithFeishu).not.toHaveBeenCalled();
+    } finally {
+      submit.mockRestore();
+    }
+  });
+
   it("redirects a Feishu CLI login back to the CLI listener with the token", async () => {
     const { api: mockedApi } = await import("@multica/core/api");
     const mockFeishuLogin = mockedApi.feishuLogin as ReturnType<typeof vi.fn>;
