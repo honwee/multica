@@ -39,6 +39,27 @@ describe("native auth handoff", () => {
     });
   });
 
+  it("uses the public forwarded origin for the Feishu redirect URI", async () => {
+    vi.stubEnv("REMOTE_API_URL", "http://backend:8080");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: "native-jwt" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await GET(new Request("http://localhost:3000/auth/native?code=test-code&state=provider:feishu,platform:mobile", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "fde.lumistedu.com",
+      },
+    }));
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      code: "test-code",
+      redirect_uri: "https://fde.lumistedu.com/auth/callback",
+    });
+  });
+
   it("closes the native session with an error when the exchange fails", async () => {
     vi.stubEnv("REMOTE_API_URL", "http://backend:8080");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(

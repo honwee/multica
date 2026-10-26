@@ -28,7 +28,21 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const apiBase = resolveRemoteApiUrl(process.env) ?? url.origin;
-  const redirectUri = new URL("/auth/callback", url.origin).toString();
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim();
+  const protocol = forwardedProtocol || url.protocol.replace(":", "");
+  const host = forwardedHost || request.headers.get("host") || url.host;
+  if (protocol !== "https" && protocol !== "http") return loginFailed();
+  // Feishu compares this value byte-for-byte with the authorization request.
+  // Behind Caddy, request.url uses the internal HTTP listener, so reconstruct
+  // the public callback origin from the proxy's forwarded headers instead.
+  const redirectUri = `${protocol}://${host}/auth/callback`;
 
   try {
     const response = await fetch(`${apiBase}/auth/feishu`, {
