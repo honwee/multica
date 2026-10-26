@@ -40,6 +40,9 @@ describe("iOS scene lifecycle configuration", () => {
 
     expect(config.name).toBe(name);
     expect(config.ios?.bundleIdentifier).toBe(bundleIdentifier);
+    expect(config.ios?.entitlements).toEqual({
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${bundleIdentifier}`],
+    });
     expect(config.scheme).toBe("multica");
     expect(config.plugins).toContain("expo-web-browser");
     expect(config.plugins).toContainEqual([
