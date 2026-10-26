@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView, Linking, Platform, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { Button } from "@/components/ui/button";
@@ -16,16 +15,12 @@ import { i18n, useT } from "@/lib/i18n";
 import { mapAuthError, mapFeishuAuthError } from "@/lib/auth-error";
 import {
   buildFeishuAuthorizationUrl,
-  FeishuCallbackError,
-  getFeishuTokenFromAuthSession,
-  MULTICA_AUTH_CALLBACK_URL,
   resolveFeishuWebUrl,
 } from "@/lib/feishu-auth";
 
 export default function Login() {
   const { t } = useT("auth");
   const sendCode = useAuthStore((s) => s.sendCode);
-  const loginWithToken = useAuthStore((s) => s.loginWithToken);
   const { data: config } = useQuery(appConfigOptions());
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -66,23 +61,18 @@ export default function Login() {
     setError(null);
     setFeishuError(null);
     try {
-      const result = await WebBrowser.openAuthSessionAsync(
+      // The system browser reliably hands custom-scheme redirects back to the
+      // native callback route on both cold and warm starts. The callback route
+      // validates the token and completes login.
+      await Linking.openURL(
         buildFeishuAuthorizationUrl({ appId: feishuAppId, webUrl: feishuWebUrl }),
-        MULTICA_AUTH_CALLBACK_URL,
       );
-      const token = getFeishuTokenFromAuthSession(result);
-      if (token === null) return;
-      await loginWithToken(token);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace("/");
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setFeishuError(
-        err instanceof FeishuCallbackError
-          ? t("login.feishu_invalid_callback")
-          : mapFeishuAuthError(err, t("login.feishu_failed"), (key) =>
-              i18n.t(`auth:${key}`),
-            ),
+        mapFeishuAuthError(err, t("login.feishu_failed"), (key) =>
+          i18n.t(`auth:${key}`),
+        ),
       );
     } finally {
       setFeishuSubmitting(false);
