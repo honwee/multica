@@ -246,6 +246,21 @@ describe("proxy runtime upstream rewrites", () => {
     }
   });
 
+  it("routes mobile Feishu callbacks through the server-side native handoff", () => {
+    const res = proxy(
+      makeRequest(
+        "/auth/callback?code=test-code&state=provider:feishu,platform:mobile",
+      ),
+    );
+
+    const rewrite = res.headers.get("x-middleware-rewrite");
+    expect(rewrite).not.toBeNull();
+    const url = new URL(rewrite!);
+    expect(url.pathname).toBe("/auth/native");
+    expect(url.searchParams.get("code")).toBe("test-code");
+    expect(url.searchParams.get("state")).toBe("provider:feishu,platform:mobile");
+  });
+
   it("does not rewrite frontend auth callback pages", () => {
     const previous = process.env.REMOTE_API_URL;
     process.env.REMOTE_API_URL = "http://backend:8080";

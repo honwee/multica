@@ -1,30 +1,68 @@
-import { describe, expect, it } from "vitest";
-import { POST } from "./route";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { GET } from "./route";
 
-function requestWithToken(token: string): Request {
-  return new Request("https://multica.test/auth/native", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ token }),
-  });
+function requestWithQuery(query = "code=test-code&state=provider:feishu,platform:mobile"): Request {
+  return new Request(`https://multica.test/auth/native?${query}`);
 }
 
-describe("native auth handoff", () => {
-  it("returns a no-store 303 redirect to the native callback", async () => {
-    const response = await POST(requestWithToken("header.payload/with_symbols"));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
-    expect(response.status).toBe(303);
+describe("native auth handoff", () => {
+  it("exchanges the code server-side and returns a no-store 302", async () => {
+    vi.stubEnv("REMOTE_API_URL", "http://backend:8080");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: "header.payload/with_symbols" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(requestWithQuery());
+
+    expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe(
       "multica://auth/callback?token=header.payload%2Fwith_symbols",
     );
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8080/auth/feishu",
+      expect.objectContaining({ method: "POST", cache: "no-store" }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      code: "test-code",
+      redirect_uri: "https://multica.test/auth/callback",
+    });
   });
 
-  it("rejects a missing token without redirecting", async () => {
-    const response = await POST(requestWithToken(" "));
+  it("closes the native session with an error when the exchange fails", async () => {
+    vi.stubEnv("REMOTE_API_URL", "http://backend:8080");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid code" }), { status: 400 }),
+    ));
 
-    expect(response.status).toBe(400);
-    expect(response.headers.get("Location")).toBeNull();
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const response = await GET(requestWithQuery());
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "multica://auth/callback?error=login_failed",
+    );
+  });
+
+  it("does not call the backend without an authorization code", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(requestWithQuery("state=provider:feishu,platform:mobile"));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "multica://auth/callback?error=login_failed",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
