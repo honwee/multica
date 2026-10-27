@@ -648,8 +648,9 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
+		ID:              target.ID,
+		Role:            role,
+		RequesterUserID: parseUUID(requestUserID(r)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update member")

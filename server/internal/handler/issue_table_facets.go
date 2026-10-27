@@ -339,9 +339,17 @@ func (h *Handler) issueTableWorkingAgentIDs(
 		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
 		return nil, false
 	}
+	teamIDs := map[string]struct{}(nil)
+	if actorType == "member" && !roleAllowed(member.Role, "owner", "admin") {
+		teamIDs, ok = h.feishuOrgTeamIDs(r.Context(), workspaceID, actorID)
+		if !ok {
+			writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+			return nil, false
+		}
+	}
 	ids := make([]pgtype.UUID, 0, len(agents))
 	for _, agent := range agents {
-		if actorType == "member" && !memberAllowedToViewAgent(agent, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role) {
+		if actorType == "member" && !memberAllowedToViewAgent(agent, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role, teamIDs) {
 			continue
 		}
 		ids = append(ids, agent.ID)

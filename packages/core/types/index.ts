@@ -240,6 +240,14 @@ export type {
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  LarkOrganizationConfig,
+  LarkOrganizationMemberRole,
+  LarkOrganizationMapping,
+  LarkOrganizationSyncChange,
+  LarkOrganizationAgentChange,
+  LarkOrganizationSyncRun,
+  LarkOrganizationResponse,
+  UpdateLarkOrganizationRequest,
 } from "./lark";
 export type {
   ComposioToolkit,

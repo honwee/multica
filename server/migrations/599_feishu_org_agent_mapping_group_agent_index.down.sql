@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS feishu_org_agent_mapping_group_agent_uidx;

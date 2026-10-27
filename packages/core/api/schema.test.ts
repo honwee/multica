@@ -1638,4 +1638,101 @@ describe("workspace subscription contract", () => {
       }),
     );
   });
+
+  describe("Lark organization", () => {
+    const validRun = {
+      id: "run-1",
+      workspace_id: "ws-1",
+      mode: "preview",
+      status: "preview",
+      revision: 3,
+      plan: {
+        changes: [
+          {
+            user_id: "user-1",
+            user_name: "Ada",
+            action: "grant",
+            before: null,
+            after: "admin",
+          },
+        ],
+        warnings: ["Review this change"],
+      },
+      error: "",
+      requested_by: "user-2",
+      created_at: "2026-10-27T00:00:00Z",
+      completed_at: null,
+    };
+
+    it("falls back safely when the configuration response is malformed", async () => {
+      stubFetchJson({ config: {}, mappings: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getLarkOrganization("ws-1")).resolves.toEqual({
+        config: null,
+        mappings: [],
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+      });
+    });
+
+    it("parses a preview plan without narrowing future mode or status values", async () => {
+      stubFetchJson({ ...validRun, mode: "future_mode", status: "future_status" });
+      const client = new ApiClient("https://api.example.test");
+
+      const run = await client.previewLarkOrganization("ws-1");
+      expect(run.mode).toBe("future_mode");
+      expect(run.status).toBe("future_status");
+      expect(run.plan.changes[0]?.user_name).toBe("Ada");
+    });
+
+    it("rejects a malformed save response instead of reporting a successful write", async () => {
+      stubFetchJson({});
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.updateLarkOrganization("ws-1", {
+        installation_id: "installation-1",
+        enabled: true,
+        mappings: [],
+      })).rejects.toThrow("Malformed response");
+
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 1, updated_at: "" },
+        mappings: "not-an-array",
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+      });
+      await expect(client.updateLarkOrganization("ws-1", {
+        installation_id: "installation-1",
+        enabled: true,
+        mappings: [],
+      })).rejects.toThrow("Malformed response");
+    });
+
+    it("rejects malformed agent changes instead of hiding them from the review", async () => {
+      stubFetchJson({
+        ...validRun,
+        plan: { changes: [], agent_changes: "not-an-array", warnings: [] },
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.previewLarkOrganization("ws-1")).rejects.toThrow("Malformed response");
+    });
+
+    it("rejects malformed preview, apply, and replay responses instead of inventing an empty plan", async () => {
+      const client = new ApiClient("https://api.example.test");
+      const calls = [
+        () => client.previewLarkOrganization("ws-1"),
+        () => client.applyLarkOrganizationSync("ws-1", "run-1"),
+        () => client.replayLarkOrganizationSync("ws-1", "run-1"),
+      ];
+
+      for (const call of calls) {
+        stubFetchJson({ ...validRun, plan: { changes: "not-an-array", warnings: [] } });
+        await expect(call()).rejects.toThrow("Malformed response");
+      }
+    });
+  });
 });

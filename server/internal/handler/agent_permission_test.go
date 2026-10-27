@@ -255,9 +255,8 @@ func invocationTargetCount(t *testing.T, agentID string) int {
 
 // TestCanInvokeAgent_MixedMemberAndTeamTargets verifies a public_to agent can
 // carry a MIX of target types on one agent, and canInvokeAgent OR-matches: a
-// member target admits that member; a team target is inert in v1 so it admits
-// nobody, but co-existing with the member target does not break the member
-// grant.
+// member target admits that member while an unknown organization group fails
+// closed without breaking the direct member grant.
 func TestCanInvokeAgent_MixedMemberAndTeamTargets(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -278,7 +277,7 @@ func TestCanInvokeAgent_MixedMemberAndTeamTargets(t *testing.T) {
 		t.Errorf("member A (on member target) should be able to invoke")
 	}
 	if canMemberInvoke(t, agentID, memberB) {
-		t.Errorf("member B should NOT invoke — only a (inert) team target applies to them")
+		t.Errorf("member B should NOT invoke — the organization group does not exist")
 	}
 }
 

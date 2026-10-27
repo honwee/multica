@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 
@@ -52,13 +53,26 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	defer tx.Rollback(ctx)
 
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockFeishuOrgPermissionWrites(ctx, uuidToString(workspaceID)); err != nil {
+		return empty, err
+	}
+	member, err := qtx.GetMember(ctx, memberID)
+	if err != nil {
+		return empty, err
+	}
+	if member.Role == "owner" {
+		members, err := qtx.ListMembers(ctx, workspaceID)
+		if err != nil {
+			return empty, err
+		}
+		if countOwners(members) <= 1 {
+			return empty, errors.New("workspace must have at least one active owner")
+		}
+	}
 
-	// Taken FIRST, before this tx touches member or issue_subscriber. The
-	// delegated auto-subscribe rule takes the same (workspace, user) lock, so
-	// a run that is mid-decomposition cannot slip a new subscriber row in
+	// The delegated auto-subscribe rule takes the same (workspace, user) lock,
+	// so a run that is mid-decomposition cannot slip a new subscriber row in
 	// between this tx's membership delete and its subscription cleanup below.
-	// First also means every holder acquires it in the same order, so these
-	// paths cannot deadlock against each other (MUL-5483 review round 7).
 	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,

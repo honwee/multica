@@ -738,6 +738,7 @@ JOIN autopilot AS a ON a.id = s.autopilot_id
 JOIN member AS m
   ON m.workspace_id = a.workspace_id
  AND m.user_id = s.user_id
+ AND m.disabled_at IS NULL
 WHERE s.autopilot_id = $1
   AND s.user_type = 'member'
 ORDER BY s.created_at ASC, s.user_id ASC;
@@ -754,6 +755,7 @@ JOIN autopilot AS a ON a.id = s.autopilot_id
 JOIN member AS m
   ON m.workspace_id = a.workspace_id
  AND m.user_id = s.user_id
+ AND m.disabled_at IS NULL
 WHERE s.autopilot_id = ANY($1::uuid[])
   AND s.user_type = 'member'
 ORDER BY s.autopilot_id ASC, s.created_at ASC, s.user_id ASC;

@@ -44,6 +44,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { useLocale, useT } from "../../i18n";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { LarkOrganizationMapping } from "./lark-organization-mapping";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -54,8 +55,8 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 // `true` to restore the "Bind to Lark" CTA; nothing else needs to change.
 const LARK_INTL_CONNECT_ENABLED: boolean = false;
 
-// LarkTab is the workspace settings panel for Lark Bot installations.
-// Listing is member-visible; the disconnect action is admin-only (the
+// LarkTab is the workspace settings panel for Lark Bot installations and
+// organization permissions. Listing is member-visible; writes are admin-only (the
 // backend enforces it; the UI hides the button for non-admins to match).
 //
 // Adding a new installation flows through the Agent detail page: the
@@ -174,6 +175,8 @@ export function LarkTab() {
           )}
         </section>
       )}
+
+      <LarkOrganizationMapping installations={installations} canManage={canManage} />
 
       <AlertDialog
         open={!!disconnectTarget}

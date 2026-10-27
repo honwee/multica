@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS feishu_org_membership_user_workspace_idx;

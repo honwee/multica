@@ -110,6 +110,26 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	}
 }
 
+func TestMemberAllowedToViewAgent_OrganizationTeamTarget(t *testing.T) {
+	teamID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	agent := db.Agent{PermissionMode: "public_to"}
+	targets := []db.AgentInvocationTarget{{
+		TargetType: "team",
+		TargetID:   util.MustParseUUID(teamID),
+	}}
+	userID := "22222222-2222-2222-2222-222222222222"
+	if memberAllowedToViewAgent(agent, targets, userID, "member") {
+		t.Fatal("team target admitted a member without an organization membership set")
+	}
+	if memberAllowedToViewAgent(agent, targets, userID, "member", map[string]struct{}{}) {
+		t.Fatal("team target admitted a member with no active organization groups")
+	}
+	teamIDs := map[string]struct{}{teamID: {}}
+	if !memberAllowedToViewAgent(agent, targets, userID, "member", teamIDs) {
+		t.Fatal("active organization group member could not view the agent")
+	}
+}
+
 // privateAgentTestFixture sets up a private agent owned by a freshly created
 // user, plus a second non-admin member in the workspace. Returns the agent
 // id, the owner's user id, and the unrelated member's user id. The caller's

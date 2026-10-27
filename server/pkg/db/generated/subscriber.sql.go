@@ -20,7 +20,7 @@ WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
 ),
 active_member AS (
     SELECT m.user_id FROM member m
-    WHERE m.user_id = $2 AND m.workspace_id = $4
+    WHERE m.user_id = $2 AND m.workspace_id = $4 AND m.disabled_at IS NULL
     FOR SHARE
 )
 INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason)
@@ -340,7 +340,7 @@ func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID pgtype.UUID)
 
 const lockActiveMember = `-- name: LockActiveMember :one
 SELECT id FROM member
-WHERE user_id = $1 AND workspace_id = $2
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NULL
 FOR SHARE
 `
 

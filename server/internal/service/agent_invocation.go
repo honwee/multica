@@ -38,16 +38,6 @@ func memberMayInvokeAgent(ctx context.Context, queries *db.Queries, agent db.Age
 	if userID == "" {
 		return false, nil
 	}
-	if util.UUIDToString(agent.OwnerID) == userID {
-		return true, nil
-	}
-	if agent.PermissionMode != "public_to" {
-		return false, nil
-	}
-	targets, err := queries.ListAgentInvocationTargets(ctx, agent.ID)
-	if err != nil {
-		return false, fmt.Errorf("list agent invocation targets: %w", err)
-	}
 	isWorkspaceMember := false
 	switch _, err := queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      memberUserID,
@@ -60,6 +50,19 @@ func memberMayInvokeAgent(ctx context.Context, queries *db.Queries, agent db.Age
 	default:
 		return false, fmt.Errorf("load workspace member: %w", err)
 	}
+	if !isWorkspaceMember {
+		return false, nil
+	}
+	if util.UUIDToString(agent.OwnerID) == userID {
+		return true, nil
+	}
+	if agent.PermissionMode != "public_to" {
+		return false, nil
+	}
+	targets, err := queries.ListAgentInvocationTargets(ctx, agent.ID)
+	if err != nil {
+		return false, fmt.Errorf("list agent invocation targets: %w", err)
+	}
 	for _, t := range targets {
 		switch t.TargetType {
 		case "workspace":
@@ -68,6 +71,21 @@ func memberMayInvokeAgent(ctx context.Context, queries *db.Queries, agent db.Age
 			}
 		case "member":
 			if util.UUIDToString(t.TargetID) == userID {
+				return true, nil
+			}
+		case "team":
+			if !isWorkspaceMember {
+				continue
+			}
+			allowed, err := queries.IsFeishuOrgTeamMember(ctx, db.IsFeishuOrgTeamMemberParams{
+				GroupID:     t.TargetID,
+				WorkspaceID: workspaceID,
+				UserID:      memberUserID,
+			})
+			if err != nil {
+				return false, fmt.Errorf("load organization team membership: %w", err)
+			}
+			if allowed {
 				return true, nil
 			}
 		}

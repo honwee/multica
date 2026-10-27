@@ -1817,9 +1817,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})
 
-				// Lark integration. Every endpoint here only requires
-				// workspace membership at the router; the real authorization
-				// is per-agent and enforced inside each handler via
+				// Lark integration. Installation endpoints in the member group
+				// below require only workspace membership at the router; their real
+				// authorization is per-agent and enforced inside each handler via
 				// canManageAgent (agent owner OR workspace owner/admin), so an
 				// agent's owner can bind/manage their own agent's Bot without
 				// being a workspace admin (MUL-4213). The router can't make
@@ -1835,6 +1835,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
+					r.Get("/lark/organization", h.GetLarkOrganization)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
@@ -1843,6 +1844,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// terminal failure.
 					r.Post("/lark/install/begin", h.BeginLarkInstall)
 					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Put("/lark/organization", h.UpdateLarkOrganization)
+					r.Post("/lark/organization/preview", h.PreviewLarkOrganization)
+					r.Post("/lark/organization/sync/{runId}/apply", h.ApplyLarkOrganizationSync)
+					r.Post("/lark/organization/sync/{runId}/replay", h.ReplayLarkOrganizationSync)
 				})
 
 				// Slack integration (MUL-3666). Same admin/member split as

@@ -312,7 +312,7 @@ const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
 SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
-WHERE m.user_id = $1
+WHERE m.user_id = $1 AND m.disabled_at IS NULL
 ORDER BY w.id ASC
 `
 
@@ -351,7 +351,7 @@ SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
-WHERE m.user_id = $1
+WHERE m.user_id = $1 AND m.disabled_at IS NULL
 ORDER BY w.created_at ASC
 `
 

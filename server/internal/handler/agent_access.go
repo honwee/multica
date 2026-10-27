@@ -28,7 +28,8 @@ import (
 //       * workspace target -> any workspace member (and workspace-internal
 //         agent/system principals) may invoke.
 //       * member target    -> only the specific user may invoke.
-//       * team target       -> reserved, inert in V1.
+//       * team target       -> active members of the mapped Feishu organization
+//         department or job-title group may invoke.
 //
 // A2A is judged by the top-of-chain human originator, never by the immediate
 // agent actor: if user U triggers agent A and A @-mentions agent B, B is only
@@ -77,15 +78,21 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 		// resolved human originator at the top of the chain.
 		effectiveUser = originatorUserID
 	}
+	isWorkspaceMember := false
+	if effectiveUser != "" {
+		if _, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {
+			isWorkspaceMember = true
+		}
+	}
 
-	// The agent owner may always invoke their own agent.
-	if effectiveUser != "" && uuidToString(agent.OwnerID) == effectiveUser {
+	// Ownership never bypasses a disabled or removed workspace membership.
+	if effectiveUser != "" && isWorkspaceMember && uuidToString(agent.OwnerID) == effectiveUser {
 		return true
 	}
 
 	if agent.PermissionMode != "public_to" {
 		// private (or any unknown mode) is deny-by-default: no admin bypass,
-		// no A2A bypass. Only the owner branch above passes.
+		// no A2A bypass. Only the active-owner branch above passes.
 		return false
 	}
 
@@ -105,10 +112,12 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 	// member-/team-scoped private-ish allow-list and can never smuggle itself
 	// onto someone's specific-people grant.
 	workspaceBroad := actorType == "agent" || actorType == "system"
-	isWorkspaceMember := false
-	if effectiveUser != "" {
-		if _, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {
-			isWorkspaceMember = true
+	var teamIDs map[string]struct{}
+	if isWorkspaceMember && invocationTargetsIncludeTeam(targets) {
+		var ok bool
+		teamIDs, ok = h.feishuOrgTeamIDs(ctx, workspaceID, effectiveUser)
+		if !ok {
+			return false
 		}
 	}
 
@@ -119,14 +128,17 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 				return true
 			}
 		case "member":
-			// Requires a resolved human. agent/system triggers with no
+			// Requires an active resolved human. agent/system triggers with no
 			// originator (effectiveUser == "") never match here — fail closed.
-			if effectiveUser != "" && uuidToString(t.TargetID) == effectiveUser {
+			if isWorkspaceMember && effectiveUser != "" && uuidToString(t.TargetID) == effectiveUser {
 				return true
 			}
 		case "team":
-			// Reserved: team membership does not exist yet in V1, so team
-			// targets never admit anyone (also fail-closed for system/agent).
+			if isWorkspaceMember {
+				if _, ok := teamIDs[uuidToString(t.TargetID)]; ok {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -138,20 +150,20 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 //
 // Rules:
 //   - agent actors always pass (A2A collaboration + inspection preserved).
-//   - the agent owner always passes.
+//   - an active agent owner passes; disabled membership is never bypassed.
 //   - workspace owner/admin pass (governance / inventory visibility retained).
 //   - a regular member passes for a public_to agent only when they hit a
-//     workspace or member target; private agents stay owner+admin only.
+//     workspace, member, or active organization-group target.
 func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
 	if actorType == "agent" {
-		return true
-	}
-	if uuidToString(agent.OwnerID) == actorID {
 		return true
 	}
 	member, err := h.getWorkspaceMember(ctx, actorID, workspaceID)
 	if err != nil {
 		return false
+	}
+	if uuidToString(agent.OwnerID) == actorID {
+		return true
 	}
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
@@ -163,20 +175,64 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if err != nil {
 		return false
 	}
-	return memberHitsInvocationTargets(targets, actorID)
+	teamIDs, ok := h.feishuOrgTeamIDs(ctx, workspaceID, actorID)
+	if !ok {
+		return false
+	}
+	return memberHitsInvocationTargets(targets, actorID, teamIDs)
+}
+
+func invocationTargetsIncludeTeam(targets []db.AgentInvocationTarget) bool {
+	for _, target := range targets {
+		if target.TargetType == invocationTargetTeam {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) feishuOrgTeamIDs(ctx context.Context, workspaceID, userID string) (map[string]struct{}, bool) {
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, false
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		return nil, false
+	}
+	rows, err := h.Queries.ListFeishuOrgTeamIDsForMember(ctx, db.ListFeishuOrgTeamIDsForMemberParams{
+		WorkspaceID: workspaceUUID,
+		UserID:      userUUID,
+	})
+	if err != nil {
+		return nil, false
+	}
+	teamIDs := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		teamIDs[uuidToString(row)] = struct{}{}
+	}
+	return teamIDs, true
 }
 
 // memberHitsInvocationTargets is the pure predicate deciding whether a regular
 // member is on a public_to agent's allow-list, used by both the single-agent
-// view gate and the ListAgents batch filter. A workspace target admits any
-// member; a member target admits the matching user; team targets are inert.
-func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID string) bool {
+// view gate and the ListAgents batch filter. The optional team set is loaded
+// once per request so organization targets do not introduce per-agent queries.
+func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID string, teamIDSets ...map[string]struct{}) bool {
+	var teamIDs map[string]struct{}
+	if len(teamIDSets) > 0 {
+		teamIDs = teamIDSets[0]
+	}
 	for _, t := range targets {
 		switch t.TargetType {
 		case "workspace":
 			return true
 		case "member":
 			if uuidToString(t.TargetID) == userID {
+				return true
+			}
+		case "team":
+			if _, ok := teamIDs[uuidToString(t.TargetID)]; ok {
 				return true
 			}
 		}
@@ -189,7 +245,7 @@ func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 // list endpoint avoids an N+1. Workspace owner/admin and the agent owner see
 // everything; a regular member sees a public_to agent only when on its
 // allow-list, and never sees other members' private agents.
-func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string) bool {
+func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string, teamIDSets ...map[string]struct{}) bool {
 	if roleAllowed(role, "owner", "admin") {
 		return true
 	}
@@ -199,7 +255,7 @@ func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget
 	if agent.PermissionMode != "public_to" {
 		return false
 	}
-	return memberHitsInvocationTargets(targets, userID)
+	return memberHitsInvocationTargets(targets, userID, teamIDSets...)
 }
 
 // invokeOriginatorFromRequest resolves the top-of-chain human user id for an
@@ -307,10 +363,17 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	if !ok {
 		return nil, false
 	}
+	teamIDs := map[string]struct{}(nil)
+	if actorType == "member" && !roleAllowed(role, "owner", "admin") {
+		teamIDs, ok = h.feishuOrgTeamIDs(ctx, workspaceID, actorID)
+		if !ok {
+			return nil, false
+		}
+	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+			if !memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role, teamIDs) {
 				continue
 			}
 		}
@@ -358,9 +421,13 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	// Whether per-agent visibility can restrict anything for this actor at all.
 	judgeUserAgents := actorType == "member" && !roleAllowed(role, "owner", "admin")
 	var targetsByAgent map[string][]db.AgentInvocationTarget
+	teamIDs := map[string]struct{}(nil)
 	if judgeUserAgents {
 		var ok bool
 		if targetsByAgent, ok = h.loadInvocationTargetsByAgent(ctx, agents); !ok {
+			return nil, false
+		}
+		if teamIDs, ok = h.feishuOrgTeamIDs(ctx, workspaceID, actorID); !ok {
 			return nil, false
 		}
 	}
@@ -369,7 +436,7 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	for _, a := range agents {
 		if a.Kind == "user" {
 			if !judgeUserAgents ||
-				memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+				memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role, teamIDs) {
 				continue
 			}
 		}

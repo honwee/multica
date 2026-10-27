@@ -14,7 +14,7 @@ import (
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, role, created_at
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
 `
 
 type CreateMemberParams struct {
@@ -32,6 +32,8 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
 	)
 	return i, err
 }
@@ -46,7 +48,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
 WHERE id = $1
 `
 
@@ -59,13 +61,15 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
 	)
 	return i, err
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
-WHERE user_id = $1 AND workspace_id = $2
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NULL
 `
 
 type GetMemberByUserAndWorkspaceParams struct {
@@ -82,6 +86,8 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
 	)
 	return i, err
 }
@@ -94,6 +100,7 @@ JOIN (
            unnest($2::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+WHERE m.disabled_at IS NULL
 `
 
 type GetRealtimeMembershipsParams struct {
@@ -127,8 +134,8 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at FROM member
-WHERE workspace_id = $1
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+WHERE workspace_id = $1 AND disabled_at IS NULL
 ORDER BY created_at ASC
 `
 
@@ -147,6 +154,8 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 			&i.UserID,
 			&i.Role,
 			&i.CreatedAt,
+			&i.DisabledAt,
+			&i.FeishuManagedRole,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +172,7 @@ SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
-WHERE m.workspace_id = $1
+WHERE m.workspace_id = $1 AND m.disabled_at IS NULL
 ORDER BY m.created_at ASC
 `
 
@@ -209,7 +218,7 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 
 const listWorkspaceManagerUserIDs = `-- name: ListWorkspaceManagerUserIDs :many
 SELECT user_id FROM member
-WHERE workspace_id = $1 AND role IN ('owner', 'admin')
+WHERE workspace_id = $1 AND role IN ('owner', 'admin') AND disabled_at IS NULL
 ORDER BY created_at ASC
 `
 
@@ -234,18 +243,50 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 }
 
 const updateMemberRole = `-- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at
+WITH target AS MATERIALIZED (
+    SELECT m.id, m.workspace_id, m.role,
+           pg_advisory_xact_lock(hashtext(m.workspace_id::text)) AS permission_lock
+    FROM member m
+    WHERE m.id = $1
+),
+requester AS MATERIALIZED (
+    SELECT m.role, m.workspace_id
+    FROM member m
+    JOIN target t ON t.workspace_id = m.workspace_id
+    WHERE m.user_id = $3
+      AND m.disabled_at IS NULL
+)
+UPDATE member
+SET role = $2, feishu_managed_role = NULL
+WHERE member.id = $1
+  AND EXISTS (
+      SELECT 1 FROM target t
+      WHERE t.role <> 'owner'
+         OR $2 = 'owner'
+         OR (
+             SELECT count(*) FROM member owners
+             WHERE owners.workspace_id = t.workspace_id
+               AND owners.role = 'owner'
+               AND owners.disabled_at IS NULL
+         ) > 1
+  )
+  AND EXISTS (
+      SELECT 1 FROM requester r
+      JOIN target t ON true
+      WHERE r.role = 'owner'
+         OR (r.role = 'admin' AND t.role <> 'owner' AND $2 <> 'owner')
+  )
+RETURNING member.id, member.workspace_id, member.user_id, member.role, member.created_at, member.disabled_at, member.feishu_managed_role
 `
 
 type UpdateMemberRoleParams struct {
-	ID   pgtype.UUID `json:"id"`
-	Role string      `json:"role"`
+	ID              pgtype.UUID `json:"id"`
+	Role            string      `json:"role"`
+	RequesterUserID pgtype.UUID `json:"requester_user_id"`
 }
 
 func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Member, error) {
-	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.Role)
+	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.Role, arg.RequesterUserID)
 	var i Member
 	err := row.Scan(
 		&i.ID,
@@ -253,6 +294,8 @@ func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRolePara
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
 	)
 	return i, err
 }

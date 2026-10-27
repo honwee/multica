@@ -1,11 +1,11 @@
 -- name: ListMembers :many
 SELECT * FROM member
-WHERE workspace_id = $1
+WHERE workspace_id = $1 AND disabled_at IS NULL
 ORDER BY created_at ASC;
 
 -- name: ListWorkspaceManagerUserIDs :many
 SELECT user_id FROM member
-WHERE workspace_id = $1 AND role IN ('owner', 'admin')
+WHERE workspace_id = $1 AND role IN ('owner', 'admin') AND disabled_at IS NULL
 ORDER BY created_at ASC;
 
 -- name: GetMember :one
@@ -14,7 +14,7 @@ WHERE id = $1;
 
 -- name: GetMemberByUserAndWorkspace :one
 SELECT * FROM member
-WHERE user_id = $1 AND workspace_id = $2;
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NULL;
 
 -- name: GetRealtimeMemberships :many
 SELECT m.user_id, m.workspace_id
@@ -23,7 +23,8 @@ JOIN (
     SELECT unnest(sqlc.arg(user_ids)::uuid[]) AS user_id,
            unnest(sqlc.arg(workspace_ids)::uuid[]) AS workspace_id
 ) AS requested
-    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id;
+    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+WHERE m.disabled_at IS NULL;
 
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
@@ -31,9 +32,40 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
-RETURNING *;
+WITH target AS MATERIALIZED (
+    SELECT m.id, m.workspace_id, m.role,
+           pg_advisory_xact_lock(hashtext(m.workspace_id::text)) AS permission_lock
+    FROM member m
+    WHERE m.id = $1
+),
+requester AS MATERIALIZED (
+    SELECT m.role, m.workspace_id
+    FROM member m
+    JOIN target t ON t.workspace_id = m.workspace_id
+    WHERE m.user_id = sqlc.arg('requester_user_id')
+      AND m.disabled_at IS NULL
+)
+UPDATE member
+SET role = $2, feishu_managed_role = NULL
+WHERE member.id = $1
+  AND EXISTS (
+      SELECT 1 FROM target t
+      WHERE t.role <> 'owner'
+         OR $2 = 'owner'
+         OR (
+             SELECT count(*) FROM member owners
+             WHERE owners.workspace_id = t.workspace_id
+               AND owners.role = 'owner'
+               AND owners.disabled_at IS NULL
+         ) > 1
+  )
+  AND EXISTS (
+      SELECT 1 FROM requester r
+      JOIN target t ON true
+      WHERE r.role = 'owner'
+         OR (r.role = 'admin' AND t.role <> 'owner' AND $2 <> 'owner')
+  )
+RETURNING member.*;
 
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;
@@ -43,5 +75,5 @@ SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
-WHERE m.workspace_id = $1
+WHERE m.workspace_id = $1 AND m.disabled_at IS NULL
 ORDER BY m.created_at ASC;

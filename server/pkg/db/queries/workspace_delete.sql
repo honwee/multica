@@ -690,6 +690,24 @@ DELETE FROM project WHERE project.workspace_id = $1;
 
 -- name: DeleteWorkspaceAdministration :exec
 WITH
+deleted_feishu_org_sync_runs AS (
+    DELETE FROM feishu_org_sync_run WHERE workspace_id = $1
+),
+deleted_feishu_org_memberships AS (
+    DELETE FROM feishu_org_membership WHERE workspace_id = $1
+),
+deleted_feishu_org_agent_mappings AS (
+    DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1
+),
+deleted_feishu_org_role_mappings AS (
+    DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1
+),
+deleted_feishu_org_groups AS (
+    DELETE FROM feishu_org_group WHERE workspace_id = $1
+),
+deleted_feishu_org_config AS (
+    DELETE FROM feishu_org_config WHERE workspace_id = $1
+),
 deleted_members AS (
     DELETE FROM member WHERE member.workspace_id = $1
 ),

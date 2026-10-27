@@ -671,6 +671,7 @@ WHERE workspace_id = @workspace_id AND daemon_id = @daemon_id;
 -- avoids the member-removal path's reverse member/runtime lock order.
 SELECT user_id FROM member
 WHERE workspace_id = @workspace_id AND user_id = ANY(@user_ids::uuid[])
+  AND disabled_at IS NULL
 ORDER BY user_id
 FOR KEY SHARE NOWAIT;
 

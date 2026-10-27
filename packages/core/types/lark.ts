@@ -74,3 +74,70 @@ export interface RedeemLarkBindingTokenResponse {
   installation_id: string;
   lark_open_id: string;
 }
+
+export interface LarkOrganizationConfig {
+  installation_id: string;
+  enabled: boolean;
+  revision: number;
+  updated_at: string;
+}
+
+export type LarkOrganizationMemberRole = "owner" | "admin" | "member";
+
+export interface LarkOrganizationMapping {
+  kind: "department" | "job_title" | string;
+  external_id: string;
+  external_name: string;
+  member_role: LarkOrganizationMemberRole | null;
+  agent_ids: string[];
+}
+
+export interface LarkOrganizationSyncChange {
+  user_id: string;
+  user_name: string;
+  action: string;
+  group_id?: string;
+  group_name?: string;
+  before?: unknown;
+  after?: unknown;
+  reason?: string;
+}
+
+export interface LarkOrganizationAgentChange {
+  agent_id: string;
+  group_id: string;
+  group_name: string;
+  action: "agent_granted" | "agent_revoked" | string;
+}
+
+export interface LarkOrganizationSyncRun {
+  id: string;
+  workspace_id: string;
+  mode: "preview" | "replay" | "apply" | string;
+  status: "preview" | "completed" | "failed" | string;
+  revision: number;
+  plan: {
+    changes: LarkOrganizationSyncChange[];
+    agent_changes: LarkOrganizationAgentChange[];
+    warnings: string[];
+  };
+  error: string;
+  requested_by: string;
+  replayed_from_id?: string | null;
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export interface LarkOrganizationResponse {
+  config: LarkOrganizationConfig | null;
+  mappings: LarkOrganizationMapping[];
+  required_scopes: string[];
+  requirements: string[];
+  sync_runs: LarkOrganizationSyncRun[];
+}
+
+export interface UpdateLarkOrganizationRequest {
+  installation_id: string;
+  enabled: boolean;
+  mappings: LarkOrganizationMapping[];
+}

@@ -63,7 +63,7 @@ type AgentBuilderDraft struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
+// Allow-list of who may invoke a public_to agent. Targets stack with OR semantics. workspace rows store the agent workspace_id; member rows store the user id; team rows reference an active Feishu organization group and admit its active workspace members. Rows only matter when agent.permission_mode = public_to. Relationships are maintained in the application layer without foreign keys.
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
 	AgentID    pgtype.UUID        `json:"agent_id"`
@@ -716,6 +716,66 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type FeishuOrgAgentMapping struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type FeishuOrgConfig struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Enabled        bool               `json:"enabled"`
+	Revision       int64              `json:"revision"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuOrgGroup struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	ExternalID   string             `json:"external_id"`
+	ExternalName string             `json:"external_name"`
+	Configured   bool               `json:"configured"`
+	Active       bool               `json:"active"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuOrgMembership struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Active      bool               `json:"active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuOrgRoleMapping struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuOrgSyncRun struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Mode           string             `json:"mode"`
+	Status         string             `json:"status"`
+	Revision       int64              `json:"revision"`
+	Snapshot       []byte             `json:"snapshot"`
+	Plan           []byte             `json:"plan"`
+	Error          pgtype.Text        `json:"error"`
+	RequestedBy    pgtype.UUID        `json:"requested_by"`
+	ReplayedFromID pgtype.UUID        `json:"replayed_from_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -1212,11 +1272,13 @@ type MaintenanceJob struct {
 }
 
 type Member struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Role        string             `json:"role"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	Role              string             `json:"role"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	DisabledAt        pgtype.Timestamptz `json:"disabled_at"`
+	FeishuManagedRole pgtype.Text        `json:"feishu_managed_role"`
 }
 
 type MemberDelegationDay struct {

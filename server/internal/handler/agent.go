@@ -1190,11 +1190,19 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	teamIDs := map[string]struct{}(nil)
+	if actorType == "member" && !roleAllowed(member.Role, "owner", "admin") {
+		teamIDs, ok = h.feishuOrgTeamIDs(r.Context(), workspaceID, actorID)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to load organization team memberships")
+			return
+		}
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+			if !memberAllowedToViewAgent(a, targets, actorID, member.Role, teamIDs) {
 				continue
 			}
 		}
@@ -2340,16 +2348,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Only binding writes need this transaction. Hold the same runtime lock as
-	// revocation until the new binding commits; a preflight-only check is stale
-	// as soon as a public runtime becomes private.
+	// Binding and invocation-permission writes share one transaction. Runtime
+	// and organization locks are held until the agent row and targets commit.
 	updateQueries := h.Queries
 	var bindingTx pgx.Tx
-	if req.RuntimeID != nil {
-		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
-		if !ok {
-			return
-		}
+	if permissionTouched || req.RuntimeID != nil {
 		bindingTx, err = h.TxStarter.Begin(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to start agent binding transaction")
@@ -2357,6 +2360,37 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		defer bindingTx.Rollback(r.Context())
 		updateQueries = h.Queries.WithTx(bindingTx)
+	}
+	if permissionTouched {
+		if err := updateQueries.LockFeishuOrgPermissionWrites(r.Context(), uuidToString(existing.WorkspaceID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to lock agent access")
+			return
+		}
+		if _, err := updateQueries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID: parseUUID(requestUserID(r)), WorkspaceID: existing.WorkspaceID,
+		}); err != nil {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		currentAgent, err := updateQueries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: existing.ID, WorkspaceID: existing.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload agent access")
+			return
+		}
+		if currentAgent.OwnerID != existing.OwnerID {
+			writeError(w, http.StatusConflict, "agent owner changed during update")
+			return
+		}
+		if replacePermissionTargets && currentAgent.OwnerID != parseUUID(requestUserID(r)) {
+			writeError(w, http.StatusForbidden, "only the agent owner can change access")
+			return
+		}
+	}
+	if req.RuntimeID != nil {
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
 		if _, err := updateQueries.LockWorkspaceForChatSessionCreate(r.Context(), existing.WorkspaceID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "workspace not found")
@@ -2402,18 +2436,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if bindingTx != nil {
-		if err := bindingTx.Commit(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
-			return
-		}
-	}
-
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config")
@@ -2421,7 +2448,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level")
@@ -2429,7 +2456,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier")
@@ -2437,7 +2464,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
@@ -2449,9 +2476,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
 	if replacePermissionTargets {
-		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
+		if err := replaceInvocationTargetsWithQueries(r.Context(), updateQueries, updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets")
+			return
+		}
+	}
+	if bindingTx != nil {
+		if err := bindingTx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
 			return
 		}
 	}

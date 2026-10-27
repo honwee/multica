@@ -211,7 +211,7 @@ FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
         i.workspace_id, i.read
     FROM inbox_item i
-    JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+    JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id AND m.disabled_at IS NULL
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
@@ -264,7 +264,7 @@ INSERT INTO inbox_item (
 )
 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid())
 WHERE ($2::text = 'member' AND EXISTS (
-    SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
+    SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3 AND disabled_at IS NULL
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
 ))

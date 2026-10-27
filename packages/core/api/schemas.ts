@@ -49,6 +49,7 @@ import type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
+  LarkOrganizationResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -3337,6 +3338,81 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+export const LarkOrganizationConfigSchema = z.object({
+  installation_id: z.string(),
+  enabled: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const LarkOrganizationMappingSchema = z.object({
+  kind: z.string(),
+  external_id: z.string(),
+  external_name: z.string().default(""),
+  member_role: z.enum(["owner", "admin", "member"]).nullable().catch(null),
+  agent_ids: z.array(z.string()).catch([]).default([]),
+}).loose();
+
+export const LarkOrganizationSyncChangeSchema = z.object({
+  user_id: z.string(),
+  user_name: z.string(),
+  action: z.string(),
+  group_id: z.string().optional(),
+  group_name: z.string().optional(),
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  reason: z.string().optional(),
+}).loose();
+
+export const LarkOrganizationAgentChangeSchema = z.object({
+  agent_id: z.string(),
+  group_id: z.string(),
+  group_name: z.string().default(""),
+  action: z.string(),
+}).loose();
+
+export const LarkOrganizationSyncRunSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  mode: z.string(),
+  status: z.string(),
+  revision: z.number().int().nonnegative(),
+  plan: z.object({
+    changes: z.array(LarkOrganizationSyncChangeSchema),
+    agent_changes: z.array(LarkOrganizationAgentChangeSchema).default([]),
+    warnings: z.array(z.string()).default([]),
+  }).loose(),
+  error: z.string().default(""),
+  requested_by: z.string().default(""),
+  replayed_from_id: z.string().nullable().optional(),
+  created_at: z.string(),
+  completed_at: z.string().nullable().optional(),
+}).loose();
+
+export const LarkOrganizationResponseSchema = z.object({
+  config: LarkOrganizationConfigSchema.nullable().default(null),
+  mappings: z.array(LarkOrganizationMappingSchema).catch([]).default([]),
+  required_scopes: z.array(z.string()).catch([]).default([]),
+  requirements: z.array(z.string()).catch([]).default([]),
+  sync_runs: z.array(LarkOrganizationSyncRunSchema).catch([]).default([]),
+}).loose();
+
+export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchema.extend({
+  config: LarkOrganizationConfigSchema,
+  mappings: z.array(LarkOrganizationMappingSchema),
+  required_scopes: z.array(z.string()),
+  requirements: z.array(z.string()),
+  sync_runs: z.array(LarkOrganizationSyncRunSchema),
+});
+
+export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
+  config: null,
+  mappings: [],
+  required_scopes: [],
+  requirements: [],
+  sync_runs: [],
 };
 
 export const DingTalkInstallationSchema = z.object({
