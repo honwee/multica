@@ -9,6 +9,7 @@
  * Subscreens push under more/settings/:
  *   - more/settings/profile        — edit name + avatar
  *   - more/settings/notifications  — per-group inbox + system toggles
+ *   - more/settings/server         — self-hosted API/Web origins and OAuth callbacks
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
