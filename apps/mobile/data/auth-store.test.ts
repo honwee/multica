@@ -22,6 +22,15 @@ const sessionMock = vi.hoisted(() => ({
   invalidateSessionEpoch: vi.fn(),
 }));
 
+const serverMock = vi.hoisted(() => ({
+  initialize: vi.fn(),
+}));
+
+const workspaceMock = vi.hoisted(() => ({
+  restoreSlug: vi.fn(),
+  clear: vi.fn(),
+}));
+
 vi.mock("./api", () => ({
   api: apiMock,
   ApiError: class ApiError extends Error {
@@ -37,13 +46,11 @@ vi.mock("./api", () => ({
 
 vi.mock("./secure-storage", () => storageMock);
 vi.mock("./session-epoch", () => sessionMock);
+vi.mock("./server-store", () => ({
+  useServerStore: { getState: () => serverMock },
+}));
 vi.mock("./workspace-store", () => ({
-  useWorkspaceStore: {
-    getState: () => ({
-      restoreSlug: vi.fn(),
-      clear: vi.fn(),
-    }),
-  },
+  useWorkspaceStore: { getState: () => workspaceMock },
 }));
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -158,5 +165,33 @@ describe("mobile auth store email verification", () => {
     expect(storageMock.setToken).not.toHaveBeenCalled();
     expect(apiMock.setToken).not.toHaveBeenCalled();
     expect(useAuthStore.getState().user).toBeNull();
+  });
+});
+
+describe("mobile auth cold-start restoration", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    useAuthStore.setState({ user: null, isLoading: true });
+  });
+
+  it("restores the server before the workspace and Keychain token", async () => {
+    const order: string[] = [];
+    serverMock.initialize.mockImplementation(async () => {
+      order.push("server");
+    });
+    workspaceMock.restoreSlug.mockImplementation(async () => {
+      order.push("workspace");
+      return null;
+    });
+    storageMock.getToken.mockImplementation(async () => {
+      order.push("token");
+      return null;
+    });
+
+    await useAuthStore.getState().initialize();
+
+    expect(order).toEqual(["server", "workspace", "token"]);
+    expect(apiMock.setToken).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().isLoading).toBe(false);
   });
 });

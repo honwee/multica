@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
+import { useServerStore } from "@/data/server-store";
 import { appConfigOptions } from "@/data/queries/billing";
 import { i18n, useT } from "@/lib/i18n";
 import { mapAuthError, mapFeishuAuthError } from "@/lib/auth-error";
@@ -26,7 +27,12 @@ export default function Login() {
   const { t } = useT("auth");
   const sendCode = useAuthStore((s) => s.sendCode);
   const loginWithToken = useAuthStore((s) => s.loginWithToken);
-  const { data: config } = useQuery(appConfigOptions());
+  const apiUrl = useServerStore((s) => s.apiUrl);
+  const webUrl = useServerStore((s) => s.webUrl);
+  const serverInitialized = useServerStore((s) => s.isInitialized);
+  const { data: config } = useQuery(
+    appConfigOptions(apiUrl, serverInitialized),
+  );
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [feishuSubmitting, setFeishuSubmitting] = useState(false);
@@ -34,12 +40,9 @@ export default function Login() {
   const [feishuError, setFeishuError] = useState<string | null>(null);
 
   const feishuAppId = config?.feishu_app_id?.trim() ?? "";
-  const feishuWebUrl = resolveFeishuWebUrl(
-    process.env.EXPO_PUBLIC_WEB_URL,
-    process.env.EXPO_PUBLIC_API_URL,
-  );
+  const feishuWebUrl = resolveFeishuWebUrl(webUrl, apiUrl);
   const feishuAvailable = Boolean(feishuAppId && feishuWebUrl);
-  const isBusy = submitting || feishuSubmitting;
+  const isBusy = submitting || feishuSubmitting || !serverInitialized;
 
   const onSubmit = async () => {
     const trimmed = email.trim();
@@ -164,6 +167,23 @@ export default function Login() {
               ) : null}
             </View>
           ) : null}
+
+          <View className="items-center gap-1">
+            <Button
+              variant="ghost"
+              disabled={isBusy}
+              onPress={() => router.push("/server")}
+            >
+              <Text>{t("login.server_settings")}</Text>
+            </Button>
+            <Text
+              className="max-w-full text-xs text-muted-foreground"
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
+              {t("login.current_server", { url: apiUrl })}
+            </Text>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

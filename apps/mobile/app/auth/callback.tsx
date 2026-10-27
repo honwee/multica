@@ -13,6 +13,7 @@ import { mapFeishuAuthError } from "@/lib/auth-error";
 export default function AuthCallback() {
   const { t } = useT("auth");
   const loginWithToken = useAuthStore((s) => s.loginWithToken);
+  const isLoading = useAuthStore((s) => s.isLoading);
   const params = useLocalSearchParams<{ token?: string | string[] }>();
   const token = Array.isArray(params.token) ? params.token[0] : params.token;
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -22,7 +23,7 @@ export default function AuthCallback() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!token?.trim()) return;
+    if (isLoading || !token?.trim()) return;
 
     void loginWithToken(token)
       .then(() => {
@@ -40,7 +41,7 @@ export default function AuthCallback() {
     return () => {
       cancelled = true;
     };
-  }, [loginWithToken, t, token]);
+  }, [isLoading, loginWithToken, t, token]);
 
   return (
     <SafeAreaView className="flex-1 bg-background">

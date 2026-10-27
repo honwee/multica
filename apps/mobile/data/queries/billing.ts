@@ -1,10 +1,15 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";
+import { getCurrentServerConfig } from "@/data/server-store";
 
-export const appConfigOptions = () =>
+export const appConfigOptions = (
+  apiUrl = getCurrentServerConfig().apiUrl,
+  enabled = true,
+) =>
   queryOptions({
-    queryKey: ["config"] as const,
+    queryKey: ["config", apiUrl] as const,
     queryFn: ({ signal }) => api.getConfig({ signal }),
+    enabled,
     staleTime: 5 * 60 * 1000,
   });
 

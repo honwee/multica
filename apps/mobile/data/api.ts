@@ -142,19 +142,15 @@ import {
 import type { LoginResponse } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
+import { useServerStore } from "./server-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
 
 export type { LoginResponse } from "./schemas";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
-      "the variant you are running (see apps/mobile/README.md).",
-  );
+function getApiUrl(): string {
+  return useServerStore.getState().apiUrl;
 }
 
 /** Mobile file payload for `uploadFile`. RN doesn't have a browser `File`
@@ -200,10 +196,12 @@ export interface ApiClientOptions {
 
 class ApiClient {
   private token: string | null = null;
+  private tokenApiUrl: string | null = null;
   private options: ApiClientOptions = {};
 
   setToken(token: string | null) {
     this.token = token;
+    this.tokenApiUrl = token ? getApiUrl() : null;
   }
 
   /** The bearer token in use, or null when signed out. Session renewal reads
@@ -233,7 +231,7 @@ class ApiClient {
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
     };
-    if (this.token) {
+    if (this.token && this.tokenApiUrl === getApiUrl()) {
       headers["Authorization"] = `Bearer ${this.token}`;
     }
     // Backend middleware (server/internal/middleware/workspace.go) resolves
@@ -269,7 +267,7 @@ class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${API_URL}${path}`, {
+      res = await fetch(`${getApiUrl()}${path}`, {
         ...init,
         signal: controller.signal,
         headers,
@@ -1359,7 +1357,7 @@ class ApiClient {
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
     };
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    if (this.token && this.tokenApiUrl === getApiUrl()) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
     if (slug) headers["X-Workspace-Slug"] = slug;
 
@@ -1375,7 +1373,7 @@ class ApiClient {
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
 
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${getApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,

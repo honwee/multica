@@ -1,14 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { useServerStore } from "./server-store";
 
-// api.ts refuses to load without a base URL; set it before the import runs.
 vi.hoisted(() => {
   process.env.EXPO_PUBLIC_API_URL = "https://api.example.test";
 });
 
-// The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
+
+beforeEach(() => {
+  api.setToken(null);
+  useServerStore.setState({
+    apiUrl: "https://api.example.test",
+    webUrl: "https://api.example.test",
+    isInitialized: true,
+  });
+});
 
 describe("api.deleteComment", () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -67,6 +75,32 @@ describe("api authentication compatibility", () => {
       "https://api.example.test/api/config",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("uses the active server without sending the previous server's token", async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    api.setToken("old-server-jwt");
+
+    await api.getConfig();
+    useServerStore.setState({
+      apiUrl: "https://self-hosted.example.test",
+      webUrl: "https://self-hosted.example.test",
+    });
+    await api.getConfig();
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.example.test/api/config",
+      "https://self-hosted.example.test/api/config",
+    ]);
+    const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const secondInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(firstInit.headers).toHaveProperty("Authorization", "Bearer old-server-jwt");
+    expect(secondInit.headers).not.toHaveProperty("Authorization");
   });
 
   it("hides Feishu when its public app ID has an unknown shape", async () => {

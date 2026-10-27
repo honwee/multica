@@ -34,6 +34,12 @@ export function resolveFeishuWebUrl(
   }
 }
 
+export function getFeishuWebCallbackUrl(webUrl: string): string {
+  const webOrigin = resolveFeishuWebUrl(webUrl);
+  if (!webOrigin) throw new Error("Feishu login is not configured");
+  return new URL("/auth/callback", webOrigin).toString();
+}
+
 export function buildFeishuAuthorizationUrl({
   appId,
   webUrl,
@@ -42,12 +48,11 @@ export function buildFeishuAuthorizationUrl({
   webUrl: string;
 }): string {
   const clientId = appId.trim();
-  const webOrigin = resolveFeishuWebUrl(webUrl);
-  if (!clientId || !webOrigin) throw new Error("Feishu login is not configured");
+  if (!clientId) throw new Error("Feishu login is not configured");
 
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: new URL("/auth/callback", webOrigin).toString(),
+    redirect_uri: getFeishuWebCallbackUrl(webUrl),
     response_type: "code",
     state: FEISHU_NATIVE_HANDOFF_STATE,
   });

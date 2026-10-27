@@ -127,6 +127,12 @@ export default function SettingsPage() {
           title={t("notifications.title")}
           subtitle={t("account.notifications_subtitle")}
         />
+        <Separator />
+        <NavRow
+          onPress={() => router.push(`/${currentSlug}/more/settings/server`)}
+          chevronColor={mutedFg}
+          title={t("server.title")}
+        />
       </SectionGroup>
 
       <SectionGroup title={t("account.workspaces")}>

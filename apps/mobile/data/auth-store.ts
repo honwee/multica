@@ -15,6 +15,7 @@ import { api, ApiError } from "./api";
 import { clearToken, getToken, setToken } from "./secure-storage";
 import { invalidateSessionEpoch } from "./session-epoch";
 import { useWorkspaceStore } from "./workspace-store";
+import { useServerStore } from "./server-store";
 
 interface AuthState {
   user: User | null;
@@ -40,6 +41,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   initialize: async () => {
+    await useServerStore.getState().initialize();
+
     // Restore the persisted workspace slug alongside the auth token so the
     // entry redirect (app/index.tsx) can route directly to the last-used
     // workspace without flashing /select-workspace.

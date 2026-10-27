@@ -343,6 +343,7 @@ export default function WorkspaceLayout() {
               headerBackTitle: t("navigation:routes.settings"),
             }}
         />
+        <Stack.Screen name="more/settings/server" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="new-issue"
           options={{

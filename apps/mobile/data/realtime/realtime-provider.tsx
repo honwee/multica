@@ -38,20 +38,11 @@ import { AppState, type AppStateStatus } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useServerStore } from "@/data/server-store";
 import { getToken } from "@/data/secure-storage";
 import { api } from "@/data/api";
+import { buildServerWebSocketUrl } from "@/lib/server-config";
 import { WSClient } from "./ws-client";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  // ApiClient already throws on this; keeping a defensive check here
-  // avoids a confusing "URL constructor failed" deep in WSClient.
-  throw new Error("EXPO_PUBLIC_API_URL is not set");
-}
-
-// http(s)://host → ws(s)://host/ws
-const WS_URL = `${API_URL.replace(/^http/, "ws")}/ws`;
 
 const RealtimeContext = createContext<WSClient | null>(null);
 
@@ -65,15 +56,19 @@ export function useWSClient(): WSClient | null {
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const apiUrl = useServerStore((s) => s.apiUrl);
   const [connection, setConnection] = useState<{
     userId: string;
     wsSlug: string;
+    apiUrl: string;
     client: WSClient;
   } | null>(null);
   // A previous workspace's client must never reach the new workspace's
   // subscribers while its token is loading. Keep the provider unkeyed so
   // navigation state and drafts survive the workspace store update.
-  const client = connection?.userId === userId && connection?.wsSlug === wsSlug
+  const client = connection?.userId === userId &&
+    connection?.wsSlug === wsSlug &&
+    connection?.apiUrl === apiUrl
     ? connection.client
     : null;
 
@@ -95,7 +90,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       if (cancelled || !token) return;
 
       ws = new WSClient({
-        url: WS_URL,
+        url: buildServerWebSocketUrl(apiUrl),
         token,
         // Re-read per connection rather than reusing the token captured
         // above: a session renewed since this effect ran would otherwise keep
@@ -106,7 +101,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         logger: console,
       });
       ws.connect();
-      setConnection({ userId, wsSlug, client: ws });
+      setConnection({ userId, wsSlug, apiUrl, client: ws });
 
       // ── AppState ────────────────────────────────────────────────
       appStateSub = AppState.addEventListener(
@@ -147,7 +142,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ws?.disconnect();
       setConnection(null);
     };
-  }, [userId, wsSlug]);
+  }, [userId, wsSlug, apiUrl]);
 
   return (
     <RealtimeContext.Provider value={client}>
