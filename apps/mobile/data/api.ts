@@ -45,6 +45,7 @@ import type {
   Reaction,
   ReorderPinsRequest,
   RuntimeDevice,
+  RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ListIssueStatusesResponse,
@@ -63,9 +64,12 @@ import type {
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 import {
+  AgentTaskPageSchema,
   AppConfigSchema,
   EMPTY_APP_CONFIG,
   EMPTY_REFRESH_SESSION_RESPONSE,
+  MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeModelListRequestSchema,
   RefreshSessionResponseSchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -85,6 +89,7 @@ import {
   AgentSchema,
   AgentListSchema,
   AgentTaskListSchema,
+  AgentTaskSchema,
   AttachmentListSchema,
   AttachmentSchema,
   ChatMessageListSchema,
@@ -218,6 +223,7 @@ class ApiClient {
   private async fetch<T>(
     path: string,
     init: RequestInit & { signal?: AbortSignal } = {},
+    responseOut?: { response?: Response },
   ): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
@@ -297,6 +303,7 @@ class ApiClient {
     clearTimeout(timeoutId);
     callerSignal?.removeEventListener("abort", onCallerAbort);
     const duration = Date.now() - start;
+    if (responseOut) responseOut.response = res;
 
     if (!res.ok) {
       // 401 sign-out hook: invoke once, let the platform layer (auth-store)
@@ -587,8 +594,12 @@ class ApiClient {
     });
   }
 
-  async listAgents(opts?: { signal?: AbortSignal }): Promise<Agent[]> {
-    const raw = await this.fetch<unknown>("/api/agents", {
+  async listAgents(opts?: {
+    signal?: AbortSignal;
+    includeArchived?: boolean;
+  }): Promise<Agent[]> {
+    const query = opts?.includeArchived ? "?include_archived=true" : "";
+    const raw = await this.fetch<unknown>(`/api/agents${query}`, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
@@ -625,16 +636,110 @@ class ApiClient {
     });
   }
 
+  async archiveAgent(id: string): Promise<Agent> {
+    return this.fetchValidatedWith<Agent>(
+      `/api/agents/${id}/archive`,
+      AgentSchema,
+      EMPTY_AGENT,
+      { method: "POST" },
+      { endpoint: "archiveAgent" },
+    );
+  }
+
+  async restoreAgent(id: string): Promise<Agent> {
+    return this.fetchValidatedWith<Agent>(
+      `/api/agents/${id}/restore`,
+      AgentSchema,
+      EMPTY_AGENT,
+      { method: "POST" },
+      { endpoint: "restoreAgent" },
+    );
+  }
+
+  async listAgentTasksPage(
+    agentId: string,
+    options: { limit?: number; before?: string; signal?: AbortSignal } = {},
+  ): Promise<{ tasks: AgentTask[]; nextCursor: string | null }> {
+    const search = new URLSearchParams({
+      limit: String(options.limit ?? 50),
+      include_usage: "true",
+    });
+    if (options.before) search.set("before", options.before);
+    const responseOut: { response?: Response } = {};
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${agentId}/tasks?${search}`,
+      { signal: options.signal },
+      responseOut,
+    );
+    return parseWithFallback(
+      {
+        tasks: raw,
+        nextCursor: responseOut.response?.headers.get(
+          "X-Agent-Tasks-Next-Cursor",
+        ),
+      },
+      AgentTaskPageSchema,
+      { tasks: [], nextCursor: null },
+      { endpoint: "GET /api/agents/:id/tasks" },
+    );
+  }
+
+  async rerunIssue(issueId: string, taskId: string): Promise<AgentTask> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({ task_id: taskId }),
+    });
+    const task = parseWithFallback<AgentTask | null>(
+      raw,
+      AgentTaskSchema,
+      null,
+      { endpoint: "POST /api/issues/:id/rerun" },
+    );
+    if (!task) throw new Error("Invalid run retry response");
+    return task;
+  }
+
   // Workspace runtimes — feeds the presence dot's availability dimension
   // (runtime.status + last_seen_at). Backend route registered in
   // server/cmd/server/router.go:514 (GET /api/runtimes).
   async listRuntimes(opts?: { signal?: AbortSignal }): Promise<RuntimeDevice[]> {
-    const raw = await this.fetch<unknown>("/api/runtimes", {
+    const raw = await this.fetch<unknown>(`/api/runtimes`, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, RuntimeListSchema, EMPTY_RUNTIME_LIST, {
       endpoint: "listRuntimes",
     });
+  }
+
+  async initiateListModels(
+    runtimeId: string,
+    options: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<RuntimeModelListRequest> {
+    const query = options.force ? "?force=true" : "";
+    return this.fetchValidatedWith<RuntimeModelListRequest>(
+      `/api/runtimes/${runtimeId}/models${query}`,
+      RuntimeModelListRequestSchema,
+      { ...MALFORMED_RUNTIME_MODEL_LIST_REQUEST, runtime_id: runtimeId },
+      { method: "POST" },
+      { signal: options.signal, endpoint: "POST /api/runtimes/:id/models" },
+    );
+  }
+
+  async getListModelsResult(
+    runtimeId: string,
+    requestId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RuntimeModelListRequest> {
+    return this.fetchValidated<RuntimeModelListRequest>(
+      `/api/runtimes/${runtimeId}/models/${requestId}`,
+      RuntimeModelListRequestSchema,
+      {
+        ...MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+        id: requestId,
+        runtime_id: runtimeId,
+      },
+      { ...opts, endpoint: "GET /api/runtimes/:id/models/:requestId" },
+    );
   }
 
   // Workspace-wide active agent tasks + each agent's most recent terminal —

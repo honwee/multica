@@ -17,6 +17,7 @@ interface AgentEditorState {
     key: K,
     value: AgentFormValues[K],
   ) => void;
+  selectRuntime: (runtimeId: string) => void;
   reset: () => void;
 }
 
@@ -36,6 +37,14 @@ export const useAgentEditorStore = create<AgentEditorState>((set, get) => ({
   setValue: (key, value) =>
     set((state) => ({
       values: { ...state.values, [key]: value },
+    })),
+  selectRuntime: (runtimeId) =>
+    set((state) => ({
+      values: {
+        ...state.values,
+        runtimeId,
+        model: state.values.runtimeId === runtimeId ? state.values.model : "",
+      },
     })),
   reset: () =>
     set({

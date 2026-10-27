@@ -62,6 +62,15 @@ describe("usePresenceRealtime", () => {
     );
 
     invalidateQueries.mockClear();
+    handlers.get("task:failed")?.({});
+    expect(invalidatedKeys()).toEqual(
+      expect.arrayContaining([
+        ["agent-task-snapshot", "workspace-1"],
+        ["agents", "workspace-1", "runs"],
+      ]),
+    );
+
+    invalidateQueries.mockClear();
     reconnect?.();
 
     expect(invalidatedKeys()).toEqual(
@@ -69,6 +78,7 @@ describe("usePresenceRealtime", () => {
         ["runtimes", "workspace-1"],
         ["agents", "workspace-1"],
         ["agent-task-snapshot", "workspace-1"],
+        ["agents", "workspace-1", "runs"],
       ]),
     );
   });

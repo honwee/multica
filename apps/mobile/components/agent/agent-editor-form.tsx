@@ -11,6 +11,7 @@ import {
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
+import { runtimeDisplayLabel } from "@multica/core/runtimes/display";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { api } from "@/data/api";
 import { useAgentEditorStore } from "@/data/stores/agent-editor-store";
@@ -41,6 +42,7 @@ export function AgentEditorForm({ mode, agent, runtimes, userId }: Props) {
   const { t } = useT("workspace");
   const { colorScheme } = useColorScheme();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const qc = useQueryClient();
   const values = useAgentEditorStore((s) => s.values);
   const initialize = useAgentEditorStore((s) => s.initialize);
@@ -118,29 +120,41 @@ export function AgentEditorForm({ mode, agent, runtimes, userId }: Props) {
         </Section>
 
         <Section title={t("agent.editor.runtime")}>
-          <View className="gap-2">
-            {runtimes.map((runtime) => (
-              <ChoiceRow
-                key={runtime.id}
-                title={runtime.name || runtime.id}
-                subtitle={runtime.provider || t(`agent.status.${runtime.status}`)}
-                selected={values.runtimeId === runtime.id}
-                onPress={() => update("runtimeId", runtime.id)}
-                disabled={submitting}
-              />
-            ))}
-          </View>
+          <EditorValueRow
+            value={(() => {
+              const runtime = runtimes.find((item) => item.id === values.runtimeId);
+              return runtime
+                ? runtimeDisplayLabel(runtime)
+                : values.runtimeId || t("agent.editor.runtime_placeholder");
+            })()}
+            placeholder={t("agent.editor.runtime_placeholder")}
+            disabled={submitting || !wsSlug}
+            onPress={() =>
+              router.push({
+                pathname:
+                  mode === "create"
+                    ? "/[workspace]/agent/new-picker/runtime"
+                    : "/[workspace]/agent/[id]/picker/runtime",
+                params: { workspace: wsSlug!, id: agent?.id },
+              })
+            }
+          />
         </Section>
 
         <Section title={t("agent.editor.model")}>
-          <TextField
-            value={values.model}
-            onChangeText={(value) => update("model", value)}
+          <EditorValueRow
+            value={values.model || t("agent.runtime_default")}
             placeholder={t("agent.editor.model_placeholder")}
-            accessibilityLabel={t("agent.editor.model")}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!submitting}
+            disabled={submitting || !wsSlug || !values.runtimeId}
+            onPress={() =>
+              router.push({
+                pathname:
+                  mode === "create"
+                    ? "/[workspace]/agent/new-picker/model"
+                    : "/[workspace]/agent/[id]/picker/model",
+                params: { workspace: wsSlug!, id: agent?.id },
+              })
+            }
           />
         </Section>
 
@@ -198,6 +212,38 @@ export function AgentEditorForm({ mode, agent, runtimes, userId }: Props) {
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+function EditorValueRow({
+  value,
+  placeholder,
+  onPress,
+  disabled,
+}: {
+  value: string;
+  placeholder: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const { colorScheme } = useColorScheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      onPress={onPress}
+      className="min-h-11 flex-row items-center gap-3 rounded-md border border-border bg-secondary/50 px-3 py-2 disabled:opacity-50"
+    >
+      <Text className="flex-1 text-sm text-foreground" numberOfLines={2}>
+        {value || placeholder}
+      </Text>
+      <Ionicons
+        name="chevron-forward"
+        size={17}
+        color={THEME[colorScheme].mutedForeground}
+      />
+    </Pressable>
   );
 }
 

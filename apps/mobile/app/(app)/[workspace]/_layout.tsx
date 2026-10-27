@@ -54,6 +54,14 @@ const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
   headerShown: false,
 };
 
+// iOS 26 renders these new agent catalog routes with zero-sized content in
+// formSheet. Use a full-screen modal so runtime/model selection stays usable.
+const AGENT_PICKER_SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
+  ...SHEET_OPTIONS,
+  presentation: "modal",
+  contentStyle: { height: "100%" },
+};
+
 /**
  * Cold-start deep-link anchor. Expo Router otherwise treats whatever
  * route resolves the URL as the root of the stack — if the user opens a
@@ -224,6 +232,11 @@ export default function WorkspaceLayout() {
           options={SHEET_OPTIONS}
         />
         <Stack.Screen name="issue/[id]/runs" options={SHEET_OPTIONS} />
+        <Stack.Screen name="agent/[id]/runs" />
+        <Stack.Screen name="agent/[id]/picker/runtime" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/[id]/picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/new-picker/runtime" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/new-picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
         {/* Full emoji picker for a comment reaction. Pushed from the "+"
             button inside the comment long-press tapback row — see
             components/issue/comment-context-menu.tsx. */}

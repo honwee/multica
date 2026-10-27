@@ -2,11 +2,12 @@
  * Presence realtime — Layer 3 of the realtime stack. Listing-level (always
  * on while the user is inside a workspace).
  *
- * Invalidates the queries that back the presence dot:
+ * Invalidates the queries that back presence and run management:
  *   - runtimeListOptions      ← daemon:register, runtime sweeper transitions
  *   - agentListOptions        ← agent:status / created / archived / restored
- *   - agentTaskSnapshotOptions← task:queued / dispatch / completed / failed /
- *                               cancelled
+ *   - agentTaskSnapshotOptions and agentRunsOptions
+ *                            ← task:queued / dispatch / completed / failed /
+ *                              cancelled
  *
  * Deliberately NOT subscribed (cellular-data rule, apps/mobile/CLAUDE.md):
  *   - daemon:heartbeat — every 15s × in-online runtime; web also skips it
@@ -16,7 +17,7 @@
  *   - task:progress / task:message — fire many times per active task. The
  *     presence cache only needs lifecycle transitions, not per-step updates.
  *
- * Reconnect: re-invalidate runtimes + agents + snapshot after missed events.
+ * Reconnect: re-invalidate runtimes + agents + task projections after missed events.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
@@ -29,6 +30,7 @@ export function usePresenceRealtime() {
       const runtimesKey = ["runtimes", wsId];
       const agentsKey = ["agents", wsId];
       const snapshotKey = ["agent-task-snapshot", wsId];
+      const runsKey = ["agents", wsId, "runs"];
 
       const invalidateRuntimes = () =>
         queryClient.invalidateQueries({ queryKey: runtimesKey });
@@ -36,6 +38,10 @@ export function usePresenceRealtime() {
         queryClient.invalidateQueries({ queryKey: agentsKey });
       const invalidateSnapshot = () =>
         queryClient.invalidateQueries({ queryKey: snapshotKey });
+      const invalidateTaskProjections = () => {
+        invalidateSnapshot();
+        queryClient.invalidateQueries({ queryKey: runsKey });
+      };
 
       return [
         // Daemon lifecycle; heartbeats deliberately omitted.
@@ -51,19 +57,19 @@ export function usePresenceRealtime() {
         ws.on("agent:archived", invalidateAgents),
         ws.on("agent:restored", invalidateAgents),
 
-        // Task lifecycle — drives the workload dimension of presence and the
-        // reserved-for-P1 peek sheet. progress / message intentionally absent.
-        ws.on("task:queued", invalidateSnapshot),
-        ws.on("task:dispatch", invalidateSnapshot),
-        ws.on("task:completed", invalidateSnapshot),
-        ws.on("task:failed", invalidateSnapshot),
-        ws.on("task:cancelled", invalidateSnapshot),
+        // Task lifecycle — drives presence and the run-history projection.
+        // progress / message intentionally absent.
+        ws.on("task:queued", invalidateTaskProjections),
+        ws.on("task:dispatch", invalidateTaskProjections),
+        ws.on("task:completed", invalidateTaskProjections),
+        ws.on("task:failed", invalidateTaskProjections),
+        ws.on("task:cancelled", invalidateTaskProjections),
 
         // Recover all presence inputs after missed sweeper transitions.
         ws.onReconnect(() => {
           invalidateRuntimes();
           invalidateAgents();
-          invalidateSnapshot();
+          invalidateTaskProjections();
         }),
       ];
     },

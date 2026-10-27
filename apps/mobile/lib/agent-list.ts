@@ -9,6 +9,15 @@ import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 
 export type AgentDisabledReason = "permission" | "runtime" | null;
 
+export function agentLifecycleAction(
+  agent: Pick<Agent, "archived_at" | "system_key">,
+  canManage: boolean,
+): "archive" | "restore" | null {
+  if (!canManage) return null;
+  if (agent.archived_at) return "restore";
+  return agent.system_key ? null : "archive";
+}
+
 export interface AgentListItem {
   agent: Agent;
   model: string;
@@ -23,14 +32,18 @@ export function buildAgentListItems({
   presenceByAgent,
   userId,
   role,
+  scope = "active",
 }: {
   agents: readonly Agent[];
   presenceByAgent: ReadonlyMap<string, AgentPresenceDetail>;
   userId: string | null;
   role: MemberRole | null;
+  scope?: "active" | "archived";
 }): AgentListItem[] {
   return agents
-    .filter((agent) => !agent.archived_at)
+    .filter((agent) =>
+      scope === "archived" ? Boolean(agent.archived_at) : !agent.archived_at,
+    )
     .map((agent) => {
       const invocation = canAssignAgentToIssue(agent, { userId, role });
       const runtimeBound = isAgentRuntimeBound(agent);

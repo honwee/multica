@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -30,6 +30,7 @@ export default function AgentsPage() {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const requestAgentSelect = useChatAgentPickerStore((s) => s.requestSelect);
+  const [scope, setScope] = useState<"active" | "archived">("active");
 
   const {
     data: agents = [],
@@ -58,12 +59,28 @@ export default function AgentsPage() {
         presenceByAgent: byAgent,
         userId,
         role: memberRole,
+        scope,
       }),
-    [agents, byAgent, userId, memberRole],
+    [agents, byAgent, userId, memberRole, scope],
+  );
+
+  const openRuns = useCallback(
+    (item: AgentListItem) => {
+      if (!wsSlug) return;
+      router.push({
+        pathname: "/[workspace]/agent/[id]/runs",
+        params: { workspace: wsSlug, id: item.agent.id },
+      });
+    },
+    [wsSlug],
   );
 
   const openAgent = useCallback(
     (item: AgentListItem) => {
+      if (item.agent.archived_at) {
+        openRuns(item);
+        return;
+      }
       if (item.disabledReason || !wsSlug) return;
       requestAgentSelect(item.agent.id);
       router.navigate({
@@ -71,7 +88,7 @@ export default function AgentsPage() {
         params: { workspace: wsSlug },
       });
     },
-    [requestAgentSelect, wsSlug],
+    [openRuns, requestAgentSelect, wsSlug],
   );
 
   const canManage = memberRole === "owner" || memberRole === "admin";
@@ -111,6 +128,19 @@ export default function AgentsPage() {
     <>
       <Stack.Screen options={{ headerRight }} />
       <SafeAreaView className="flex-1 bg-background" edges={[]}>
+        <View className="flex-row gap-2 px-4 pb-2 pt-3">
+          {(["active", "archived"] as const).map((value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={scope === value ? "secondary" : "ghost"}
+              accessibilityState={{ selected: scope === value }}
+              onPress={() => setScope(value)}
+            >
+              <Text>{t(`agent.scope.${value}`)}</Text>
+            </Button>
+          ))}
+        </View>
         {agentsLoading || membersLoading ? (
           <View className="flex-1 items-center justify-center">
             <ActivityIndicator />
@@ -130,10 +160,10 @@ export default function AgentsPage() {
         ) : items.length === 0 ? (
           <View className="flex-1 items-center justify-center gap-2 px-6">
             <Text className="text-base font-medium text-foreground">
-              {t("agent.empty")}
+              {scope === "archived" ? t("agent.empty_archived") : t("agent.empty")}
             </Text>
             <Text className="text-center text-sm text-muted-foreground">
-              {t("agent.empty_detail")}
+              {scope === "active" ? t("agent.empty_detail") : null}
             </Text>
           </View>
         ) : (
@@ -145,6 +175,8 @@ export default function AgentsPage() {
                 item={item}
                 onPress={() => openAgent(item)}
                 onEdit={canManage ? () => openEditor(item) : undefined}
+                onRuns={() => openRuns(item)}
+                canManage={canManage}
               />
             )}
             ItemSeparatorComponent={() => (
