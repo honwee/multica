@@ -38,13 +38,25 @@ import {
 type ServerField = keyof ServerConfig;
 
 export function ServerSettingsScreen() {
+  const apiUrl = useServerStore((s) => s.apiUrl);
+  const webUrl = useServerStore((s) => s.webUrl);
+  const serverInitialized = useServerStore((s) => s.isInitialized);
+
+  if (!serverInitialized) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background">
+        <ActivityIndicator />
+      </View>
+    );
+  }
+  return <ServerSettingsForm apiUrl={apiUrl} webUrl={webUrl} />;
+}
+
+function ServerSettingsForm({ apiUrl, webUrl }: ServerConfig) {
   const { t } = useT("settings");
   const { t: tCommon } = useT();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const apiUrl = useServerStore((s) => s.apiUrl);
-  const webUrl = useServerStore((s) => s.webUrl);
-  const serverInitialized = useServerStore((s) => s.isInitialized);
   const [draftApiUrl, setDraftApiUrl] = useState(apiUrl);
   const [draftWebUrl, setDraftWebUrl] = useState(webUrl);
   const [testing, setTesting] = useState(false);
@@ -62,14 +74,6 @@ export function ServerSettingsScreen() {
     ? getFeishuWebCallbackUrl(draftWebOrigin)
     : "—";
   const busy = testing || saving;
-
-  if (!serverInitialized) {
-    return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator />
-      </View>
-    );
-  }
 
   const readDraft = (): ServerConfig | null => {
     let normalizedApiUrl: string;
