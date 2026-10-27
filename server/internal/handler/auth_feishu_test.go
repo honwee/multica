@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"testing/iotest"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type feishuRoundTripper func(*http.Request) (*http.Response, error)
@@ -209,5 +212,48 @@ func TestFeishuLoginWithoutEmailUsesOpenID(t *testing.T) {
 	}
 	if got.User.Name != "无邮箱用户" {
 		t.Fatalf("got name %q, want the Feishu profile name", got.User.Name)
+	}
+}
+
+// TestFeishuLoginUsesLinkedOpenID proves that a Feishu identity returns to an
+// existing account instead of creating a second open_id-based user.
+func TestFeishuLoginUsesLinkedOpenID(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	email := "linked-feishu@example.com"
+	openID := "ou_linked_identity"
+	internalEmail := openID + "@feishu.invalid"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2`, email, internalEmail)
+
+	h := *testHandler
+	h.cfg = Config{AllowSignup: true}
+	existing, _, err := h.findOrCreateUser(context.Background(), email)
+	if err != nil {
+		t.Fatalf("create linked user: %v", err)
+	}
+	if _, err := h.Queries.SetUserFeishuOpenID(context.Background(), db.SetUserFeishuOpenIDParams{
+		ID: existing.ID, FeishuOpenID: pgtype.Text{String: openID, Valid: true},
+	}); err != nil {
+		t.Fatalf("link Feishu identity: %v", err)
+	}
+
+	h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+			return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+		}
+		return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"已关联用户","open_id":"ou_linked_identity"}}`), nil
+	})}
+	req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+	var got LoginResponse
+	testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+
+	if got.User.ID != uuidToString(existing.ID) {
+		t.Fatalf("got user ID %q, want linked user %q", got.User.ID, uuidToString(existing.ID))
+	}
+	if got.User.Email != email {
+		t.Fatalf("got email %q, want original account email %q", got.User.Email, email)
+	}
+	if _, err := h.Queries.GetUserByEmail(context.Background(), internalEmail); err == nil {
+		t.Fatal("Feishu login created a duplicate open_id account despite the existing link")
 	}
 }

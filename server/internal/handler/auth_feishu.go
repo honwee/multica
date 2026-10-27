@@ -191,23 +191,25 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		email = strings.ToLower(strings.TrimSpace(fUser.Data.Email))
 	}
+
+	// open_id is the stable identity across a Feishu app installation. Once it
+	// is linked to a Multica user it takes precedence over email, so a person
+	// without an enterprise mailbox can still return to the same account.
+	openID := strings.ToLower(strings.TrimSpace(fUser.Data.OpenID))
+	validOpenID := openID != ""
+	for _, char := range openID {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
+			validOpenID = false
+			break
+		}
+	}
+	if email == "" && !validOpenID {
+		writeErrorCode(w, http.StatusBadRequest, feishuLoginCodeAccountWithoutEmail, "Feishu did not provide an email address or a valid Open ID for this sign-in")
+		return
+	}
 	if email == "" {
-		// Many tenants do not assign mailboxes to employees. In that case use
-		// the stable Feishu identity as a non-deliverable internal account key
-		// instead of rejecting every login. The reserved .invalid TLD makes it
-		// explicit that this identifier is not a routable email address.
-		openID := strings.ToLower(strings.TrimSpace(fUser.Data.OpenID))
-		validOpenID := openID != ""
-		for _, char := range openID {
-			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
-				validOpenID = false
-				break
-			}
-		}
-		if !validOpenID {
-			writeErrorCode(w, http.StatusBadRequest, feishuLoginCodeAccountWithoutEmail, "Feishu did not provide an email address or a valid Open ID for this sign-in")
-			return
-		}
+		// The reserved .invalid TLD makes the fallback account identifier
+		// explicitly non-routable. It remains a login alias, not an email claim.
 		email = openID + "@feishu.invalid"
 	}
 
@@ -216,13 +218,40 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
-	if err != nil {
-		if writeGoogleLoginActionableError(w, err) {
+	var user db.User
+	var isNew bool
+	if validOpenID {
+		user, err = h.Queries.GetUserByFeishuOpenID(r.Context(), pgtype.Text{String: openID, Valid: true})
+		if err != nil && !isNotFound(err) {
+			slog.Warn("linked Feishu identity lookup failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to look up Feishu identity")
 			return
 		}
-		slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
-		writeError(w, http.StatusInternalServerError, "failed to create user")
+	}
+
+	if !validOpenID || isNotFound(err) {
+		user, isNew, err = h.findOrCreateUser(r.Context(), email)
+		if err != nil {
+			if writeGoogleLoginActionableError(w, err) {
+				return
+			}
+			slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+			writeError(w, http.StatusInternalServerError, "failed to create user")
+			return
+		}
+		if validOpenID {
+			user, err = h.Queries.SetUserFeishuOpenID(r.Context(), db.SetUserFeishuOpenIDParams{
+				ID: user.ID, FeishuOpenID: pgtype.Text{String: openID, Valid: true},
+			})
+			if err != nil {
+				slog.Warn("failed to link Feishu identity", append(logger.RequestAttrs(r), "error", err, "user_id", uuidToString(user.ID))...)
+				writeError(w, http.StatusInternalServerError, "failed to link Feishu identity")
+				return
+			}
+		}
+	}
+	if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeAccountDisabled, auth.TemporarilyDisabledUserError)
 		return
 	}
 	if isNew {
