@@ -7,9 +7,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { AgentRow } from "@/components/agent/agent-row";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useAuthStore } from "@/data/auth-store";
 import { agentListOptions } from "@/data/queries/agents";
@@ -73,6 +74,33 @@ export default function AgentsPage() {
     [requestAgentSelect, wsSlug],
   );
 
+  const canManage = memberRole === "owner" || memberRole === "admin";
+  const openEditor = useCallback(
+    (item: AgentListItem) => {
+      if (!canManage || !wsSlug) return;
+      router.push({
+        pathname: "/[workspace]/agent/[id]",
+        params: { workspace: wsSlug, id: item.agent.id },
+      });
+    },
+    [canManage, wsSlug],
+  );
+  const headerRight = useCallback(() => {
+    if (!canManage || !wsSlug) return null;
+    return (
+      <IconButton
+        name="add"
+        accessibilityLabel={t("agent.editor.create_a11y")}
+        onPress={() =>
+          router.push({
+            pathname: "/[workspace]/agent/new",
+            params: { workspace: wsSlug },
+          })
+        }
+      />
+    );
+  }, [canManage, t, wsSlug]);
+
   const refresh = useCallback(() => {
     void refetchAgents();
     void refetchMembers();
@@ -80,51 +108,58 @@ export default function AgentsPage() {
   const loadError = agentsError ?? membersError;
 
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={[]}>
-      {agentsLoading || membersLoading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator />
-        </View>
-      ) : loadError ? (
-        <View className="gap-3 px-4 pt-4">
-          <Text className="text-sm text-destructive">
-            {t("agent.errors.load_failed", {
-              message:
-                loadError instanceof Error ? loadError.message : "unknown",
-            })}
-          </Text>
-          <Button variant="outline" className="self-start" onPress={refresh}>
-            <Text>{t("common:actions.retry")}</Text>
-          </Button>
-        </View>
-      ) : items.length === 0 ? (
-        <View className="flex-1 items-center justify-center gap-2 px-6">
-          <Text className="text-base font-medium text-foreground">
-            {t("agent.empty")}
-          </Text>
-          <Text className="text-center text-sm text-muted-foreground">
-            {t("agent.empty_detail")}
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => item.agent.id}
-          renderItem={({ item }) => (
-            <AgentRow item={item} onPress={() => openAgent(item)} />
-          )}
-          ItemSeparatorComponent={() => (
-            <View className="ml-4 h-px bg-border" />
-          )}
-          refreshControl={
-            <RefreshControl
-              refreshing={agentsRefetching || membersRefetching}
-              onRefresh={refresh}
-            />
-          }
-          contentContainerClassName="pb-6"
-        />
-      )}
-    </SafeAreaView>
+    <>
+      <Stack.Screen options={{ headerRight }} />
+      <SafeAreaView className="flex-1 bg-background" edges={[]}>
+        {agentsLoading || membersLoading ? (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator />
+          </View>
+        ) : loadError ? (
+          <View className="gap-3 px-4 pt-4">
+            <Text className="text-sm text-destructive">
+              {t("agent.errors.load_failed", {
+                message:
+                  loadError instanceof Error ? loadError.message : "unknown",
+              })}
+            </Text>
+            <Button variant="outline" className="self-start" onPress={refresh}>
+              <Text>{t("common:actions.retry")}</Text>
+            </Button>
+          </View>
+        ) : items.length === 0 ? (
+          <View className="flex-1 items-center justify-center gap-2 px-6">
+            <Text className="text-base font-medium text-foreground">
+              {t("agent.empty")}
+            </Text>
+            <Text className="text-center text-sm text-muted-foreground">
+              {t("agent.empty_detail")}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.agent.id}
+            renderItem={({ item }) => (
+              <AgentRow
+                item={item}
+                onPress={() => openAgent(item)}
+                onEdit={canManage ? () => openEditor(item) : undefined}
+              />
+            )}
+            ItemSeparatorComponent={() => (
+              <View className="ml-4 h-px bg-border" />
+            )}
+            refreshControl={
+              <RefreshControl
+                refreshing={agentsRefetching || membersRefetching}
+                onRefresh={refresh}
+              />
+            }
+            contentContainerClassName="pb-6"
+          />
+        )}
+      </SafeAreaView>
+    </>
   );
 }

@@ -14,7 +14,7 @@
   "agent": {
     "title": "Agents",
     "empty": "No agents yet",
-    "empty_detail": "Create an agent on web or desktop to start chatting.",
+    "empty_detail": "Create an agent with the plus button, or tap the edit button to adjust its configuration.",
     "search_placeholder": "Search agents...",
     "model": "Model: {{model}}",
     "runtime_default": "Runtime default model",
@@ -33,6 +33,29 @@
     },
     "errors": {
       "load_failed": "Failed to load agents: {{message}}"
+    },
+    "editor": {
+      "title_create": "New agent",
+      "title_edit": "Edit agent",
+      "create_a11y": "Create agent",
+      "edit_a11y": "Edit {{name}}",
+      "name": "Name",
+      "name_placeholder": "e.g. iOS development",
+      "description": "Description",
+      "description_placeholder": "Optional, help members understand the role",
+      "runtime": "Runtime",
+      "model": "Model",
+      "model_placeholder": "Leave blank to use the runtime default",
+      "instructions": "Instructions",
+      "instructions_placeholder": "Describe responsibilities, workflow and boundaries",
+      "visibility": "Visibility",
+      "workspace": "Workspace members",
+      "private": "Only me",
+      "create": "Create agent",
+      "save": "Save",
+      "save_failed": "Couldn't save: {{message}}",
+      "visibility_owner_only": "Only the agent owner can change visibility",
+      "no_permission": "You don't have permission to manage agents"
     }
   },
   "actions": {

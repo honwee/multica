@@ -21,6 +21,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   Comment,
+  CreateAgentRequest,
   CreateIssueRequest,
   CreateLabelRequest,
   CreateProjectRequest,
@@ -53,6 +54,7 @@ import type {
   NotificationPreferences,
   TaskMessagePayload,
   TimelineEntry,
+  UpdateAgentRequest,
   UpdateIssueRequest,
   UpdateMeRequest,
   UpdateProjectRequest,
@@ -80,6 +82,7 @@ import type {
 } from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
+  AgentSchema,
   AgentListSchema,
   AgentTaskListSchema,
   AttachmentListSchema,
@@ -90,6 +93,7 @@ import {
   ChatSessionListSchema,
   ChatSessionSchema,
   EMPTY_ACTIVE_TASKS_RESPONSE,
+  EMPTY_AGENT,
   EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
   EMPTY_ATTACHMENT_LIST,
@@ -591,6 +595,35 @@ class ApiClient {
     });
     return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
       endpoint: "listAgents",
+    });
+  }
+
+  async getAgent(id: string, opts?: { signal?: AbortSignal }): Promise<Agent> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "getAgent",
+    });
+  }
+
+  async createAgent(data: CreateAgentRequest): Promise<Agent> {
+    const raw = await this.fetch<unknown>("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "createAgent",
+    });
+  }
+
+  async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "updateAgent",
     });
   }
 

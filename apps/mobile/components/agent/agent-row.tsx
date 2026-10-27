@@ -26,9 +26,11 @@ const ACCESS_LABELS = {
 export function AgentRow({
   item,
   onPress,
+  onEdit,
 }: {
   item: AgentListItem;
   onPress: () => void;
+  onEdit?: () => void;
 }) {
   const { t } = useT("workspace");
   const { colorScheme } = useColorScheme();
@@ -49,74 +51,89 @@ export function AgentRow({
       : null;
 
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      className={cn(
-        "flex-row items-start gap-3 px-4 py-4",
-        !disabled && "active:bg-secondary",
-        disabled && "opacity-60",
-      )}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      accessibilityLabel={[
-        agent.name,
-        modelLabel,
-        statusLabel,
-        accessLabel,
-        permissionLabel,
-      ]
-        .filter(Boolean)
-        .join(", ")}
-    >
-      <ActorAvatar
-        type="agent"
-        id={agent.id}
-        name={agent.name}
-        avatarUrl={agent.avatar_url}
-        size={40}
-      />
-      <View className="flex-1 gap-1.5">
-        <Text
-          className="text-base font-medium text-foreground"
-          numberOfLines={2}
-        >
-          {agent.name}
-        </Text>
-        {agent.description ? (
+    <View className="flex-row items-start gap-2 px-4 py-4">
+      <Pressable
+        disabled={disabled}
+        onPress={onPress}
+        className={cn(
+          "flex-1 flex-row items-start gap-3",
+          !disabled && "active:bg-secondary",
+          disabled && "opacity-60",
+        )}
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+        accessibilityLabel={[
+          agent.name,
+          modelLabel,
+          statusLabel,
+          accessLabel,
+          permissionLabel,
+        ]
+          .filter(Boolean)
+          .join(", ")}
+      >
+        <ActorAvatar
+          type="agent"
+          id={agent.id}
+          name={agent.name}
+          avatarUrl={agent.avatar_url}
+          size={40}
+        />
+        <View className="flex-1 gap-1.5">
           <Text
-            className="text-sm text-muted-foreground"
+            className="text-base font-medium text-foreground"
             numberOfLines={2}
           >
-            {agent.description}
+            {agent.name}
           </Text>
-        ) : null}
-        <Text className="text-xs text-muted-foreground" numberOfLines={2}>
-          {modelLabel}
-        </Text>
-        <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
-          <View className="flex-row items-center gap-1.5">
-            {item.presence && item.runtimeBound ? (
-              <PresenceDot availability={item.presence.availability} />
-            ) : null}
+          {agent.description ? (
             <Text
-              className={cn(
-                "text-xs",
-                item.disabledReason === "runtime"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-              )}
+              className="text-sm text-muted-foreground"
+              numberOfLines={2}
             >
-              {statusLabel}
+              {agent.description}
             </Text>
+          ) : null}
+          <Text className="text-xs text-muted-foreground" numberOfLines={2}>
+            {modelLabel}
+          </Text>
+          <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
+            <View className="flex-row items-center gap-1.5">
+              {item.presence && item.runtimeBound ? (
+                <PresenceDot availability={item.presence.availability} />
+              ) : null}
+              <Text
+                className={cn(
+                  "text-xs",
+                  item.disabledReason === "runtime"
+                    ? "text-warning"
+                    : "text-muted-foreground",
+                )}
+              >
+                {statusLabel}
+              </Text>
+            </View>
+            <Text className="text-xs text-muted-foreground">{accessLabel}</Text>
           </View>
-          <Text className="text-xs text-muted-foreground">{accessLabel}</Text>
+          {permissionLabel ? (
+            <Text className="text-xs text-warning">{permissionLabel}</Text>
+          ) : null}
         </View>
-        {permissionLabel ? (
-          <Text className="text-xs text-warning">{permissionLabel}</Text>
-        ) : null}
-      </View>
-      {!disabled ? (
+      </Pressable>
+      {onEdit ? (
+        <Pressable
+          onPress={onEdit}
+          accessibilityRole="button"
+          accessibilityLabel={t("agent.editor.edit_a11y", { name: agent.name })}
+          className="size-10 items-center justify-center self-center rounded-md active:bg-secondary"
+        >
+          <Ionicons
+            name="create-outline"
+            size={20}
+            color={THEME[colorScheme].mutedForeground}
+          />
+        </Pressable>
+      ) : !disabled ? (
         <View className="self-center">
           <Ionicons
             name="chevron-forward"
@@ -125,6 +142,6 @@ export function AgentRow({
           />
         </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }

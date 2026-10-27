@@ -1,6 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";
 
+export const agentDetailOptions = (id: string | null) =>
+  queryOptions({
+    queryKey: ["agent", id] as const,
+    queryFn: ({ signal }) => api.getAgent(id!, { signal }),
+    enabled: !!id,
+  });
+
 export const agentListOptions = (wsId: string | null) =>
   queryOptions({
     queryKey: ["agents", wsId] as const,

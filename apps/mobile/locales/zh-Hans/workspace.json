@@ -14,7 +14,7 @@
   "agent": {
     "title": "智能体",
     "empty": "还没有智能体",
-    "empty_detail": "在 Web 或桌面端创建智能体后即可开始聊天。",
+    "empty_detail": "点按右上角新建智能体，或点按编辑按钮调整配置。",
     "search_placeholder": "搜索智能体...",
     "model": "模型：{{model}}",
     "runtime_default": "使用运行时默认模型",
@@ -33,6 +33,29 @@
     },
     "errors": {
       "load_failed": "智能体加载失败：{{message}}"
+    },
+    "editor": {
+      "title_create": "新建智能体",
+      "title_edit": "编辑智能体",
+      "create_a11y": "新建智能体",
+      "edit_a11y": "编辑 {{name}}",
+      "name": "名称",
+      "name_placeholder": "例如：iOS 开发",
+      "description": "描述",
+      "description_placeholder": "可选，便于成员理解职责",
+      "runtime": "运行时",
+      "model": "模型",
+      "model_placeholder": "留空使用运行时默认模型",
+      "instructions": "指令",
+      "instructions_placeholder": "描述职责、工作方式和边界",
+      "visibility": "可见性",
+      "workspace": "工作区成员",
+      "private": "仅自己",
+      "create": "创建智能体",
+      "save": "保存",
+      "save_failed": "保存失败：{{message}}",
+      "visibility_owner_only": "只有智能体所有者可以修改可见性",
+      "no_permission": "你没有权限管理智能体"
     }
   },
   "actions": {
