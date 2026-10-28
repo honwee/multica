@@ -236,6 +236,7 @@ export type {
 } from "./vcs";
 export type {
   LarkInstallation,
+  LarkInstallationBotInfo,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -246,6 +247,10 @@ export type {
   LarkOrganizationSyncChange,
   LarkOrganizationAgentChange,
   LarkOrganizationSyncRun,
+  LarkOrganizationCatalog,
+  LarkOrganizationDepartment,
+  LarkOrganizationJobTitle,
+  LarkOrganizationWorkspaceMember,
   LarkOrganizationResponse,
   UpdateLarkOrganizationRequest,
 } from "./lark";

@@ -1,1 +1,1 @@
-export { larkKeys, larkInstallationsOptions, larkOrganizationOptions } from "./queries";
+export { larkKeys, larkInstallationsOptions, larkOrganizationOptions, larkBotInfoOptions } from "./queries";

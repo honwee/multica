@@ -469,3 +469,53 @@ RETURNING id
 		t.Fatalf("orphan revoke as workspace owner: want 204, got %d", code)
 	}
 }
+
+type botInfoTestClient struct {
+	lark.APIClient
+}
+
+func (c *botInfoTestClient) IsConfigured() bool { return true }
+
+func (c *botInfoTestClient) GetBotInfo(context.Context, lark.InstallationCredentials) (lark.BotInfo, error) {
+	return lark.BotInfo{OpenID: "ou_live_bot", AppName: "Lumist", AvatarURL: "https://example.com/avatar.png"}, nil
+}
+
+func TestGetLarkInstallationBotInfo_NotConfigured(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/lark/installations/y/bot-info", nil)
+	w := httptest.NewRecorder()
+	h.GetLarkInstallationBotInfo(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestGetLarkInstallationBotInfo_ReturnsLiveMetadata(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	previous := testHandler.LarkAPIClient
+	testHandler.LarkAPIClient = &botInfoTestClient{APIClient: lark.NewStubAPIClient(nil)}
+	t.Cleanup(func() { testHandler.LarkAPIClient = previous })
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/installations/"+fixture.installationID+"/bot-info", nil, "installationId", fixture.installationID)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkInstallationBotInfo(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("bot info status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response LarkInstallationBotInfoResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode bot info: %v", err)
+	}
+	if response.AppName != "Lumist" || response.AvatarURL != "https://example.com/avatar.png" || response.BotOpenID != "ou_live_bot" || response.InstallationID != fixture.installationID {
+		t.Fatalf("unexpected bot info: %+v", response)
+	}
+	if strings.Contains(w.Body.String(), "feishu-org-test-secret") {
+		t.Fatal("bot info exposed the app secret")
+	}
+
+	memberRequest := feishuOrgRequest(fixture.memberID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/installations/"+fixture.installationID+"/bot-info", nil, "installationId", fixture.installationID)
+	memberResponse := httptest.NewRecorder()
+	testHandler.GetLarkInstallationBotInfo(memberResponse, memberRequest)
+	if memberResponse.Code != http.StatusForbidden {
+		t.Fatalf("member bot info status = %d, want 403", memberResponse.Code)
+	}
+}

@@ -106,6 +106,68 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type LarkInstallationBotInfoResponse struct {
+	InstallationID string `json:"installation_id"`
+	AppID          string `json:"app_id"`
+	AppName        string `json:"app_name"`
+	AvatarURL      string `json:"avatar_url,omitempty"`
+	BotOpenID      string `json:"bot_open_id"`
+	Region         string `json:"region"`
+}
+
+// GetLarkInstallationBotInfo returns live, non-secret Feishu app metadata for
+// the connection-details surface. The plaintext credential never leaves the
+// server, and the endpoint is restricted to workspace owners/admins.
+func (h *Handler) GetLarkInstallationBotInfo(w http.ResponseWriter, r *http.Request) {
+	if h.LarkInstallations == nil || h.LarkAPIClient == nil || !h.LarkAPIClient.IsConfigured() {
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, uuidToString(workspaceID))
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+	installationID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	installation, err := h.LarkInstallations.GetInWorkspace(r.Context(), installationID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "lark installation not found")
+		return
+	}
+	secret, err := h.LarkInstallations.DecryptAppSecret(installation)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read lark installation credentials")
+		return
+	}
+	credentials := lark.InstallationCredentials{
+		AppID: installation.AppID, AppSecret: secret, TenantKey: installation.TenantKey.String,
+		Region: lark.RegionOrDefault(installation.Region),
+	}
+	info, err := h.LarkAPIClient.GetBotInfo(r.Context(), credentials)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to load Feishu bot info")
+		return
+	}
+	appName := info.AppName
+	if appName == "" {
+		appName = installation.AppID
+	}
+	writeJSON(w, http.StatusOK, LarkInstallationBotInfoResponse{
+		InstallationID: uuidToString(installation.ID), AppID: installation.AppID, AppName: appName,
+		AvatarURL: info.AvatarURL, BotOpenID: string(info.OpenID), Region: string(lark.RegionOrDefault(installation.Region)),
+	})
+}
+
 // RevokeLarkInstallation (DELETE /api/workspaces/{id}/lark/installations/{installationId})
 // flips status to 'revoked' so the WS hub drops the connection on its
 // next sweep. The row itself is preserved for audit; a re-install via

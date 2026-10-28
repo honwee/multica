@@ -565,11 +565,8 @@ func (c *httpAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 // fall back to the (broken) open_id match path until the operator
 // fixes scopes. We log a warning so the gap is visible.
 //
-// Other fields the upstream APIs return (display name, avatar, IP
-// whitelist) are deliberately dropped; downstream reads can fetch
-// them on demand from the bot_open_id, and freezing them into our
-// schema would create a drift surface every time the operator edits
-// the Bot on Lark's side.
+// Display name and avatar are returned for on-demand connection details,
+// not persisted. IP whitelist and other unrelated fields are dropped.
 func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	if creds.AppID == "" || creds.AppSecret == "" {
 		return BotInfo{}, errors.New("lark http client: missing app credentials for GetBotInfo")
@@ -578,7 +575,9 @@ func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCreden
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Bot  struct {
-			OpenID string `json:"open_id"`
+			OpenID    string `json:"open_id"`
+			AppName   string `json:"app_name"`
+			AvatarURL string `json:"avatar_url"`
 		} `json:"bot"`
 	}
 	if err := c.doAuthedJSON(ctx, creds, http.MethodGet, "/open-apis/bot/v3/info", nil, &botResp); err != nil {
@@ -605,7 +604,7 @@ func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCreden
 			"bot_open_id", botResp.Bot.OpenID,
 			"err", lookupErr)
 	}
-	return BotInfo{OpenID: OpenID(botResp.Bot.OpenID), UnionID: unionID}, nil
+	return BotInfo{OpenID: OpenID(botResp.Bot.OpenID), UnionID: unionID, AppName: botResp.Bot.AppName, AvatarURL: botResp.Bot.AvatarURL}, nil
 }
 
 // GetMessage retrieves a message by id via

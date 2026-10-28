@@ -250,6 +250,13 @@ func validateMappings(snapshot lark.OrgSnapshot, mappings []Mapping, warnings ma
 	return valid
 }
 
+// MatchMembers exposes the shared identity matcher for read-only organization
+// directories. A blocked member has conflicting identities and is not linked.
+func MatchMembers(users []lark.OrgUser, members []Member) (map[int]int, map[int]bool) {
+	matches, blocked := matchMembers(users, members, make(map[string]struct{}))
+	return matches, blocked
+}
+
 func matchMembers(users []lark.OrgUser, members []Member, warnings map[string]struct{}) (map[int]int, map[int]bool) {
 	index := identityIndex{
 		union:   make(map[string][]int),

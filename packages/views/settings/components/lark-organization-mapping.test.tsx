@@ -9,9 +9,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const organizationRef = vi.hoisted(() => ({ current: undefined as unknown }));
-const agentsRef = vi.hoisted(() => ({
-  current: [{ id: "agent-1", name: "Review Bot" }],
-}));
+const agentsRef = vi.hoisted(() => ({ current: [{ id: "agent-1", name: "Review Bot" }] }));
 const mockUpdate = vi.hoisted(() => vi.fn());
 const mockPreview = vi.hoisted(() => vi.fn());
 const mockApply = vi.hoisted(() => vi.fn());
@@ -20,43 +18,24 @@ const mockInvalidate = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[]; enabled?: boolean }) => {
-    if (options.enabled === false) {
-      return { data: undefined, isLoading: false, isError: false };
-    }
+    if (options.enabled === false) return { data: undefined, isLoading: false, isError: false };
     const key = JSON.stringify(options.queryKey);
-    if (key.includes("organization")) {
-      return { data: organizationRef.current, isLoading: false, isError: false };
-    }
-    if (key.includes("agents")) {
-      return { data: agentsRef.current, isLoading: false, isError: false };
-    }
+    if (key.includes("organization")) return { data: organizationRef.current, isLoading: false, isError: false };
+    if (key.includes("agents")) return { data: agentsRef.current, isLoading: false, isError: false };
     return { data: undefined, isLoading: false, isError: false };
   },
   useQueryClient: () => ({ invalidateQueries: mockInvalidate }),
   queryOptions: <T,>(options: T) => options,
 }));
 
-vi.mock("@multica/core/hooks", () => ({
-  useWorkspaceId: () => "workspace-1",
-}));
-
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/workspace", () => ({
-  agentListOptions: (wsId: string) => ({
-    queryKey: ["workspaces", wsId, "agents"],
-    queryFn: vi.fn(),
-  }),
+  agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"], queryFn: vi.fn() }),
 }));
-
 vi.mock("@multica/core/lark/queries", () => ({
-  larkOrganizationOptions: (wsId: string) => ({
-    queryKey: ["lark", wsId, "organization"],
-    queryFn: vi.fn(),
-  }),
-  larkKeys: {
-    organization: (wsId: string) => ["lark", wsId, "organization"],
-  },
+  larkOrganizationOptions: (wsId: string) => ({ queryKey: ["lark", wsId, "organization"], queryFn: vi.fn() }),
+  larkKeys: { organization: (wsId: string) => ["lark", wsId, "organization"] },
 }));
-
 vi.mock("@multica/core/api", () => ({
   api: {
     updateLarkOrganization: mockUpdate,
@@ -65,10 +44,7 @@ vi.mock("@multica/core/api", () => ({
     replayLarkOrganizationSync: mockReplay,
   },
 }));
-
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { LarkOrganizationMapping } from "./lark-organization-mapping";
 
@@ -92,24 +68,22 @@ const previewRun = {
   status: "preview",
   revision: 3,
   plan: {
-    changes: [
-      {
-        user_id: "user-1",
-        user_name: "Ada",
-        action: "grant",
-        before: "member",
-        after: "admin",
-        reason: "Matched Engineering",
-      },
-    ],
-    agent_changes: [
-      {
-        agent_id: "agent-1",
-        group_id: "group-1",
-        group_name: "Engineering",
-        action: "agent_granted",
-      },
-    ],
+    changes: [{
+      user_id: "user-1",
+      user_name: "Ada",
+      action: "group_joined",
+      group_id: "dep-1",
+      group_name: "Engineering",
+      before: "inactive",
+      after: "active",
+      reason: "Matched Engineering",
+    }],
+    agent_changes: [{
+      agent_id: "agent-1",
+      group_id: "group-1",
+      group_name: "Engineering",
+      action: "agent_granted",
+    }],
     warnings: ["One member could not be matched"],
   },
   error: "",
@@ -126,18 +100,40 @@ function baseOrganization() {
       revision: 3,
       updated_at: "2026-10-26T00:00:00Z",
     },
-    mappings: [
-      {
-        kind: "department",
-        external_id: "dep-1",
-        external_name: "Engineering",
-        member_role: null,
-        agent_ids: [],
-      },
-    ],
+    mappings: [{
+      kind: "department",
+      external_id: "dep-1",
+      external_name: "Engineering",
+      member_role: null,
+      agent_ids: [],
+    }],
     required_scopes: ["contact:department:readonly"],
     requirements: ["Grant the bot access to organization contacts"],
     sync_runs: [],
+    catalog: {
+      snapshot_at: "2026-10-27T00:00:00Z",
+      departments: [
+        { id: "dep-1", name: "Engineering", direct_member_count: 2, active_direct_member_count: 2 },
+        { id: "dep-2", name: "Platform", direct_member_count: 3, active_direct_member_count: 3 },
+        { id: "dep-3", name: "Support", direct_member_count: 1, active_direct_member_count: 1 },
+      ],
+      job_titles: [{ name: "Engineer", member_count: 1, active_member_count: 1 }],
+      total_users: 2,
+      active_users: 2,
+      job_title_users: 1,
+      workspace_members: [{
+        user_id: "user-1",
+        name: "Ada",
+        role: "owner",
+        managed_role: "",
+        disabled: false,
+        linked: true,
+        identity_conflict: false,
+        job_title: "Engineer",
+        departments: ["Engineering"],
+        feishu_active: true,
+      }],
+    },
   };
 }
 
@@ -157,30 +153,23 @@ beforeEach(() => {
 });
 
 describe("LarkOrganizationMapping", () => {
-  it("shows members the configuration and preview without any write controls", () => {
+  it("shows read-only configuration and preview without write controls", async () => {
+    const user = userEvent.setup();
     organizationRef.current = {
       ...baseOrganization(),
-      mappings: [
-        {
-          kind: "department",
-          external_id: "dep-1",
-          external_name: "Engineering",
-          member_role: "admin",
-          agent_ids: ["agent-1"],
-        },
-      ],
+      mappings: [{ kind: "department", external_id: "dep-1", external_name: "Engineering", member_role: "admin", agent_ids: ["agent-1"] }],
       sync_runs: [previewRun],
     };
-
     renderUI(false);
 
     expect(screen.getByText(enSettings.lark.organization.read_only)).toBeTruthy();
-    expect(screen.getByText("Engineering")).toBeTruthy();
-    expect(screen.getByText("dep-1")).toBeTruthy();
+    expect(screen.getAllByText("Engineering").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Review Bot").length).toBeGreaterThan(0);
-    expect(screen.getByText("contact:department:readonly")).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_preview }));
     expect(screen.getByText("One member could not be matched")).toBeTruthy();
     expect(screen.getByText(/Matched Engineering/)).toBeTruthy();
+    expect(screen.queryByText(/group_joined/)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
@@ -189,39 +178,49 @@ describe("LarkOrganizationMapping", () => {
     expect(mockPreview).not.toHaveBeenCalled();
   });
 
-  it("saves edited external IDs and agents selected by name", async () => {
+  it("edits a rule through the catalog dialog and saves it", async () => {
+    const user = userEvent.setup();
     mockUpdate.mockResolvedValue(baseOrganization());
     renderUI();
 
-    fireEvent.change(screen.getByLabelText(enSettings.lark.organization.external_id), {
-      target: { value: "  dep-2  " },
-    });
-    fireEvent.change(screen.getByLabelText(enSettings.lark.organization.external_name), {
-      target: { value: "  Platform  " },
-    });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Review Bot" }));
-    fireEvent.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_edit.replace("{{name}}", "Engineering") }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: /Platform/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "Review Bot" }));
+    await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
       installation_id: installation.id,
       enabled: true,
-      mappings: [
-        {
-          kind: "department",
-          external_id: "dep-2",
-          external_name: "Platform",
-          member_role: null,
-          agent_ids: ["agent-1"],
-        },
-      ],
+      mappings: [{
+        kind: "department",
+        external_id: "dep-2",
+        external_name: "Platform",
+        member_role: null,
+        agent_ids: ["agent-1"],
+      }],
     });
-    expect(mockInvalidate).toHaveBeenCalledWith({
-      queryKey: ["lark", "workspace-1", "organization"],
-    });
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["lark", "workspace-1", "organization"] });
   }, 30000);
 
-  it("previews, replays, and explicitly applies a matching read-only plan", async () => {
+  it("filters catalog sources before adding a rule", async () => {
+    const user = userEvent.setup();
+    renderUI();
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_add }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: enSettings.lark.organization.rule_source }), {
+      target: { value: "Support" },
+    });
+    expect(within(dialog).queryByRole("option", { name: /Platform/ })).toBeNull();
+    await user.click(within(dialog).getByRole("option", { name: /Support/ }));
+    await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
+    expect(await screen.findAllByText("Support")).not.toHaveLength(0);
+    expect(screen.getAllByText(enSettings.lark.organization.no_agent_grant)).toHaveLength(2);
+  });
+
+  it("previews, replays, and explicitly applies a reviewed plan with natural language", async () => {
     const user = userEvent.setup();
     mockPreview.mockResolvedValue(previewRun);
     mockReplay.mockResolvedValue({ ...previewRun, id: "run-2", mode: "replay" });
@@ -234,41 +233,55 @@ describe("LarkOrganizationMapping", () => {
     });
     renderUI();
 
-    await user.click(
-      screen.getByRole("button", { name: enSettings.lark.organization.preview }),
-    );
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.sync_now }));
     expect(await screen.findByText("One member could not be matched")).toBeTruthy();
     expect(screen.getByText(/Matched Engineering/)).toBeTruthy();
+    expect(screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("Join Engineering"))).toBeTruthy();
+    expect(screen.queryByText(/group_joined/)).toBeNull();
+    expect(screen.getByText(enSettings.lark.organization.no_role_changes)).toBeTruthy();
     expect(mockPreview).toHaveBeenCalledWith("workspace-1");
 
-    await user.click(
-      screen.getByRole("button", { name: enSettings.lark.organization.replay }),
-    );
-    await waitFor(() =>
-      expect(mockReplay).toHaveBeenCalledWith("workspace-1", "run-1"),
-    );
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.replay }));
+    await waitFor(() => expect(mockReplay).toHaveBeenCalledWith("workspace-1", "run-1"));
 
-    await user.click(
-      screen.getByRole("button", { name: enSettings.lark.organization.apply }),
-    );
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.apply }));
     const dialog = await screen.findByRole("alertdialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: enSettings.lark.organization.apply }),
-    );
+    await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.apply }));
     await waitFor(() => expect(mockApply).toHaveBeenCalledWith("workspace-1", "run-2"));
     expect(mockInvalidate).toHaveBeenCalledTimes(3);
   }, 30000);
 
-  it("blocks apply when the preview revision no longer matches", () => {
-    organizationRef.current = {
-      ...baseOrganization(),
-      sync_runs: [{ ...previewRun, revision: 2 }],
-    };
+  it("blocks apply when the preview revision no longer matches", async () => {
+    const user = userEvent.setup();
+    organizationRef.current = { ...baseOrganization(), sync_runs: [{ ...previewRun, revision: 2 }] };
     renderUI();
-
+    await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_preview }));
     expect(screen.getByText(enSettings.lark.organization.stale_preview)).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: enSettings.lark.organization.apply }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: enSettings.lark.organization.apply })).toBeDisabled();
+  });
+
+  it("shows current workspace members and filters them", async () => {
+    const user = userEvent.setup();
+    renderUI();
+    await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_members }));
+    expect(screen.getByText("Ada")).toBeTruthy();
+    expect(screen.getByText("owner")).toBeTruthy();
+    expect(screen.getByText("Engineer")).toBeTruthy();
+    expect(screen.getByText(enSettings.lark.organization.members_linked)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: enSettings.lark.organization.members_search_placeholder }), {
+      target: { value: "nobody" },
+    });
+    expect(screen.getByText(enSettings.lark.organization.members_no_results)).toBeTruthy();
+  });
+
+  it("shows sync history and replays from a record", async () => {
+    const user = userEvent.setup();
+    organizationRef.current = { ...baseOrganization(), sync_runs: [previewRun] };
+    mockReplay.mockResolvedValue({ ...previewRun, id: "run-2", mode: "replay" });
+    renderUI();
+    await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_history }));
+    expect(screen.getByText(enSettings.lark.organization.history_mode_preview)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.replay }));
+    await waitFor(() => expect(mockReplay).toHaveBeenCalledWith("workspace-1", "run-1"));
   });
 });

@@ -28,8 +28,10 @@ const ApiError = vi.hoisted(() => {
 const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
+const mockGetBotInfo = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockOrganizationMapping = vi.hoisted(() => vi.fn());
+const botInfoRef = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock("./lark-organization-mapping", () => ({
   LarkOrganizationMapping: (props: unknown) => {
@@ -52,9 +54,13 @@ const installationsRef = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
+  useQuery: (opts: { queryKey: unknown[]; enabled?: boolean; queryFn?: () => unknown }) => {
     if (opts.enabled === false) return { data: undefined, isLoading: false };
     const key = JSON.stringify(opts.queryKey);
+    if (key.includes("bot-info")) {
+      void opts.queryFn?.();
+      return { data: botInfoRef.current, isLoading: false, isError: false };
+    }
     if (key.includes("members")) return { data: membersRef.current, isLoading: false };
     if (key.includes("installations")) {
       return { data: installationsRef.current, isLoading: false };
@@ -109,6 +115,11 @@ vi.mock("@multica/core/lark", () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
   }),
+  larkBotInfoOptions: (wsId: string, installationId: string, enabled: boolean) => ({
+    queryKey: ["lark", "bot-info", wsId, installationId],
+    queryFn: () => mockGetBotInfo(wsId, installationId),
+    enabled,
+  }),
   larkKeys: { installations: (wsId: string) => ["lark", "installations", wsId] },
 }));
 
@@ -117,6 +128,7 @@ vi.mock("@multica/core/api", () => ({
     beginLarkInstall: mockBeginInstall,
     getLarkInstallStatus: mockGetStatus,
     deleteLarkInstallation: mockDeleteInstallation,
+    getLarkInstallationBotInfo: mockGetBotInfo,
   },
   ApiError,
 }));
@@ -190,6 +202,7 @@ function resetFixtures() {
     install_supported: true,
   };
   agentNameByIdRef.current = new Map();
+  botInfoRef.current = null;
 }
 
 describe("LarkAgentBindButton (CTA gate)", () => {
@@ -828,5 +841,43 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText("Bohan's Helper")).toBeTruthy();
     expect(screen.queryByTestId("lark-organization-mapping")).toBeNull();
     expect(mockOrganizationMapping).not.toHaveBeenCalled();
+  });
+
+  it("loads Feishu app details only after expanding the connection", async () => {
+    const user = userEvent.setup();
+    agentNameByIdRef.current = new Map([["agent-1", "Bohan's Helper"]]);
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_aa941499d4f95cd9",
+        bot_open_id: "ou_abc123",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+    botInfoRef.current = {
+      installation_id: "inst-1",
+      app_id: "cli_aa941499d4f95cd9",
+      app_name: "Lumist",
+      avatar_url: "",
+      bot_open_id: "ou_abc123",
+      region: "feishu",
+    };
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+    expect(screen.queryByText("cli_aa941499d4f95cd9")).toBeNull();
+    expect(mockGetBotInfo).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.bot_details }));
+
+    expect(await screen.findByText("Lumist")).toBeTruthy();
+    expect(screen.getByText("cli_aa941499d4f95cd9")).toBeTruthy();
+    expect(screen.getByText("ou_abc123")).toBeTruthy();
+    expect(mockGetBotInfo).toHaveBeenCalledWith("workspace-1", "inst-1");
   });
 });

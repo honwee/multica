@@ -1674,7 +1674,43 @@ describe("workspace subscription contract", () => {
         required_scopes: [],
         requirements: [],
         sync_runs: [],
+        catalog: null,
       });
+    });
+
+    it("parses the organization catalog and defaults it for older backends", async () => {
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },
+        mappings: [],
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+        catalog: {
+          snapshot_at: "2026-10-28T00:00:00Z",
+          departments: [{ id: "dep-1", name: "Engineering", direct_member_count: 2, active_direct_member_count: 1 }],
+          job_titles: [{ name: "Engineer", member_count: 1, active_member_count: 1 }],
+          total_users: 2,
+          active_users: 1,
+          job_title_users: 1,
+          workspace_members: [{
+            user_id: "user-1", name: "Ada", role: "owner", managed_role: "",
+            disabled: false, linked: true, identity_conflict: false,
+            job_title: "Engineer", departments: ["Engineering"], feishu_active: true,
+          }],
+        },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getLarkOrganization("ws-1");
+      expect(response.catalog?.departments[0]?.name).toBe("Engineering");
+      expect(response.catalog?.workspace_members[0]?.linked).toBe(true);
+      expect(response.catalog?.total_users).toBe(2);
+
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },
+        mappings: [], required_scopes: [], requirements: [], sync_runs: [],
+      });
+      const legacy = await client.getLarkOrganization("ws-1");
+      expect(legacy.catalog).toBeNull();
     });
 
     it("parses a preview plan without narrowing future mode or status values", async () => {
@@ -1733,6 +1769,25 @@ describe("workspace subscription contract", () => {
         stubFetchJson({ ...validRun, plan: { changes: "not-an-array", warnings: [] } });
         await expect(call()).rejects.toThrow("Malformed response");
       }
+    });
+
+    it("loads Feishu app connection details without credentials", async () => {
+      stubFetchJson({
+        installation_id: "inst-1",
+        app_id: "cli_app",
+        app_name: "Lumist",
+        avatar_url: "https://example.com/avatar.png",
+        bot_open_id: "ou_bot",
+        region: "feishu",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const info = await client.getLarkInstallationBotInfo("ws-1", "inst-1");
+      expect(info.app_name).toBe("Lumist");
+      expect(info).not.toHaveProperty("app_secret");
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/lark/installations/inst-1/bot-info",
+        expect.any(Object),
+      );
     });
   });
 });

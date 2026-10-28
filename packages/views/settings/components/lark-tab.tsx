@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -37,7 +37,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
+import { larkBotInfoOptions, larkInstallationsOptions, larkKeys } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -143,6 +143,7 @@ export function LarkTab() {
       ) : (
         <section className="space-y-3">
           <h2 className="text-body font-semibold">{t(($) => $.lark.connected_bots)}</h2>
+          <p className="text-caption text-muted-foreground">{t(($) => $.lark.connected_bots_description)}</p>
           {isLoading ? (
             <Card>
               <CardContent>
@@ -223,52 +224,119 @@ function InstallationRow({
 }) {
   const { t } = useT("settings");
   const locale = useLocale();
-  // The bot is bound 1:1 to a Multica Agent (per the (workspace_id,
-  // agent_id) UNIQUE in lark_installation). Render the Multica agent's
-  // identity here rather than the raw Lark app_id / bot_open_id — those
-  // mean nothing to product users. getAgentName falls back to
-  // "Unknown Agent" when the agent has been deleted; the Disconnect
-  // affordance below is the recovery path for that orphan row.
-  const { getAgentName } = useActorName();
+  const wsId = useWorkspaceId();
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const { getAgentName, getMemberName } = useActorName();
+  const { data: botInfo, isLoading, isError } = useQuery(
+    larkBotInfoOptions(wsId, installation.id, detailsOpen && canManage),
+  );
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
+  const installerName = getMemberName(installation.installer_user_id);
+  const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
   return (
-    <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-3">
-        <ActorAvatar
-          actorType="agent"
-          actorId={installation.agent_id}
-          size="lg"
-          enableHoverCard
-          profileLink
-        />
-        <div className="space-y-1">
-          <p className="text-body font-medium">
-            {agentName}
-            <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
-              {installation.region === "lark"
-                ? t(($) => $.lark.region_lark)
-                : t(($) => $.lark.region_feishu)}
-            </span>
-            {!isActive && (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <ActorAvatar
+            actorType="agent"
+            actorId={installation.agent_id}
+            size="lg"
+            enableHoverCard
+            profileLink
+          />
+          <div className="space-y-1">
+            <p className="text-body font-medium">
+              {agentName}
               <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
-                {t(($) => $.lark.revoked_badge)}
+                {installation.region === "lark"
+                  ? t(($) => $.lark.region_lark)
+                  : t(($) => $.lark.region_feishu)}
               </span>
-            )}
-          </p>
-          <p className="text-micro text-muted-foreground">
-            {t(($) => $.lark.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(locale),
-            })}
-          </p>
+              {!isActive && (
+                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                  {t(($) => $.lark.revoked_badge)}
+                </span>
+              )}
+            </p>
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.lark.installed_at_label, {
+                when: new Date(installation.installed_at).toLocaleString(locale),
+              })}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {canManage && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
+              onClick={() => setDetailsOpen((current) => !current)}
+            >
+              {detailsOpen ? <ChevronUp /> : <ChevronDown />}
+              {detailsOpen ? t(($) => $.lark.bot_details_hide) : t(($) => $.lark.bot_details)}
+            </Button>
+          )}
+          {canManage && isActive && (
+            <Button variant="outline" size="sm" onClick={onDisconnect}>
+              <Trash2 className="h-3 w-3" />
+              {t(($) => $.lark.disconnect)}
+            </Button>
+          )}
         </div>
       </div>
-      {canManage && isActive && (
-        <Button variant="outline" size="sm" onClick={onDisconnect}>
-          <Trash2 className="h-3 w-3" />
-          {t(($) => $.lark.disconnect)}
-        </Button>
+      {detailsOpen && canManage && (
+        <div id={detailsId} className="mt-3 ml-11 space-y-3 rounded-md border bg-muted/30 p-3">
+          {isLoading && <p className="text-caption text-muted-foreground">{t(($) => $.lark.loading)}</p>}
+          {isError && <p role="alert" className="text-caption text-destructive">{t(($) => $.lark.bot_details_error)}</p>}
+          <div className="flex items-center gap-3">
+            {botInfo?.avatar_url && <img src={botInfo.avatar_url} alt="" aria-hidden="true" className="size-10 rounded-md" />}
+            <div>
+              <p className="text-body font-medium">{botInfo?.app_name ?? installation.app_id}</p>
+              <p className="text-caption text-muted-foreground">{t(($) => $.lark.bot_app_name)}</p>
+            </div>
+          </div>
+          <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <ConnectionDetail label={t(($) => $.lark.bot_app_id)} value={installation.app_id} code />
+            <ConnectionDetail label={t(($) => $.lark.bot_open_id)} value={installation.bot_open_id} code />
+            <ConnectionDetail label={t(($) => $.lark.bot_agent)} value={agentName} />
+            <ConnectionDetail label={t(($) => $.lark.bot_installer)} value={installerName} />
+            <ConnectionDetail
+              label={t(($) => $.lark.bot_region)}
+              value={installation.region === "lark" ? t(($) => $.lark.region_lark) : t(($) => $.lark.region_feishu)}
+            />
+            <ConnectionDetail
+              label={t(($) => $.lark.bot_installed_at)}
+              value={new Date(installation.installed_at).toLocaleString(locale)}
+            />
+            <ConnectionDetail
+              label={t(($) => $.lark.bot_connection_status)}
+              value={isActive ? t(($) => $.lark.bot_status_active) : t(($) => $.lark.revoked_badge)}
+            />
+          </dl>
+          <a
+            href={manageHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {t(($) => $.lark.bot_developer_console)}
+            <ExternalLink className="size-3" />
+          </a>
+        </div>
       )}
+    </div>
+  );
+}
+
+function ConnectionDetail({ label, value, code = false }: { label: string; value: string; code?: boolean }) {
+  return (
+    <div>
+      <dt className="text-micro text-muted-foreground">{label}</dt>
+      <dd className="text-caption break-words">{code ? <code className="break-all">{value}</code> : value}</dd>
     </div>
   );
 }

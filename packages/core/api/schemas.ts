@@ -3340,6 +3340,15 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   updated_at: "",
 };
 
+export const LarkInstallationBotInfoSchema = z.object({
+  installation_id: z.string(),
+  app_id: z.string(),
+  app_name: z.string(),
+  avatar_url: z.string().optional(),
+  bot_open_id: z.string(),
+  region: z.string().default("feishu"),
+}).loose();
+
 export const LarkOrganizationConfigSchema = z.object({
   installation_id: z.string(),
   enabled: z.boolean(),
@@ -3391,12 +3400,49 @@ export const LarkOrganizationSyncRunSchema = z.object({
   completed_at: z.string().nullable().optional(),
 }).loose();
 
+export const LarkOrganizationDepartmentSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  direct_member_count: z.number().int().nonnegative().default(0),
+  active_direct_member_count: z.number().int().nonnegative().default(0),
+}).loose();
+
+export const LarkOrganizationJobTitleSchema = z.object({
+  name: z.string(),
+  member_count: z.number().int().nonnegative().default(0),
+  active_member_count: z.number().int().nonnegative().default(0),
+}).loose();
+
+export const LarkOrganizationWorkspaceMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string().default(""),
+  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  managed_role: z.string().default(""),
+  disabled: z.boolean().default(false),
+  linked: z.boolean().default(false),
+  identity_conflict: z.boolean().default(false),
+  job_title: z.string().default(""),
+  departments: z.array(z.string()).catch([]).default([]),
+  feishu_active: z.boolean().nullable().optional(),
+}).loose();
+
+export const LarkOrganizationCatalogSchema = z.object({
+  snapshot_at: z.string().default(""),
+  departments: z.array(LarkOrganizationDepartmentSchema).catch([]).default([]),
+  job_titles: z.array(LarkOrganizationJobTitleSchema).catch([]).default([]),
+  total_users: z.number().int().nonnegative().default(0),
+  active_users: z.number().int().nonnegative().default(0),
+  job_title_users: z.number().int().nonnegative().default(0),
+  workspace_members: z.array(LarkOrganizationWorkspaceMemberSchema).catch([]).default([]),
+}).loose();
+
 export const LarkOrganizationResponseSchema = z.object({
   config: LarkOrganizationConfigSchema.nullable().default(null),
   mappings: z.array(LarkOrganizationMappingSchema).catch([]).default([]),
   required_scopes: z.array(z.string()).catch([]).default([]),
   requirements: z.array(z.string()).catch([]).default([]),
   sync_runs: z.array(LarkOrganizationSyncRunSchema).catch([]).default([]),
+  catalog: LarkOrganizationCatalogSchema.nullable().catch(null).default(null),
 }).loose();
 
 export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchema.extend({
@@ -3413,6 +3459,7 @@ export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
   required_scopes: [],
   requirements: [],
   sync_runs: [],
+  catalog: null,
 };
 
 export const DingTalkInstallationSchema = z.object({

@@ -24,6 +24,15 @@ export interface LarkInstallation {
   updated_at: string;
 }
 
+export interface LarkInstallationBotInfo {
+  installation_id: string;
+  app_id: string;
+  app_name: string;
+  avatar_url?: string;
+  bot_open_id: string;
+  region: "feishu" | "lark" | string;
+}
+
 export interface ListLarkInstallationsResponse {
   installations: LarkInstallation[];
   /** Whether the deployment has the at-rest secret key configured. When
@@ -128,12 +137,49 @@ export interface LarkOrganizationSyncRun {
   completed_at?: string | null;
 }
 
+export interface LarkOrganizationDepartment {
+  id: string;
+  name: string;
+  direct_member_count: number;
+  active_direct_member_count: number;
+}
+
+export interface LarkOrganizationJobTitle {
+  name: string;
+  member_count: number;
+  active_member_count: number;
+}
+
+export interface LarkOrganizationWorkspaceMember {
+  user_id: string;
+  name: string;
+  role: LarkOrganizationMemberRole;
+  managed_role: string;
+  disabled: boolean;
+  linked: boolean;
+  identity_conflict: boolean;
+  job_title: string;
+  departments: string[];
+  feishu_active?: boolean | null;
+}
+
+export interface LarkOrganizationCatalog {
+  snapshot_at: string;
+  departments: LarkOrganizationDepartment[];
+  job_titles: LarkOrganizationJobTitle[];
+  total_users: number;
+  active_users: number;
+  job_title_users: number;
+  workspace_members: LarkOrganizationWorkspaceMember[];
+}
+
 export interface LarkOrganizationResponse {
   config: LarkOrganizationConfig | null;
   mappings: LarkOrganizationMapping[];
   required_scopes: string[];
   requirements: string[];
   sync_runs: LarkOrganizationSyncRun[];
+  catalog?: LarkOrganizationCatalog | null;
 }
 
 export interface UpdateLarkOrganizationRequest {

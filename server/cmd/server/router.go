@@ -1846,6 +1846,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/lark/installations/{installationId}/bot-info", h.GetLarkInstallationBotInfo)
 					r.Get("/lark/organization", h.GetLarkOrganization)
 					r.Put("/lark/organization", h.UpdateLarkOrganization)
 					r.Post("/lark/organization/preview", h.PreviewLarkOrganization)

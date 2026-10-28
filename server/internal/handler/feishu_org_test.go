@@ -201,6 +201,63 @@ func TestFeishuOrgGetRequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestFeishuOrgCatalogIncludesDirectoryAndWorkspaceMembers(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}, {ID: "d2", Name: "Support"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_sensitive", UnionID: "on_sensitive", Email: fixture.memberEmail, Name: "Member", JobTitle: "Engineer", DepartmentIDs: []string{"d1"}, Active: true},
+			{OpenID: "ou_other", UnionID: "on_other", Email: "other@example.com", Name: "Other", DepartmentIDs: []string{"d2"}, Active: false},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetLarkOrganization status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	catalog := response.Catalog
+	if catalog == nil {
+		t.Fatal("catalog is missing")
+	}
+	if catalog.SnapshotAt == "" || catalog.TotalUsers != 2 || catalog.ActiveUsers != 1 || catalog.JobTitleUsers != 1 {
+		t.Fatalf("unexpected catalog summary: %+v", catalog)
+	}
+	if len(catalog.Departments) != 2 || len(catalog.JobTitles) != 1 || catalog.JobTitles[0].Name != "Engineer" {
+		t.Fatalf("unexpected catalog directory: %+v", catalog)
+	}
+	if len(catalog.WorkspaceMembers) != 3 {
+		t.Fatalf("workspace members = %d, want 3", len(catalog.WorkspaceMembers))
+	}
+	var linked *LarkOrganizationWorkspaceMemberResponse
+	for i := range catalog.WorkspaceMembers {
+		if catalog.WorkspaceMembers[i].UserID == fixture.memberID {
+			linked = &catalog.WorkspaceMembers[i]
+		}
+	}
+	if linked == nil || !linked.Linked || linked.IdentityConflict || linked.JobTitle != "Engineer" || len(linked.Departments) != 1 || linked.Departments[0] != "Engineering" || linked.FeishuActive == nil || !*linked.FeishuActive {
+		t.Fatalf("unexpected linked workspace member: %+v", linked)
+	}
+	for _, sensitive := range []string{"ou_sensitive", "on_sensitive", fixture.memberEmail} {
+		if strings.Contains(w.Body.String(), sensitive) {
+			t.Fatalf("catalog leaked sensitive identity %q", sensitive)
+		}
+	}
+}
+
 func TestFeishuOrgSaveDoesNotApplyRolesOrAgentAccess(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	dbfx.Exec(t, `INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by) VALUES ($1, 'member', $2, $3)`, fixture.agentID, fixture.adminID, fixture.ownerID)

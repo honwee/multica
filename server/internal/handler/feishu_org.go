@@ -59,6 +59,7 @@ type LarkOrganizationResponse struct {
 	RequiredScopes []string                          `json:"required_scopes"`
 	Requirements   []string                          `json:"requirements"`
 	SyncRuns       []LarkOrganizationSyncRunResponse `json:"sync_runs"`
+	Catalog        *LarkOrganizationCatalogResponse  `json:"catalog,omitempty"`
 }
 
 type UpdateLarkOrganizationRequest struct {
@@ -180,6 +181,20 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 			return response, err
 		}
 		response.SyncRuns = append(response.SyncRuns, converted)
+		if response.Catalog == nil && run.Mode == "preview" && run.Status == "preview" {
+			var snapshot lark.OrgSnapshot
+			if err := json.Unmarshal(run.Snapshot, &snapshot); err != nil {
+				return response, err
+			}
+			if !snapshot.Complete {
+				continue
+			}
+			catalog, err := h.buildLarkOrganizationCatalog(ctx, workspaceID, run, snapshot)
+			if err != nil {
+				return response, err
+			}
+			response.Catalog = catalog
+		}
 	}
 	return response, nil
 }
@@ -884,24 +899,10 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 		trackedUsers[userID] = struct{}{}
 		memberships = append(memberships, feishuorg.Membership{GroupID: uuidToString(row.GroupID), UserID: userID, Active: row.Active})
 	}
-	members := make([]feishuorg.Member, 0, len(memberRows))
-	for _, row := range memberRows {
-		userID := uuidToString(row.UserID)
-		managedRole := ""
-		if row.FeishuManagedRole.Valid {
-			managedRole = row.FeishuManagedRole.String
-		}
-		feishuOpenID := ""
-		if row.FeishuOpenID.Valid {
-			feishuOpenID = row.FeishuOpenID.String
-		}
-		_, hasMembership := trackedUsers[userID]
-		members = append(members, feishuorg.Member{
-			MemberID: uuidToString(row.ID), UserID: userID, Name: row.UserName, Email: row.UserEmail, Role: row.Role,
-			FeishuOpenID: feishuOpenID, ManagedRole: managedRole, Disabled: row.DisabledAt.Valid,
-			ChannelOpenIDs: row.ChannelOpenIds, UnionIDs: row.UnionIds,
-			Tracked: managedRole != "" || row.DisabledAt.Valid || hasMembership,
-		})
+	members := feishuOrgMemberInputs(memberRows)
+	for i, row := range memberRows {
+		_, hasMembership := trackedUsers[uuidToString(row.UserID)]
+		members[i].Tracked = members[i].ManagedRole != "" || row.DisabledAt.Valid || hasMembership
 	}
 	plan, err := feishuorg.BuildPlan(snapshot, mappings, members, memberships)
 	if err != nil {
