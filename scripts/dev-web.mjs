@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,10 +12,12 @@ export function normalizeWebDevArgs(args) {
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
+  const nextBinary = webRequire.resolve("next/dist/bin/next");
   const child = spawn(
-    "pnpm",
-    ["--filter", "@multica/web", "exec", "next", "dev", "--webpack", ...normalizeWebDevArgs(process.argv.slice(2))],
-    { stdio: "inherit" },
+    process.execPath,
+    [nextBinary, "dev", "--webpack", ...normalizeWebDevArgs(process.argv.slice(2))],
+    { cwd: fileURLToPath(new URL("../apps/web/", import.meta.url)), stdio: "inherit" },
   );
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => child.kill(signal));
