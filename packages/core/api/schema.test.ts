@@ -1689,6 +1689,7 @@ describe("workspace subscription contract", () => {
           snapshot_at: "2026-10-28T00:00:00Z",
           departments: [{ id: "dep-1", name: "Engineering", direct_member_count: 2, active_direct_member_count: 1 }],
           job_titles: [{ name: "Engineer", member_count: 1, active_member_count: 1 }],
+          users: [{ union_id: "union-ada", name: "Ada", job_title: "Engineer", departments: ["Engineering"], active: true, workspace_member: true }],
           total_users: 2,
           active_users: 1,
           job_title_users: 1,
@@ -1704,6 +1705,8 @@ describe("workspace subscription contract", () => {
       expect(response.catalog?.departments[0]?.name).toBe("Engineering");
       expect(response.catalog?.workspace_members[0]?.linked).toBe(true);
       expect(response.catalog?.total_users).toBe(2);
+      expect(response.catalog?.users[0]?.union_id).toBe("union-ada");
+      expect(response.catalog?.users[0]?.workspace_member).toBe(true);
 
       stubFetchJson({
         config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },

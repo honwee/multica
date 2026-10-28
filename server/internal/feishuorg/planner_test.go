@@ -479,6 +479,50 @@ func TestBuildPlanProtectsLastActiveOwner(t *testing.T) {
 	})
 }
 
+func TestBuildPlanUserMappings(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}},
+		Users:       []lark.OrgUser{{UnionID: "union-alice", OpenID: "open-alice", Name: "Alice", DepartmentIDs: []string{"d1"}, Active: true}},
+	}
+	mappings := []Mapping{
+		{GroupID: "g-user", Kind: "user", ExternalID: "union-alice", ExternalName: "Alice", MemberRole: "admin"},
+		{GroupID: "g-dept", Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: "member"},
+	}
+	member := Member{MemberID: "m1", UserID: "u1", Name: "Alice", Role: "member", UnionIDs: []string{"union-alice"}, Tracked: true}
+	got, err := BuildPlan(snapshot, mappings, []Member{member}, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	want := []Change{
+		groupChange("u1", "Alice", "group_joined", "g-dept", "Engineering"),
+		groupChange("u1", "Alice", "group_joined", "g-user", "Alice"),
+		{UserID: "u1", UserName: "Alice", Action: "role_changed", Before: "member", After: "admin"},
+	}
+	if !reflect.DeepEqual(got.Changes, want) {
+		t.Fatalf("BuildPlan() changes = %#v, want %#v", got.Changes, want)
+	}
+	if len(got.RoleAssignments) != 1 || got.RoleAssignments[0].Role != "admin" {
+		t.Fatalf("BuildPlan() role assignments = %#v, want admin", got.RoleAssignments)
+	}
+}
+
+func TestBuildPlanUserMappingDoesNotInvite(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete: true,
+		Users:    []lark.OrgUser{{UnionID: "union-new", OpenID: "open-new", Name: "New Person", Active: true}},
+	}
+	mapping := Mapping{GroupID: "g-user", Kind: "user", ExternalID: "union-new", ExternalName: "New Person", MemberRole: "member"}
+	member := Member{MemberID: "m1", UserID: "u1", Name: "Existing", Role: "member", UnionIDs: []string{"union-other"}, Tracked: true}
+	got, err := BuildPlan(snapshot, []Mapping{mapping}, []Member{member}, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	if len(got.Changes) != 0 || len(got.RoleAssignments) != 0 {
+		t.Fatalf("user mapping must not invite: changes=%#v role assignments=%#v", got.Changes, got.RoleAssignments)
+	}
+}
+
 func groupChange(userID, userName, action, groupID, groupName string) Change {
 	change := Change{UserID: userID, UserName: userName, Action: action, GroupID: groupID, GroupName: groupName}
 	if action == "group_joined" {

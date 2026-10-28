@@ -273,8 +273,8 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		mapping.Kind = strings.TrimSpace(mapping.Kind)
 		mapping.ExternalID = strings.TrimSpace(mapping.ExternalID)
 		mapping.ExternalName = strings.TrimSpace(mapping.ExternalName)
-		if mapping.Kind != "department" && mapping.Kind != "job_title" {
-			writeError(w, http.StatusBadRequest, "mapping kind must be 'department' or 'job_title'")
+		if mapping.Kind != "department" && mapping.Kind != "job_title" && mapping.Kind != "user" {
+			writeError(w, http.StatusBadRequest, "mapping kind must be 'department', 'job_title', or 'user'")
 			return
 		}
 		if mapping.ExternalID == "" {

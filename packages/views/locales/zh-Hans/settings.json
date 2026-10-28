@@ -958,14 +958,14 @@
     "organization": {
       "title": "组织权限",
       "description": "将飞书部门和职务映射到工作区角色与智能体。",
-      "console_description": "通过已连接的飞书应用，按部门和职务管理工作区访问权限。",
+      "console_description": "读取飞书部门和职务，配置 Multica 工作区访问权限。",
       "connection_connected": "已连接",
       "read_only": "仅工作区所有者和管理员可修改组织权限。",
       "loading": "正在加载组织权限…",
       "load_error": "无法加载组织权限。",
       "source": "来源 Bot",
       "no_active_installations": "没有可用的已启用飞书来源 Bot。",
-      "enabled": "同步组织权限",
+      "enabled": "同步组织信息",
       "enabled_yes": "已开启",
       "enabled_no": "已关闭",
       "mappings": "映射",
@@ -1042,8 +1042,8 @@
       "rule_edit_title": "编辑权限规则",
       "rule_dialog_description": "先加入规则列表，再保存配置并核对预览。",
       "rule_save": "保存规则",
-      "source_required": "请选择部门或职务。",
-      "catalog_search_placeholder": "搜索部门或职务",
+      "source_required": "请选择部门、职务或成员。",
+      "catalog_search_placeholder": "搜索部门、职务或成员",
       "catalog_empty": "没有匹配的来源",
       "agent_scope_note": "可选。授权会与现有访问范围叠加，不会收回工作区已有权限。",
       "preview_add_access": "新增访问",
@@ -1087,7 +1087,10 @@
       "history_empty": "暂无同步记录。",
       "history_mode_preview": "预览",
       "history_mode_replay": "重放",
-      "history_mode_apply": "应用"
+      "history_mode_apply": "应用",
+      "user": "指定成员",
+      "workspace_member_yes": "已加入工作区",
+      "workspace_member_no": "未加入工作区，需先邀请"
     }
   },
   "composio": {

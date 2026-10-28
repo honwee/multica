@@ -248,6 +248,7 @@ export type {
   LarkOrganizationAgentChange,
   LarkOrganizationSyncRun,
   LarkOrganizationCatalog,
+  LarkOrganizationUser,
   LarkOrganizationDepartment,
   LarkOrganizationJobTitle,
   LarkOrganizationWorkspaceMember,

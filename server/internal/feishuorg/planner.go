@@ -219,9 +219,13 @@ func validateMappings(snapshot lark.OrgSnapshot, mappings []Mapping, warnings ma
 		}
 	}
 	jobTitles := make(map[string]struct{})
+	userUnionIDs := make(map[string]struct{})
 	for _, user := range snapshot.Users {
 		if user.JobTitle != "" {
 			jobTitles[user.JobTitle] = struct{}{}
+		}
+		if user.UnionID != "" {
+			userUnionIDs[user.UnionID] = struct{}{}
 		}
 	}
 
@@ -233,6 +237,8 @@ func validateMappings(snapshot lark.OrgSnapshot, mappings []Mapping, warnings ma
 			_, known = departments[mapping.ExternalID]
 		case "job_title":
 			_, known = jobTitles[mapping.ExternalID]
+		case "user":
+			_, known = userUnionIDs[mapping.ExternalID]
 		default:
 			addWarning(warnings, fmt.Sprintf("unknown mapping kind %q for group %q; mapping has no permissions", mapping.Kind, mapping.GroupID))
 			continue
@@ -368,6 +374,8 @@ func desiredAccess(user lark.OrgUser, mappings []Mapping) (map[string]struct{}, 
 			}
 		case "job_title":
 			matched = user.JobTitle == mapping.ExternalID
+		case "user":
+			matched = user.UnionID == mapping.ExternalID
 		}
 		if !matched {
 			continue

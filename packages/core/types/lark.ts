@@ -163,10 +163,20 @@ export interface LarkOrganizationWorkspaceMember {
   feishu_active?: boolean | null;
 }
 
+export interface LarkOrganizationUser {
+  union_id: string;
+  name: string;
+  job_title: string;
+  departments: string[];
+  active: boolean;
+  workspace_member: boolean;
+}
+
 export interface LarkOrganizationCatalog {
   snapshot_at: string;
   departments: LarkOrganizationDepartment[];
   job_titles: LarkOrganizationJobTitle[];
+  users: LarkOrganizationUser[];
   total_users: number;
   active_users: number;
   job_title_users: number;

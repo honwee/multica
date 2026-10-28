@@ -963,7 +963,7 @@
       "load_error": "組織権限を読み込めませんでした。",
       "source": "ソースボット",
       "no_active_installations": "有効な Feishu ソースボットがありません。",
-      "enabled": "組織権限を同期",
+      "enabled": "組織情報を同期",
       "enabled_yes": "オン",
       "enabled_no": "オフ",
       "mappings": "マッピング",
@@ -1013,7 +1013,7 @@
       "apply_confirm_description": "ワークスペースのロールとエージェントの関連付けがこのプレビューどおりに更新されます。",
       "apply_confirm_cancel": "キャンセル",
       "stale_preview": "設定が変更されました。適用する前に再度プレビューしてください。",
-      "console_description": "接続済みの Feishu アプリを使って、部署や役職からワークスペースのアクセス権を管理します。",
+      "console_description": "Feishu の部署・役職を読み取り、Multica ワークスペースのアクセス権を設定します。",
       "connection_connected": "接続済み",
       "no_agent_grant": "エージェント未割り当て",
       "sync_now": "同期してプレビュー",
@@ -1042,8 +1042,8 @@
       "rule_edit_title": "権限ルールを編集",
       "rule_dialog_description": "ルール一覧に追加してから、設定を保存し、プレビューを確認してください。",
       "rule_save": "ルールを保存",
-      "source_required": "部署または役職を選択してください。",
-      "catalog_search_placeholder": "部署・役職を検索",
+      "source_required": "部署・役職・メンバーを選択してください。",
+      "catalog_search_placeholder": "部署・役職・メンバーを検索",
       "catalog_empty": "一致するソースがありません",
       "agent_scope_note": "任意です。既存のアクセス権に追加され、ワークスペース全体の権限は削除されません。",
       "preview_add_access": "新しいアクセス",
@@ -1087,7 +1087,10 @@
       "history_empty": "同期履歴はまだありません。",
       "history_mode_preview": "プレビュー",
       "history_mode_replay": "再生成",
-      "history_mode_apply": "適用"
+      "history_mode_apply": "適用",
+      "user": "個人",
+      "workspace_member_yes": "ワークスペース参加中",
+      "workspace_member_no": "ワークスペース未参加（招待が必要）"
     }
   },
   "composio": {

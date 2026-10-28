@@ -3426,10 +3426,20 @@ export const LarkOrganizationWorkspaceMemberSchema = z.object({
   feishu_active: z.boolean().nullable().optional(),
 }).loose();
 
+export const LarkOrganizationUserSchema = z.object({
+  union_id: z.string(),
+  name: z.string().default(""),
+  job_title: z.string().default(""),
+  departments: z.array(z.string()).catch([]).default([]),
+  active: z.boolean().default(false),
+  workspace_member: z.boolean().default(false),
+}).loose();
+
 export const LarkOrganizationCatalogSchema = z.object({
   snapshot_at: z.string().default(""),
   departments: z.array(LarkOrganizationDepartmentSchema).catch([]).default([]),
   job_titles: z.array(LarkOrganizationJobTitleSchema).catch([]).default([]),
+  users: z.array(LarkOrganizationUserSchema).catch([]).default([]),
   total_users: z.number().int().nonnegative().default(0),
   active_users: z.number().int().nonnegative().default(0),
   job_title_users: z.number().int().nonnegative().default(0),

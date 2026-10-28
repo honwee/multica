@@ -368,12 +368,13 @@ export function LarkOrganizationMapping({
                           <TableCell className="whitespace-normal">
                             <div className="space-y-1">
                               <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline">{mapping.kind === "department" ? t(($) => $.lark.organization.department) : mapping.kind === "job_title" ? t(($) => $.lark.organization.job_title) : mapping.kind}</Badge>
+                                <Badge variant="outline">{mapping.kind === "department" ? t(($) => $.lark.organization.department) : mapping.kind === "job_title" ? t(($) => $.lark.organization.job_title) : mapping.kind === "user" ? t(($) => $.lark.organization.user) : mapping.kind}</Badge>
                                 <span className="font-medium">{source.name}</span>
                               </div>
                               <div className="text-caption text-muted-foreground">
                                 {source.count !== null ? t(($) => $.lark.organization.source_member, { count: source.count }) : ""}
                                 {source.missing && <span className="text-amber-600">{t(($) => $.lark.organization.source_missing)}</span>}
+                                {source.workspaceMember === false && <span className="ml-2 text-amber-600">{t(($) => $.lark.organization.workspace_member_no)}</span>}
                               </div>
                             </div>
                           </TableCell>

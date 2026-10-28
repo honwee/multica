@@ -41,6 +41,7 @@ type LarkOrganizationCatalogResponse struct {
 	SnapshotAt       string                                    `json:"snapshot_at"`
 	Departments      []LarkOrganizationDepartmentResponse      `json:"departments"`
 	JobTitles        []LarkOrganizationJobTitleResponse        `json:"job_titles"`
+	Users            []LarkOrganizationUserResponse            `json:"users"`
 	TotalUsers       int                                       `json:"total_users"`
 	ActiveUsers      int                                       `json:"active_users"`
 	JobTitleUsers    int                                       `json:"job_title_users"`
@@ -59,6 +60,7 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 		SnapshotAt:       timestampToString(run.CreatedAt),
 		Departments:      make([]LarkOrganizationDepartmentResponse, 0, len(snapshot.Departments)),
 		JobTitles:        make([]LarkOrganizationJobTitleResponse, 0),
+		Users:            buildLarkOrganizationUsers(snapshot, matches, blocked),
 		TotalUsers:       len(snapshot.Users),
 		WorkspaceMembers: make([]LarkOrganizationWorkspaceMemberResponse, 0, len(members)),
 	}

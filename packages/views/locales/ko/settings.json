@@ -1232,7 +1232,7 @@
       "load_error": "조직 권한을 불러오지 못했어요.",
       "source": "소스 봇",
       "no_active_installations": "활성 Feishu 소스 봇이 없어요.",
-      "enabled": "조직 권한 동기화",
+      "enabled": "조직 정보 동기화",
       "enabled_yes": "켜짐",
       "enabled_no": "꺼짐",
       "mappings": "매핑",
@@ -1282,7 +1282,7 @@
       "apply_confirm_description": "워크스페이스 역할과 에이전트 연결이 이 미리보기에 맞게 업데이트돼요.",
       "apply_confirm_cancel": "취소",
       "stale_preview": "설정이 변경되었어요. 적용하기 전에 다시 미리보세요.",
-      "console_description": "연결된 Feishu 앱으로 부서와 직책을 기준으로 워크스페이스 접근 권한을 관리합니다.",
+      "console_description": "Feishu 부서와 직책을 읽어 Multica 워크스페이스 접근 권한을 설정합니다.",
       "connection_connected": "연결됨",
       "no_agent_grant": "에이전트 미할당",
       "sync_now": "동기화 및 미리보기",
@@ -1311,8 +1311,8 @@
       "rule_edit_title": "권한 규칙 편집",
       "rule_dialog_description": "규칙 목록에 추가한 후 설정을 저장하고 미리보기를 검토하세요.",
       "rule_save": "규칙 저장",
-      "source_required": "부서 또는 직책을 선택하세요.",
-      "catalog_search_placeholder": "부서 또는 직책 검색",
+      "source_required": "부서, 직책 또는 구성원을 선택하세요.",
+      "catalog_search_placeholder": "부서, 직책 또는 구성원 검색",
       "catalog_empty": "일치하는 소스가 없습니다",
       "agent_scope_note": "선택 사항입니다. 기존 접근 권한에 추가되며, 워크스페이스 전체 권한은 제거되지 않습니다.",
       "preview_add_access": "새 접근 권한",
@@ -1356,7 +1356,10 @@
       "history_empty": "동기화 기록이 없습니다.",
       "history_mode_preview": "미리보기",
       "history_mode_replay": "재생성",
-      "history_mode_apply": "적용"
+      "history_mode_apply": "적용",
+      "user": "개인",
+      "workspace_member_yes": "워크스페이스 구성원",
+      "workspace_member_no": "워크스페이스 미참여(초대 필요)"
     }
   },
   "composio": {

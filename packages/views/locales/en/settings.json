@@ -963,14 +963,14 @@
     "organization": {
       "title": "Organization permissions",
       "description": "Map Feishu departments and job titles to workspace roles and agents.",
-      "console_description": "Use a connected Feishu app to manage workspace access from departments and job titles.",
+      "console_description": "Read Feishu departments and job titles to configure Multica workspace access.",
       "connection_connected": "Connected",
       "read_only": "Only workspace owners and admins can change organization permissions.",
       "loading": "Loading organization permissions…",
       "load_error": "Could not load organization permissions.",
       "source": "Source bot",
       "no_active_installations": "No active Feishu source bot is available.",
-      "enabled": "Sync organization permissions",
+      "enabled": "Sync organization information",
       "enabled_yes": "On",
       "enabled_no": "Off",
       "mappings": "Mappings",
@@ -1048,8 +1048,8 @@
       "rule_edit_title": "Edit permission rule",
       "rule_dialog_description": "Save to the rule list first, then save the configuration and review the preview.",
       "rule_save": "Save rule",
-      "source_required": "Select a department or job title.",
-      "catalog_search_placeholder": "Search departments or job titles",
+      "source_required": "Select a department, job title, or person.",
+      "catalog_search_placeholder": "Search departments, job titles, or people",
       "catalog_empty": "No matching sources",
       "agent_scope_note": "Optional. Grants are added to existing access and do not remove workspace-wide access.",
       "preview_add_access": "New access",
@@ -1093,7 +1093,10 @@
       "history_empty": "No sync history yet.",
       "history_mode_preview": "Preview",
       "history_mode_replay": "Replay",
-      "history_mode_apply": "Apply"
+      "history_mode_apply": "Apply",
+      "user": "Individual",
+      "workspace_member_yes": "In workspace",
+      "workspace_member_no": "Not in workspace — invite required"
     }
   },
   "composio": {

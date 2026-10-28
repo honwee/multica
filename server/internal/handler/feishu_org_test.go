@@ -251,7 +251,19 @@ func TestFeishuOrgCatalogIncludesDirectoryAndWorkspaceMembers(t *testing.T) {
 	if linked == nil || !linked.Linked || linked.IdentityConflict || linked.JobTitle != "Engineer" || len(linked.Departments) != 1 || linked.Departments[0] != "Engineering" || linked.FeishuActive == nil || !*linked.FeishuActive {
 		t.Fatalf("unexpected linked workspace member: %+v", linked)
 	}
-	for _, sensitive := range []string{"ou_sensitive", "on_sensitive", fixture.memberEmail} {
+	if len(catalog.Users) != 2 {
+		t.Fatalf("catalog users = %d, want 2", len(catalog.Users))
+	}
+	var directoryUser *LarkOrganizationUserResponse
+	for i := range catalog.Users {
+		if catalog.Users[i].UnionID == "on_sensitive" {
+			directoryUser = &catalog.Users[i]
+		}
+	}
+	if directoryUser == nil || !directoryUser.WorkspaceMember || directoryUser.JobTitle != "Engineer" {
+		t.Fatalf("unexpected catalog user: %+v", directoryUser)
+	}
+	for _, sensitive := range []string{"ou_sensitive", fixture.memberEmail} {
 		if strings.Contains(w.Body.String(), sensitive) {
 			t.Fatalf("catalog leaked sensitive identity %q", sensitive)
 		}
@@ -316,6 +328,32 @@ func TestFeishuOrgSaveDoesNotApplyRolesOrAgentAccess(t *testing.T) {
 	}
 	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_group WHERE workspace_id = $1 AND configured`, fixture.workspaceID); count != 0 {
 		t.Fatal("removed mapping group is still configured")
+	}
+}
+
+func TestFeishuOrgSaveUserMapping(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	mapping := LarkOrganizationMappingResponse{
+		Kind: "user", ExternalID: "on_member", ExternalName: "Member",
+		MemberRole: feishuOrgRole("admin"), AgentIDs: []string{fixture.agentID},
+	}
+	w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping})
+	if w.Code != http.StatusOK {
+		t.Fatalf("save user mapping status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode save response: %v", err)
+	}
+	if len(response.Mappings) != 1 || response.Mappings[0].Kind != "user" || response.Mappings[0].ExternalID != "on_member" {
+		t.Fatalf("unexpected saved user mapping: %+v", response.Mappings)
+	}
+	var kind, externalID, role string
+	if err := testPool.QueryRow(context.Background(), `SELECT g.kind, g.external_id, r.role FROM feishu_org_group g JOIN feishu_org_role_mapping r ON r.group_id = g.id WHERE g.workspace_id = $1 AND g.configured`, fixture.workspaceID).Scan(&kind, &externalID, &role); err != nil {
+		t.Fatalf("load saved user mapping: %v", err)
+	}
+	if kind != "user" || externalID != "on_member" || role != "admin" {
+		t.Fatalf("saved user mapping = %q %q %q", kind, externalID, role)
 	}
 }
 

@@ -36,6 +36,10 @@ interface SourceOption {
   count: number | null;
   duplicate: boolean;
   missing?: boolean;
+  workspaceMember?: boolean;
+  active?: boolean;
+  jobTitle?: string;
+  departments?: string[];
 }
 
 export function LarkOrganizationRuleEditor({
@@ -89,7 +93,18 @@ export function LarkOrganizationRuleEditor({
             count: item.member_count,
             duplicate: false,
           }))
-        : [];
+        : kind === "user"
+          ? (catalog?.users ?? []).map((item) => ({
+              id: item.union_id,
+              name: item.name,
+              count: null,
+              duplicate: (catalog?.users.filter((other) => other.name === item.name).length ?? 0) > 1,
+              workspaceMember: item.workspace_member,
+              active: item.active,
+              jobTitle: item.job_title,
+              departments: item.departments,
+            }))
+          : [];
     if (mapping && mapping.kind === kind && !items.some((item) => item.id === mapping.external_id)) {
       items.push({
         id: mapping.external_id,
@@ -148,6 +163,7 @@ export function LarkOrganizationRuleEditor({
               items={[
                 { value: "department", label: t(($) => $.lark.organization.department) },
                 { value: "job_title", label: t(($) => $.lark.organization.job_title) },
+                { value: "user", label: t(($) => $.lark.organization.user) },
               ]}
               value={kind}
               onValueChange={(value) => {
@@ -162,6 +178,7 @@ export function LarkOrganizationRuleEditor({
               <SelectContent>
                 <SelectItem value="department">{t(($) => $.lark.organization.department)}</SelectItem>
                 <SelectItem value="job_title">{t(($) => $.lark.organization.job_title)}</SelectItem>
+                <SelectItem value="user">{t(($) => $.lark.organization.user)}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -213,6 +230,14 @@ export function LarkOrganizationRuleEditor({
               >
                 <span className="min-w-0">
                   <span className="block truncate text-body">{source.name}</span>
+                  {source.jobTitle && <span className="block text-caption text-muted-foreground">{source.jobTitle}</span>}
+                  {!!source.departments?.length && <span className="block text-micro text-muted-foreground">{source.departments.join("、")}</span>}
+                  {kind === "user" && (
+                    <span className={source.workspaceMember ? "block text-caption text-muted-foreground" : "block text-caption text-amber-600"}>
+                      {source.workspaceMember ? t(($) => $.lark.organization.workspace_member_yes) : t(($) => $.lark.organization.workspace_member_no)}
+                    </span>
+                  )}
+                  {source.active === false && <span className="block text-caption text-amber-600">{t(($) => $.lark.organization.members_feishu_inactive)}</span>}
                   {source.duplicate && <span className="block text-micro text-muted-foreground">{`ID ···${source.id.slice(-6)}`}</span>}
                   {source.missing && <span className="block text-micro text-amber-600">{t(($) => $.lark.organization.source_missing)}</span>}
                 </span>

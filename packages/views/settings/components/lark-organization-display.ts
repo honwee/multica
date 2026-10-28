@@ -47,7 +47,7 @@ export function formatOrganizationValue(value: unknown): string {
 export function organizationSourceSummary(
   mapping: LarkOrganizationMapping,
   catalog: LarkOrganizationCatalog | null | undefined,
-): { name: string; count: number | null; duplicate: boolean; missing: boolean } {
+): { name: string; count: number | null; duplicate: boolean; missing: boolean; workspaceMember?: boolean } {
   if (mapping.kind === "department") {
     const source = catalog?.departments.find((item) => item.id === mapping.external_id);
     const duplicates = catalog?.departments.filter((item) => item.name === source?.name).length ?? 0;
@@ -65,6 +65,16 @@ export function organizationSourceSummary(
       count: source?.member_count ?? null,
       duplicate: false,
       missing: !!catalog && !source,
+    };
+  }
+  if (mapping.kind === "user") {
+    const source = catalog?.users.find((item) => item.union_id === mapping.external_id);
+    return {
+      name: mapping.external_name || source?.name || mapping.external_id,
+      count: null,
+      duplicate: false,
+      missing: !!catalog && !source,
+      workspaceMember: source?.workspace_member,
     };
   }
   return {

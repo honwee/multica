@@ -968,7 +968,7 @@
       "load_error": "Impossible de charger les autorisations organisationnelles.",
       "source": "Bot source",
       "no_active_installations": "Aucun bot source Feishu actif n’est disponible.",
-      "enabled": "Synchroniser les autorisations organisationnelles",
+      "enabled": "Synchroniser les informations d’organisation",
       "enabled_yes": "Activé",
       "enabled_no": "Désactivé",
       "mappings": "Associations",
@@ -1018,7 +1018,7 @@
       "apply_confirm_description": "Les rôles de l’espace de travail et les associations d’agents seront mis à jour selon cet aperçu.",
       "apply_confirm_cancel": "Annuler",
       "stale_preview": "La configuration a changé. Créez un nouvel aperçu avant d’appliquer les changements.",
-      "console_description": "Utilisez une application Feishu connectée pour gérer l’accès à l’espace de travail selon les départements et fonctions.",
+      "console_description": "Lisez les départements et fonctions Feishu pour configurer l’accès à l’espace Multica.",
       "connection_connected": "Connecté",
       "no_agent_grant": "Aucun agent attribué",
       "sync_now": "Synchroniser et prévisualiser",
@@ -1047,8 +1047,8 @@
       "rule_edit_title": "Modifier la règle d’accès",
       "rule_dialog_description": "Ajoutez d’abord la règle à la liste, puis enregistrez la configuration et vérifiez l’aperçu.",
       "rule_save": "Enregistrer la règle",
-      "source_required": "Sélectionnez un département ou une fonction.",
-      "catalog_search_placeholder": "Rechercher un département ou une fonction",
+      "source_required": "Sélectionnez un département, une fonction ou une personne.",
+      "catalog_search_placeholder": "Rechercher un département, une fonction ou une personne",
       "catalog_empty": "Aucune source correspondante",
       "agent_scope_note": "Facultatif. Les autorisations s’ajoutent à l’accès existant sans supprimer l’accès à l’espace.",
       "preview_add_access": "Nouvel accès",
@@ -1092,7 +1092,10 @@
       "history_empty": "Aucun historique de synchronisation.",
       "history_mode_preview": "Aperçu",
       "history_mode_replay": "Recalcul",
-      "history_mode_apply": "Application"
+      "history_mode_apply": "Application",
+      "user": "Individu",
+      "workspace_member_yes": "Dans l’espace",
+      "workspace_member_no": "Hors de l’espace — invitation requise"
     }
   },
   "composio": {

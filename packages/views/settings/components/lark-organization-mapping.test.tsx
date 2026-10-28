@@ -118,6 +118,10 @@ function baseOrganization() {
         { id: "dep-3", name: "Support", direct_member_count: 1, active_direct_member_count: 1 },
       ],
       job_titles: [{ name: "Engineer", member_count: 1, active_member_count: 1 }],
+      users: [
+        { union_id: "union-ada", name: "Ada", job_title: "Engineer", departments: ["Engineering"], active: true, workspace_member: true },
+        { union_id: "union-grace", name: "Grace", job_title: "Support", departments: ["Support"], active: true, workspace_member: false },
+      ],
       total_users: 2,
       active_users: 2,
       job_title_users: 1,
@@ -203,6 +207,64 @@ describe("LarkOrganizationMapping", () => {
       }],
     });
     expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["lark", "workspace-1", "organization"] });
+  }, 30000);
+
+  it("adds an individual who is not a workspace member without inviting them", async () => {
+    const user = userEvent.setup();
+    renderUI();
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_add }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("combobox", { name: enSettings.lark.organization.mapping_kind }));
+    await user.click(await screen.findByRole("option", { name: enSettings.lark.organization.user }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: enSettings.lark.organization.rule_source }), {
+      target: { value: "Grace" },
+    });
+    await user.click(within(dialog).getByRole("option", { name: /Grace/ }));
+    await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
+
+    expect(await screen.findAllByText("Grace")).not.toHaveLength(0);
+    expect(screen.getByText(enSettings.lark.organization.workspace_member_no)).toBeTruthy();
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockPreview).not.toHaveBeenCalled();
+  }, 30000);
+
+  it("saves an individual rule with its role and agent selection", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockResolvedValue(baseOrganization());
+    renderUI();
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_add }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("combobox", { name: enSettings.lark.organization.mapping_kind }));
+    await user.click(await screen.findByRole("option", { name: enSettings.lark.organization.user }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: enSettings.lark.organization.rule_source }), {
+      target: { value: "Ada" },
+    });
+    await user.click(within(dialog).getByRole("option", { name: /Ada/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "Review Bot" }));
+    await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
+      installation_id: installation.id,
+      enabled: true,
+      mappings: [
+        {
+          kind: "department",
+          external_id: "dep-1",
+          external_name: "Engineering",
+          member_role: null,
+          agent_ids: [],
+        },
+        {
+          kind: "user",
+          external_id: "union-ada",
+          external_name: "Ada",
+          member_role: "member",
+          agent_ids: ["agent-1"],
+        },
+      ],
+    });
   }, 30000);
 
   it("filters catalog sources before adding a rule", async () => {
