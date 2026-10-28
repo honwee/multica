@@ -29,6 +29,14 @@ const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
+const mockOrganizationMapping = vi.hoisted(() => vi.fn());
+
+vi.mock("./lark-organization-mapping", () => ({
+  LarkOrganizationMapping: (props: unknown) => {
+    mockOrganizationMapping(props);
+    return <div data-testid="lark-organization-mapping" />;
+  },
+}));
 
 type MemberRole = "owner" | "admin" | "member" | "guest";
 
@@ -788,5 +796,37 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText(/Unknown Agent/)).toBeTruthy();
     // Disconnect stays reachable so the orphan row can be cleaned up.
     expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+  });
+
+  it.each(["owner", "admin"] as const)("%s can view organization permissions", (role) => {
+    membersRef.current = [{ user_id: "user-1", role }];
+    render(<LarkTab />, { wrapper: I18nWrapper });
+    expect(screen.getByTestId("lark-organization-mapping")).toBeTruthy();
+    expect(mockOrganizationMapping).toHaveBeenCalled();
+  });
+
+  it("keeps connected bots visible but does not mount organization permissions for a plain member", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    agentNameByIdRef.current = new Map([["agent-1", "Bohan's Helper"]]);
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_aa941499d4f95cd9",
+        bot_open_id: "ou_abc123",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Bohan's Helper")).toBeTruthy();
+    expect(screen.queryByTestId("lark-organization-mapping")).toBeNull();
+    expect(mockOrganizationMapping).not.toHaveBeenCalled();
   });
 });

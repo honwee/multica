@@ -56,8 +56,9 @@ import { LarkOrganizationMapping } from "./lark-organization-mapping";
 const LARK_INTL_CONNECT_ENABLED: boolean = false;
 
 // LarkTab is the workspace settings panel for Lark Bot installations and
-// organization permissions. Listing is member-visible; writes are admin-only (the
-// backend enforces it; the UI hides the button for non-admins to match).
+// organization permissions. Bot listing stays member-visible. Organization
+// configuration and previews are restricted to workspace owners/admins in
+// both this panel and the backend API.
 //
 // Adding a new installation flows through the Agent detail page: the
 // install path is per-agent (each Multica Agent gets exactly one Bot —
@@ -176,7 +177,9 @@ export function LarkTab() {
         </section>
       )}
 
-      <LarkOrganizationMapping installations={installations} canManage={canManage} />
+      {canManage && (
+        <LarkOrganizationMapping installations={installations} canManage={canManage} />
+      )}
 
       <AlertDialog
         open={!!disconnectTarget}

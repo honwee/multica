@@ -1835,7 +1835,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
-					r.Get("/lark/organization", h.GetLarkOrganization)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
@@ -1847,6 +1846,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/lark/organization", h.GetLarkOrganization)
 					r.Put("/lark/organization", h.UpdateLarkOrganization)
 					r.Post("/lark/organization/preview", h.PreviewLarkOrganization)
 					r.Post("/lark/organization/sync/{runId}/apply", h.ApplyLarkOrganizationSync)

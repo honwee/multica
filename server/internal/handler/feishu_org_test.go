@@ -157,7 +157,7 @@ func wireFeishuOrgAPIClient(t *testing.T, client *fakeFeishuOrgAPIClient) {
 
 func TestFeishuOrgGetEmptyResponse(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
-	req := feishuOrgRequest(fixture.memberID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
 	w := httptest.NewRecorder()
 	testHandler.GetLarkOrganization(w, req)
 	if w.Code != http.StatusOK {
@@ -172,6 +172,32 @@ func TestFeishuOrgGetEmptyResponse(t *testing.T) {
 	}
 	if len(response.RequiredScopes) != len(lark.RequiredOrgScopes) {
 		t.Fatalf("required scopes = %v, want %v", response.RequiredScopes, lark.RequiredOrgScopes)
+	}
+}
+
+func TestFeishuOrgGetRequiresAdmin(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	tests := []struct {
+		name   string
+		userID string
+		want   int
+	}{
+		{name: "owner", userID: fixture.ownerID, want: http.StatusOK},
+		{name: "admin", userID: fixture.adminID, want: http.StatusOK},
+		{name: "member", userID: fixture.memberID, want: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := feishuOrgRequest(tt.userID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+			w := httptest.NewRecorder()
+			testHandler.GetLarkOrganization(w, req)
+			if w.Code != tt.want {
+				t.Fatalf("GetLarkOrganization status = %d, want %d; body=%s", w.Code, tt.want, w.Body.String())
+			}
+		})
 	}
 }
 

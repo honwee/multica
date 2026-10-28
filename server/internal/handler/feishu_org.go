@@ -98,11 +98,11 @@ func (h *Handler) feishuOrgMutationActor(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) GetLarkOrganization(w http.ResponseWriter, r *http.Request) {
-	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	actor, ok := h.feishuOrgMutationActor(w, r)
 	if !ok {
 		return
 	}
-	response, err := h.loadLarkOrganizationResponse(r.Context(), workspaceID)
+	response, err := h.loadLarkOrganizationResponse(r.Context(), actor.workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load organization sync configuration")
 		return
