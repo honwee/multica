@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @multica/web exec next dev --webpack",
+    "dev": "node scripts/dev-web.mjs",
     "dev:web": "turbo dev --filter=@multica/web",
     "dev:docs": "turbo dev --filter=@multica/docs",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
