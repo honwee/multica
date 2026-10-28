@@ -28,6 +28,16 @@ type InstallationParams struct {
 	Region          Region // which cloud (feishu/lark); empty defaults to feishu
 }
 
+// WorkspaceConnectionParams contains application credentials without a Bot route.
+type WorkspaceConnectionParams struct {
+	WorkspaceID     pgtype.UUID
+	AppID           string
+	AppSecret       string
+	TenantKey       string
+	InstallerUserID pgtype.UUID
+	Region          Region
+}
+
 // InstallationService creates, refreshes and revokes per-agent Lark
 // installations. It owns the at-rest encryption of `app_secret` so
 // that no caller (and no test fixture) can accidentally insert a row
@@ -75,6 +85,32 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		Region:             string(RegionOrDefault(string(p.Region))),
 	})
 }
+
+// UpsertWorkspaceConnection stores application credentials without requiring a
+// Bot route. Existing agent bindings and installation IDs are preserved.
+func (s *InstallationService) UpsertWorkspaceConnection(ctx context.Context, p WorkspaceConnectionParams) (Installation, error) {
+	if err := validateWorkspaceConnectionParams(p); err != nil {
+		return Installation{}, err
+	}
+	sealed, err := s.box.Seal([]byte(p.AppSecret))
+	if err != nil {
+		return Installation{}, fmt.Errorf("encrypt app_secret: %w", err)
+	}
+	installation, err := s.queries.UpsertWorkspaceLarkConnection(ctx, UpsertInstallationParams{
+		WorkspaceID:        p.WorkspaceID,
+		AppID:              p.AppID,
+		AppSecretEncrypted: sealed,
+		TenantKey:          textOrNull(p.TenantKey),
+		InstallerUserID:    p.InstallerUserID,
+		Region:             string(RegionOrDefault(string(p.Region))),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, ErrWorkspaceConnectionConflict
+	}
+	return installation, err
+}
+
+var ErrWorkspaceConnectionConflict = errors.New("lark app connection belongs to another workspace")
 
 // Revoke flips status to 'revoked' so the WS hub tears the connection
 // down on its next sweep and the dispatcher drops any in-flight
@@ -147,6 +183,20 @@ func validateInstallationParams(p InstallationParams) error {
 		return errors.New("app_secret is required")
 	case p.BotOpenID == "":
 		return errors.New("bot_open_id is required")
+	}
+	return nil
+}
+
+func validateWorkspaceConnectionParams(p WorkspaceConnectionParams) error {
+	switch {
+	case !p.WorkspaceID.Valid:
+		return errors.New("workspace_id is required")
+	case !p.InstallerUserID.Valid:
+		return errors.New("installer_user_id is required")
+	case p.AppID == "":
+		return errors.New("app_id is required")
+	case p.AppSecret == "":
+		return errors.New("app_secret is required")
 	}
 	return nil
 }

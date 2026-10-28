@@ -28,6 +28,7 @@ const ApiError = vi.hoisted(() => {
 const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
+const mockConnectWorkspace = vi.hoisted(() => vi.fn());
 const mockGetBotInfo = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockOrganizationMapping = vi.hoisted(() => vi.fn());
@@ -128,6 +129,7 @@ vi.mock("@multica/core/api", () => ({
     beginLarkInstall: mockBeginInstall,
     getLarkInstallStatus: mockGetStatus,
     deleteLarkInstallation: mockDeleteInstallation,
+    connectLarkWorkspace: mockConnectWorkspace,
     getLarkInstallationBotInfo: mockGetBotInfo,
   },
   ApiError,
@@ -879,5 +881,51 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText("cli_aa941499d4f95cd9")).toBeTruthy();
     expect(screen.getByText("ou_abc123")).toBeTruthy();
     expect(mockGetBotInfo).toHaveBeenCalledWith("workspace-1", "inst-1");
+  });
+
+  it("connects an app for organization data without selecting an agent", async () => {
+    const user = userEvent.setup();
+    mockConnectWorkspace.mockResolvedValue({ id: "inst-workspace", agent_id: null });
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.workspace_connect_button }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    await user.type(screen.getByLabelText(enSettings.lark.workspace_app_id_label), "cli_workspace");
+    await user.type(screen.getByLabelText(enSettings.lark.workspace_app_secret_label), "workspace-secret");
+    await user.click(screen.getByRole("button", { name: enSettings.lark.workspace_connect_submit }));
+
+    await waitFor(() => expect(mockConnectWorkspace).toHaveBeenCalledWith("workspace-1", {
+      app_id: "cli_workspace",
+      app_secret: "workspace-secret",
+      tenant_key: "",
+      region: "feishu",
+    }));
+    expect(JSON.stringify(mockConnectWorkspace.mock.calls[0]?.[1])).not.toContain("agent_id");
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["lark", "installations", "workspace-1"] });
+  });
+
+  it("renders an agent-less app connection without Unknown Agent", async () => {
+    const user = userEvent.setup();
+    installationsRef.current.installations = [{
+      id: "inst-workspace",
+      workspace_id: "ws-1",
+      agent_id: null,
+      app_id: "cli_workspace",
+      bot_open_id: "",
+      installer_user_id: "user-1",
+      status: "active",
+      installed_at: "2026-10-28T00:00:00Z",
+      created_at: "2026-10-28T00:00:00Z",
+      updated_at: "2026-10-28T00:00:00Z",
+    }];
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getAllByText("cli_workspace").length).toBeGreaterThan(0);
+    expect(screen.getByText(enSettings.lark.workspace_app_badge)).toBeTruthy();
+    expect(screen.queryByText(/Unknown Agent/)).toBeNull();
+    expect(screen.queryByTestId("actor-avatar")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.bot_details }));
+    expect(await screen.findByText(enSettings.lark.workspace_unbound)).toBeTruthy();
   });
 });

@@ -1774,6 +1774,33 @@ describe("workspace subscription contract", () => {
       }
     });
 
+    it("parses agent-less app connections and creates them without an agent", async () => {
+      const installation = {
+        id: "inst-workspace",
+        workspace_id: "ws-1",
+        agent_id: null,
+        app_id: "cli_workspace",
+        bot_open_id: "",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-10-28T00:00:00Z",
+        created_at: "2026-10-28T00:00:00Z",
+        updated_at: "2026-10-28T00:00:00Z",
+      };
+      stubFetchJson({ installations: [installation], configured: true, install_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      const listed = await client.listLarkInstallations("ws-1");
+      expect(listed.installations[0]?.agent_id).toBeNull();
+
+      stubFetchJson(installation);
+      const created = await client.connectLarkWorkspace("ws-1", { app_id: "cli_workspace", app_secret: "secret", region: "feishu" });
+      expect(created.agent_id).toBeNull();
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/lark/connections",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ app_id: "cli_workspace", app_secret: "secret", region: "feishu" }) }),
+      );
+    });
+
     it("loads Feishu app connection details without credentials", async () => {
       stubFetchJson({
         installation_id: "inst-1",

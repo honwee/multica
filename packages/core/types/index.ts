@@ -238,6 +238,7 @@ export type {
   LarkInstallation,
   LarkInstallationBotInfo,
   ListLarkInstallationsResponse,
+  ConnectLarkWorkspaceRequest,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,

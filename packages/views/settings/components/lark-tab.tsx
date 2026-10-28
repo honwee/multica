@@ -3,7 +3,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, ChevronUp, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { LarkWorkspaceConnectionDialog } from "./lark-workspace-connection-dialog";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -93,6 +94,8 @@ export function LarkTab() {
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const disconnectInstallation = installations.find((installation) => installation.id === disconnectTarget);
 
   async function handleDisconnect() {
     if (!disconnectTarget || disconnecting) return;
@@ -125,13 +128,7 @@ export function LarkTab() {
             </p>
           </CardContent>
         </Card>
-      ) : !installSupported && installations.length === 0 ? (
-        // Device-flow install path is not wired (HTTP client is the stub
-        // or RegistrationService didn't initialize). We deliberately do
-        // NOT direct users to the agent-detail "Bind" button because the
-        // backend would reject it anyway. Existing installations still render
-        // via the branch below; this only hides the empty-state CTA
-        // when there is nothing to manage.
+      ) : !installSupported && installations.length === 0 && !canManage ? (
         <Card>
           <CardContent className="space-y-2">
             <p className="text-body font-medium">{t(($) => $.lark.preview_title)}</p>
@@ -142,8 +139,17 @@ export function LarkTab() {
         </Card>
       ) : (
         <section className="space-y-3">
-          <h2 className="text-body font-semibold">{t(($) => $.lark.connected_bots)}</h2>
-          <p className="text-caption text-muted-foreground">{t(($) => $.lark.connected_bots_description)}</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="text-body font-semibold">{t(($) => $.lark.connected_bots)}</h2>
+              <p className="text-caption text-muted-foreground">{t(($) => $.lark.connected_bots_description)}</p>
+            </div>
+            {canManage && (
+              <Button variant="outline" size="sm" onClick={() => setConnectionOpen(true)}>
+                <Plus />{t(($) => $.lark.workspace_connect_button)}
+              </Button>
+            )}
+          </div>
           {isLoading ? (
             <Card>
               <CardContent>
@@ -182,6 +188,8 @@ export function LarkTab() {
         <LarkOrganizationMapping installations={installations} canManage={canManage} />
       )}
 
+      {canManage && <LarkWorkspaceConnectionDialog open={connectionOpen} onOpenChange={setConnectionOpen} />}
+
       <AlertDialog
         open={!!disconnectTarget}
         onOpenChange={(v) => {
@@ -191,10 +199,14 @@ export function LarkTab() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t(($) => $.lark.disconnect_confirm_title)}
+              {disconnectInstallation?.agent_id
+                ? t(($) => $.lark.disconnect_confirm_title)
+                : t(($) => $.lark.workspace_disconnect_title)}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t(($) => $.lark.disconnect_confirm_description)}
+              {disconnectInstallation?.agent_id
+                ? t(($) => $.lark.disconnect_confirm_description)
+                : t(($) => $.lark.workspace_disconnect_description)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -232,20 +244,27 @@ function InstallationRow({
     larkBotInfoOptions(wsId, installation.id, detailsOpen && canManage),
   );
   const isActive = installation.status === "active";
-  const agentName = getAgentName(installation.agent_id);
+  const agentId = installation.agent_id;
+  const agentName = agentId ? getAgentName(agentId) : installation.app_id;
   const installerName = getMemberName(installation.installer_user_id);
   const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
   return (
     <div className="py-3 first:pt-0 last:pb-0">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <ActorAvatar
-            actorType="agent"
-            actorId={installation.agent_id}
-            size="lg"
-            enableHoverCard
-            profileLink
-          />
+          {agentId ? (
+            <ActorAvatar
+              actorType="agent"
+              actorId={agentId}
+              size="lg"
+              enableHoverCard
+              profileLink
+            />
+          ) : (
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              <Building2 className="size-4" />
+            </div>
+          )}
           <div className="space-y-1">
             <p className="text-body font-medium">
               {agentName}
@@ -254,6 +273,11 @@ function InstallationRow({
                   ? t(($) => $.lark.region_lark)
                   : t(($) => $.lark.region_feishu)}
               </span>
+              {!agentId && (
+                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                  {t(($) => $.lark.workspace_app_badge)}
+                </span>
+              )}
               {!isActive && (
                 <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {t(($) => $.lark.revoked_badge)}
@@ -301,8 +325,8 @@ function InstallationRow({
           </div>
           <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
             <ConnectionDetail label={t(($) => $.lark.bot_app_id)} value={installation.app_id} code />
-            <ConnectionDetail label={t(($) => $.lark.bot_open_id)} value={installation.bot_open_id} code />
-            <ConnectionDetail label={t(($) => $.lark.bot_agent)} value={agentName} />
+            {installation.bot_open_id && <ConnectionDetail label={t(($) => $.lark.bot_open_id)} value={installation.bot_open_id} code />}
+            <ConnectionDetail label={t(($) => $.lark.bot_agent)} value={agentId ? agentName : t(($) => $.lark.workspace_unbound)} />
             <ConnectionDetail label={t(($) => $.lark.bot_installer)} value={installerName} />
             <ConnectionDetail
               label={t(($) => $.lark.bot_region)}

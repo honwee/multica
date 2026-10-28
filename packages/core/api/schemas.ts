@@ -3340,6 +3340,33 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   updated_at: "",
 };
 
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  agent_id: z.string().nullable().catch(null).default(null),
+  app_id: z.string(),
+  tenant_key: z.string().nullable().optional(),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string(),
+  status: z.string(),
+  region: z.string().default("feishu"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).catch([]).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE = {
+  installations: [],
+  configured: false,
+  install_supported: false,
+};
+
 export const LarkInstallationBotInfoSchema = z.object({
   installation_id: z.string(),
   app_id: z.string(),

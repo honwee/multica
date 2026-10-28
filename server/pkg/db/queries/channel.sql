@@ -38,6 +38,46 @@ ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
     updated_at        = now()
 RETURNING *;
 
+-- name: UpsertFeishuChannelInstallation :one
+-- Feishu apps have one workspace connection that may optionally route messages
+-- to an agent. Reinstalling adopts an agent-less connection or refreshes the
+-- same agent without replacing the installation ID used by organization sync.
+INSERT INTO channel_installation (
+    workspace_id, agent_id, channel_type, config, installer_user_id
+) VALUES (
+    $1, $2, $3, $4, $5
+)
+ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
+    agent_id          = EXCLUDED.agent_id,
+    config            = EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status            = 'active',
+    installed_at      = now(),
+    updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
+  AND (
+      channel_installation.agent_id IS NULL
+      OR channel_installation.agent_id = EXCLUDED.agent_id
+  )
+RETURNING *;
+
+-- name: UpsertWorkspaceLarkConnection :one
+-- Owner/admin-managed application credentials for organization data. The merge
+-- preserves bot identifiers when the same app also has a message route.
+INSERT INTO channel_installation (
+    workspace_id, agent_id, channel_type, config, installer_user_id
+) VALUES (
+    $1, NULL, 'feishu', $2, $3
+)
+ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
+    config            = channel_installation.config || EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status            = 'active',
+    installed_at      = now(),
+    updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
+RETURNING *;
+
 -- name: UpsertChannelInstallationByAppID :one
 -- Team-keyed install / re-install for channels whose natural identity is the
 -- platform workspace, not the (agent) pairing. Slack: one Slack workspace
@@ -200,7 +240,7 @@ WITH dead AS (
                 AND NOT (ci.workspace_id = sqlc.arg('workspace_id')
                          AND ci.agent_id = sqlc.arg('agent_id')))
          OR NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
-         OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
+         OR (ci.agent_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id))
       )
     RETURNING ci.id
 ),

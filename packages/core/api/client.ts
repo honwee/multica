@@ -189,6 +189,8 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
+  LarkInstallation,
+  ConnectLarkWorkspaceRequest,
   LarkInstallationBotInfo,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -399,6 +401,9 @@ import {
   LarkOrganizationResponseSchema,
   LarkOrganizationWriteResponseSchema,
   LarkOrganizationSyncRunSchema,
+  LarkInstallationSchema,
+  ListLarkInstallationsResponseSchema,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   LarkInstallationBotInfoSchema,
   EMPTY_LARK_ORGANIZATION_RESPONSE,
   EMPTY_BILLING_BALANCE,
@@ -5112,7 +5117,21 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/installations`);
+    return parseWithFallback(raw, ListLarkInstallationsResponseSchema, EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/lark/installations",
+    });
+  }
+
+  async connectLarkWorkspace(workspaceId: string, body: ConnectLarkWorkspaceRequest): Promise<LarkInstallation> {
+    const endpoint = "POST /api/workspaces/:id/lark/connections";
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/connections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const installation = parseWithFallback<LarkInstallation | null>(raw, LarkInstallationSchema, null, { endpoint });
+    if (!installation) throw new Error(`Malformed response from ${endpoint}`);
+    return installation;
   }
 
   async getLarkInstallationBotInfo(workspaceId: string, installationId: string): Promise<LarkInstallationBotInfo> {

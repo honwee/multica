@@ -1,4 +1,4 @@
-/** A Lark Bot installation bound to a single Multica agent.
+/** A Feishu app connection with an optional agent message route.
  *
  * Wire shape mirrors `LarkInstallationResponse` in
  * `server/internal/handler/lark.go`. New fields the backend adds in the
@@ -7,7 +7,7 @@
 export interface LarkInstallation {
   id: string;
   workspace_id: string;
-  agent_id: string;
+  agent_id: string | null;
   app_id: string;
   tenant_key?: string | null;
   bot_open_id: string;
@@ -47,6 +47,13 @@ export interface ListLarkInstallationsResponse {
    * builds receiving a server that does not yet emit the field
    * default to `undefined`, treated as not supported. */
   install_supported?: boolean;
+}
+
+export interface ConnectLarkWorkspaceRequest {
+  app_id: string;
+  app_secret: string;
+  tenant_key?: string;
+  region?: "feishu" | "lark";
 }
 
 /** First half of the device-flow install: the server has opened a

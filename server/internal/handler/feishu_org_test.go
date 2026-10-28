@@ -357,6 +357,125 @@ func TestFeishuOrgSaveUserMapping(t *testing.T) {
 	}
 }
 
+func TestLarkWorkspaceConnectionWithoutAgent(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	appID := "cli_workspace_" + uuid.NewString()
+	request := ConnectLarkWorkspaceConnectionRequest{AppID: appID, AppSecret: "workspace-secret", Region: "feishu"}
+	memberReq := feishuOrgRequest(fixture.memberID, http.MethodPost, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/connections", request)
+	memberWriter := httptest.NewRecorder()
+	testHandler.ConnectLarkWorkspaceConnection(memberWriter, memberReq)
+	if memberWriter.Code != http.StatusForbidden {
+		t.Fatalf("member create app connection status = %d, want 403", memberWriter.Code)
+	}
+
+	req := feishuOrgRequest(fixture.ownerID, http.MethodPost, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/connections", request)
+	w := httptest.NewRecorder()
+	testHandler.ConnectLarkWorkspaceConnection(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create app connection status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "workspace-secret") {
+		t.Fatal("app connection response leaked the app secret")
+	}
+	var response LarkInstallationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode app connection: %v", err)
+	}
+	if response.AgentID != nil || response.AppID != appID {
+		t.Fatalf("unexpected app connection: %+v", response)
+	}
+	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, response.ID)
+	installation, err := testHandler.LarkInstallations.GetInWorkspace(context.Background(), parseUUID(response.ID), parseUUID(fixture.workspaceID))
+	if err != nil || installation.AgentID.Valid {
+		t.Fatalf("stored app connection = %+v, err=%v", installation, err)
+	}
+	secret, err := testHandler.LarkInstallations.DecryptAppSecret(installation)
+	if err != nil || secret != "workspace-secret" {
+		t.Fatalf("decrypt app connection secret: %v", err)
+	}
+	active, err := lark.NewChannelStore(testHandler.Queries).ListActiveLarkInstallations(context.Background())
+	if err != nil {
+		t.Fatalf("list active installations: %v", err)
+	}
+	for _, candidate := range active {
+		if candidate.ID == installation.ID {
+			t.Fatal("agent-less app connection must not start a Bot WebSocket")
+		}
+	}
+
+	configReq := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
+		InstallationID: response.ID, Enabled: true, Mappings: []LarkOrganizationMappingResponse{},
+	})
+	configWriter := httptest.NewRecorder()
+	testHandler.UpdateLarkOrganization(configWriter, configReq)
+	if configWriter.Code != http.StatusOK {
+		t.Fatalf("save organization config status = %d, body=%s", configWriter.Code, configWriter.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{Complete: true}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview with agent-less app status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	if client.calls != 1 {
+		t.Fatalf("organization fetches = %d, want 1", client.calls)
+	}
+
+	revokeReq := feishuOrgRequest(fixture.ownerID, http.MethodDelete, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/installations/"+response.ID, nil, "installationId", response.ID)
+	revokeWriter := httptest.NewRecorder()
+	testHandler.RevokeLarkInstallation(revokeWriter, revokeReq)
+	if revokeWriter.Code != http.StatusNoContent {
+		t.Fatalf("revoke agent-less app status = %d, body=%s", revokeWriter.Code, revokeWriter.Body.String())
+	}
+}
+
+func TestLarkWorkspaceConnectionBotAdoptionPreservesID(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	appID := "cli_adopt_" + uuid.NewString()
+	created, err := testHandler.LarkInstallations.UpsertWorkspaceConnection(context.Background(), lark.WorkspaceConnectionParams{
+		WorkspaceID: parseUUID(fixture.workspaceID), AppID: appID, AppSecret: "workspace-secret", InstallerUserID: parseUUID(fixture.ownerID), Region: lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("create app connection: %v", err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, uuidToString(created.ID))
+	if err := testHandler.LarkInstallations.Revoke(context.Background(), created.ID); err != nil {
+		t.Fatalf("revoke app connection: %v", err)
+	}
+	store := lark.NewChannelStore(testHandler.Queries)
+	adoptingAgentID := dbfx.Agent(t, "Feishu app adopting agent", "", testutil.Cols{"workspace_id": fixture.workspaceID, "owner_id": fixture.ownerID})
+	if err := store.ReclaimDeadInstallationByAppID(context.Background(), parseUUID(fixture.workspaceID), parseUUID(adoptingAgentID), appID); err != nil {
+		t.Fatalf("reclaim agent-less app: %v", err)
+	}
+	adopted, err := testHandler.LarkInstallations.Upsert(context.Background(), lark.InstallationParams{
+		WorkspaceID: parseUUID(fixture.workspaceID), AgentID: parseUUID(adoptingAgentID), AppID: appID,
+		AppSecret: "bot-secret", BotOpenID: "ou_workspace_bot", InstallerUserID: parseUUID(fixture.ownerID), Region: lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("adopt app connection as Bot: %v", err)
+	}
+	if adopted.ID != created.ID || !adopted.AgentID.Valid || uuidToString(adopted.AgentID) != adoptingAgentID || adopted.Status != "active" {
+		t.Fatalf("adopted app connection = %+v, original ID = %s", adopted, uuidToString(created.ID))
+	}
+	updated, err := testHandler.LarkInstallations.UpsertWorkspaceConnection(context.Background(), lark.WorkspaceConnectionParams{
+		WorkspaceID: parseUUID(fixture.workspaceID), AppID: appID, AppSecret: "rotated-secret", InstallerUserID: parseUUID(fixture.ownerID), Region: lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("refresh app credentials: %v", err)
+	}
+	if updated.ID != created.ID || !updated.AgentID.Valid || updated.BotOpenID != "ou_workspace_bot" {
+		t.Fatalf("credential refresh broke the Bot route: %+v", updated)
+	}
+	secret, err := testHandler.LarkInstallations.DecryptAppSecret(updated)
+	if err != nil || secret != "rotated-secret" {
+		t.Fatalf("decrypt rotated secret: %v", err)
+	}
+	original, err := testHandler.LarkInstallations.GetInWorkspace(context.Background(), parseUUID(fixture.installationID), parseUUID(fixture.workspaceID))
+	if err != nil || !original.AgentID.Valid || uuidToString(original.AgentID) != fixture.agentID {
+		t.Fatalf("existing Bot installation changed: %+v, err=%v", original, err)
+	}
+}
+
 func TestFeishuOrgSaveOwnerMappingRequiresOwner(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner"), AgentIDs: []string{}}

@@ -141,8 +141,7 @@ export function LarkOrganizationMapping({
   const dirty = !savedSignature || draftSignature !== savedSignature;
   const missingExternalId = mappings.some((mapping) => !mapping.external_id.trim());
   const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
-  const installationName = (installation: LarkInstallation) =>
-    agentNames.get(installation.agent_id) ?? t(($) => $.lark.organization.unknown_agent);
+  const installationName = (installation: LarkInstallation) => installation.app_id;
   const selectedInstallation = installations.find((installation) => installation.id === installationId)
     ?? installations.find((installation) => installation.id === config?.installation_id);
   const canApply = Boolean(

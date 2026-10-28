@@ -2721,7 +2721,7 @@ WITH dead AS (
                 AND NOT (ci.workspace_id = $3
                          AND ci.agent_id = $4))
          OR NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
-         OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
+         OR (ci.agent_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id))
       )
     RETURNING ci.id
 ),
@@ -3596,6 +3596,108 @@ func (q *Queries) UpsertChannelInstallationByAppID(ctx context.Context, arg Upse
 		arg.Config,
 		arg.InstallerUserID,
 	)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertFeishuChannelInstallation = `-- name: UpsertFeishuChannelInstallation :one
+INSERT INTO channel_installation (
+    workspace_id, agent_id, channel_type, config, installer_user_id
+) VALUES (
+    $1, $2, $3, $4, $5
+)
+ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
+    agent_id          = EXCLUDED.agent_id,
+    config            = EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status            = 'active',
+    installed_at      = now(),
+    updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
+  AND (
+      channel_installation.agent_id IS NULL
+      OR channel_installation.agent_id = EXCLUDED.agent_id
+  )
+RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type UpsertFeishuChannelInstallationParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ChannelType     string      `json:"channel_type"`
+	Config          []byte      `json:"config"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+// Feishu apps have one workspace connection that may optionally route messages
+// to an agent. Reinstalling adopts an agent-less connection or refreshes the
+// same agent without replacing the installation ID used by organization sync.
+func (q *Queries) UpsertFeishuChannelInstallation(ctx context.Context, arg UpsertFeishuChannelInstallationParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, upsertFeishuChannelInstallation,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.ChannelType,
+		arg.Config,
+		arg.InstallerUserID,
+	)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkspaceLarkConnection = `-- name: UpsertWorkspaceLarkConnection :one
+INSERT INTO channel_installation (
+    workspace_id, agent_id, channel_type, config, installer_user_id
+) VALUES (
+    $1, NULL, 'feishu', $2, $3
+)
+ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
+    config            = channel_installation.config || EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status            = 'active',
+    installed_at      = now(),
+    updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
+RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type UpsertWorkspaceLarkConnectionParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Config          []byte      `json:"config"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+// Owner/admin-managed application credentials for organization data. The merge
+// preserves bot identifiers when the same app also has a message route.
+func (q *Queries) UpsertWorkspaceLarkConnection(ctx context.Context, arg UpsertWorkspaceLarkConnectionParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceLarkConnection, arg.WorkspaceID, arg.Config, arg.InstallerUserID)
 	var i ChannelInstallation
 	err := row.Scan(
 		&i.ID,

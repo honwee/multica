@@ -130,10 +130,31 @@ func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertIns
 	if err != nil {
 		return Installation{}, err
 	}
-	row, err := s.Queries.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+	row, err := s.Queries.UpsertFeishuChannelInstallation(ctx, db.UpsertFeishuChannelInstallationParams{
 		WorkspaceID:     arg.WorkspaceID,
 		AgentID:         arg.AgentID,
 		ChannelType:     channelTypeFeishu,
+		Config:          cfg,
+		InstallerUserID: arg.InstallerUserID,
+	})
+	if err != nil {
+		return Installation{}, err
+	}
+	return installationFromRow(row)
+}
+
+func (s *ChannelStore) UpsertWorkspaceLarkConnection(ctx context.Context, arg UpsertInstallationParams) (Installation, error) {
+	cfg, err := encodeInstallConfig(Installation{
+		AppID:              arg.AppID,
+		AppSecretEncrypted: arg.AppSecretEncrypted,
+		TenantKey:          arg.TenantKey,
+		Region:             arg.Region,
+	})
+	if err != nil {
+		return Installation{}, err
+	}
+	row, err := s.Queries.UpsertWorkspaceLarkConnection(ctx, db.UpsertWorkspaceLarkConnectionParams{
+		WorkspaceID:     arg.WorkspaceID,
 		Config:          cfg,
 		InstallerUserID: arg.InstallerUserID,
 	})

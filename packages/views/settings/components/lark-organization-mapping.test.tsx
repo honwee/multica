@@ -169,6 +169,7 @@ describe("LarkOrganizationMapping", () => {
     expect(screen.getByText(enSettings.lark.organization.read_only)).toBeTruthy();
     expect(screen.getAllByText("Engineering").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Review Bot").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("cli_app").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_preview }));
     expect(screen.getByText("One member could not be matched")).toBeTruthy();
