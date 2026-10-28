@@ -79,7 +79,7 @@ func newFeishuOrgHandlerFixture(t *testing.T) feishuOrgHandlerFixture {
 		t.Fatalf("NewInstallationService: %v", err)
 	}
 	installation, err := installations.Upsert(context.Background(), lark.InstallationParams{
-		WorkspaceID: parseUUID(workspaceID), AgentID: parseUUID(agentID), AppID: "cli_feishu_org_test",
+		WorkspaceID: parseUUID(workspaceID), AgentID: parseUUID(agentID), AppID: "cli_feishu_org_test_" + token,
 		AppSecret: "feishu-org-test-secret", BotOpenID: "ou_feishu_org_bot", InstallerUserID: parseUUID(ownerID),
 	})
 	if err != nil {

@@ -78,6 +78,9 @@ func TestRouter_RealServiceLookupFailure_ReleasesInsteadOfDenying(t *testing.T) 
 				t.Fatalf("Handle returned nil when %s could not be read; the Router cannot tell "+
 					"a failed lookup from a refusal unless the policy reports one", tc.what)
 			}
+			if !errors.Is(err, errInjected) {
+				t.Fatalf("Handle error = %v, want injected failure for %s", err, tc.what)
+			}
 			if h.dedup.marks() != 0 {
 				t.Errorf("marked %d time(s): the message is now consumed, so the platform's redelivery "+
 					"is discarded and this turn is lost for good", h.dedup.marks())
@@ -147,6 +150,7 @@ func seedPublicToAgent(t *testing.T, pool *pgxpool.Pool) (agentID, senderID pgty
 	f.WorkspaceID = f.Workspace(t, "invoke-gate "+tag, "invoke-gate-"+tag)
 	f.UserID = f.User(t, "Owner "+tag, "owner-"+tag+"@example.com")
 	sender := f.User(t, "Sender "+tag, "sender-"+tag+"@example.com")
+	f.Member(t, f.WorkspaceID, sender, "member")
 	agent := f.Agent(t, "gated-agent-"+tag, "", dbfx.Cols{"permission_mode": "public_to"})
 	return uuidFromString(t, agent), uuidFromString(t, sender)
 }
