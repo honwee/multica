@@ -331,6 +331,51 @@ func TestFeishuOrgPreviewFailureIsAuditedAndReturned(t *testing.T) {
 	}
 }
 
+type cancelingFeishuOrgAPIClient struct {
+	*fakeFeishuOrgAPIClient
+	cancel context.CancelFunc
+}
+
+func (c *cancelingFeishuOrgAPIClient) FetchOrganization(ctx context.Context, credentials lark.InstallationCredentials) (lark.OrgSnapshot, error) {
+	c.cancel()
+	return c.fakeFeishuOrgAPIClient.FetchOrganization(ctx, credentials)
+}
+
+func TestFeishuOrgPreviewFailureAuditSurvivesCancellation(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := &cancelingFeishuOrgAPIClient{fakeFeishuOrgAPIClient: newFakeFeishuOrgAPIClient()}
+	client.err = context.Canceled
+	previous := testHandler.LarkAPIClient
+	testHandler.LarkAPIClient = client
+	t.Cleanup(func() { testHandler.LarkAPIClient = previous })
+	req := feishuOrgRequest(fixture.ownerID, http.MethodPost, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization/preview", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	client.cancel = cancel
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	testHandler.PreviewLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", w.Code, w.Body.String())
+	}
+	run := decodeFeishuOrgRun(t, w)
+	if run.Status != "failed" || !strings.Contains(run.Error, context.Canceled.Error()) || run.CompletedAt == nil {
+		t.Fatalf("unexpected failed run: %+v", run)
+	}
+	stored, err := testHandler.Queries.GetFeishuOrgSyncRunInWorkspace(context.Background(), db.GetFeishuOrgSyncRunInWorkspaceParams{ID: parseUUID(run.ID), WorkspaceID: parseUUID(fixture.workspaceID)})
+	if err != nil {
+		t.Fatalf("load failed run after cancellation: %v", err)
+	}
+	if stored.Status != "failed" || !stored.Error.Valid || !strings.Contains(stored.Error.String, context.Canceled.Error()) {
+		t.Fatalf("stored failed run after cancellation = %+v", stored)
+	}
+	if client.calls != 1 {
+		t.Fatalf("FetchOrganization calls = %d, want 1", client.calls)
+	}
+}
+
 func TestFeishuOrgApplyIsIdempotentAndReplayRecalculates(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin"), AgentIDs: []string{}}

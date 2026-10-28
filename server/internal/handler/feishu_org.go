@@ -442,7 +442,11 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 	}
 
 	fail := func(cause error) {
-		run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "preview", "failed", config.Revision, nil, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{})
+		// A client-side timeout or disconnect must not erase the failed preview's
+		// audit record. Keep the detached write bounded as well.
+		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancel()
+		run, err := h.createFeishuOrgSyncRun(auditCtx, h.Queries, actor, "preview", "failed", config.Revision, nil, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to audit organization preview")
 			return
