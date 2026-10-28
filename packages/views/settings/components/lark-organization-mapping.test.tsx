@@ -229,6 +229,27 @@ describe("LarkOrganizationMapping", () => {
     expect(mockPreview).not.toHaveBeenCalled();
   }, 30000);
 
+  it("filters people by job title and department with a member-specific search hint", async () => {
+    const user = userEvent.setup();
+    renderUI();
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_add }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("combobox", { name: enSettings.lark.organization.mapping_kind }));
+    await user.click(await screen.findByRole("option", { name: enSettings.lark.organization.user }));
+    const input = within(dialog).getByRole("textbox", { name: enSettings.lark.organization.rule_source });
+    expect(input).toHaveProperty("placeholder", enSettings.lark.organization.catalog_search_user);
+
+    fireEvent.change(input, { target: { value: "Engineer" } });
+    expect(within(dialog).getByRole("option", { name: /Ada/ })).toBeTruthy();
+    expect(within(dialog).queryByRole("option", { name: /Grace/ })).toBeNull();
+    fireEvent.change(input, { target: { value: "Engineering" } });
+    expect(within(dialog).getByRole("option", { name: /Ada/ })).toBeTruthy();
+    expect(within(dialog).queryByRole("option", { name: /Grace/ })).toBeNull();
+    fireEvent.change(input, { target: { value: "Support" } });
+    expect(within(dialog).getByRole("option", { name: /Grace/ })).toBeTruthy();
+    expect(within(dialog).queryByRole("option", { name: /Ada/ })).toBeNull();
+  }, 30000);
+
   it("saves an individual rule with its role and agent selection", async () => {
     const user = userEvent.setup();
     mockUpdate.mockResolvedValue(baseOrganization());

@@ -121,9 +121,16 @@ export function LarkOrganizationRuleEditor({
     const query = search.trim().toLocaleLowerCase();
     if (!query) return sources.slice(0, 40);
     return sources.filter((item) =>
-      `${item.name} ${item.id}`.toLocaleLowerCase().includes(query),
+      `${item.name} ${item.id} ${item.jobTitle ?? ""} ${(item.departments ?? []).join(" ")}`
+        .toLocaleLowerCase()
+        .includes(query),
     ).slice(0, 40);
   }, [sources, search]);
+  const searchPlaceholder = kind === "user"
+    ? t(($) => $.lark.organization.catalog_search_user)
+    : kind === "job_title"
+      ? t(($) => $.lark.organization.catalog_search_job_title)
+      : t(($) => $.lark.organization.catalog_search_department);
   const selected = sources.find((item) => item.id === externalId);
 
   function selectSource(source: SourceOption) {
@@ -213,7 +220,7 @@ export function LarkOrganizationRuleEditor({
               className="pl-9"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={t(($) => $.lark.organization.catalog_search_placeholder)}
+              placeholder={searchPlaceholder}
             />
           </div>
           <div className="max-h-56 overflow-y-auto rounded-md border" role="listbox" aria-label={t(($) => $.lark.organization.rule_source)}>
