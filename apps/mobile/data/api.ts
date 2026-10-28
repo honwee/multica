@@ -151,6 +151,7 @@ import { useServerStore } from "./server-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
+import { onlineManager } from "@tanstack/react-query";
 
 export type { LoginResponse } from "./schemas";
 
@@ -192,6 +193,13 @@ export class ApiError extends Error {
   }
 }
 
+export class OfflineError extends Error {
+  constructor() {
+    super("Device is offline. Reconnect and try again.");
+    this.name = "OfflineError";
+  }
+}
+
 export interface ApiClientOptions {
   /** Called once when the server returns 401. The platform layer wires this
    *  to clear the token + navigate to /login so a stale token doesn't keep
@@ -228,6 +236,9 @@ class ApiClient {
     const rid = createRequestId();
     const start = Date.now();
     const method = init.method ?? "GET";
+    if (method.toUpperCase() !== "GET" && !onlineManager.isOnline()) {
+      throw new OfflineError();
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -1451,6 +1462,7 @@ class ApiClient {
     asset: FileAsset,
     opts?: { issueId?: string; commentId?: string },
   ): Promise<Attachment> {
+    if (!onlineManager.isOnline()) throw new OfflineError();
     const rid = createRequestId();
     const start = Date.now();
     const path = "/api/upload-file";
@@ -1478,11 +1490,17 @@ class ApiClient {
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(new Error("upload timed out")),
+      FETCH_TIMEOUT_MS,
+    );
     const res = await fetch(`${getApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
     const duration = Date.now() - start;
 
     if (!res.ok) {

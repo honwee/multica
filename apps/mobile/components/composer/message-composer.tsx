@@ -81,6 +81,7 @@ interface Props {
     content: string;
     attachmentIds: string[];
     mentions: MentionChip[];
+    submissionId: string;
   }) => Promise<void>;
 
   /** Push target for the `@` button. The picker route reads /
@@ -192,8 +193,11 @@ export function MessageComposer({
   const isControlled =
     controlledValue !== undefined && controlledOnChange !== undefined;
   const text = isControlled ? controlledValue : internalText;
+  const textRef = useRef(text);
+  const submissionIdRef = useRef<string | null>(null);
   const setText = useCallback(
     (next: string) => {
+      textRef.current = next;
       if (isControlled) {
         controlledOnChange(next);
       } else {
@@ -202,6 +206,9 @@ export function MessageComposer({
     },
     [isControlled, controlledOnChange],
   );
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
 
   const mentions = useMentionDraftStore((s) => s.mentions);
   const removeMention = useMentionDraftStore((s) => s.remove);
@@ -233,11 +240,13 @@ export function MessageComposer({
   }, [expanded, triggerSeen, disabled]);
 
   const hasInFlightUpload = attachments.some((a) => a.status === "uploading");
+  const hasFailedUpload = attachments.some((a) => a.status === "failed");
   const canSend =
     !disabled &&
     !isSending &&
     !submitting &&
     !hasInFlightUpload &&
+    !hasFailedUpload &&
     (text.trim().length > 0 || mentions.length > 0);
 
   const expand = useCallback(() => {
@@ -256,6 +265,8 @@ export function MessageComposer({
     const textSnap = text;
     const mentionsSnap = mentions;
     const attachmentsSnap = attachments;
+    const submissionId = submissionIdRef.current ?? makeLocalId();
+    submissionIdRef.current = submissionId;
 
     const mentionMd = serializeMentions(mentionsSnap);
     const trimmed = textSnap.trim();
@@ -270,8 +281,6 @@ export function MessageComposer({
       .map((a) => a.id)
       .filter((id): id is string => !!id);
 
-    // Optimistic clear: text + chips empty out immediately so the next
-    // typing tick doesn't double-include them. Restored on rejection.
     setText("");
     setAttachments([]);
     clearMentions();
@@ -283,20 +292,31 @@ export function MessageComposer({
         content,
         attachmentIds: activeIds,
         mentions: mentionsSnap,
+        submissionId,
       });
-      // Success → fully exit composing mode. Explicit triple-step
-      // because a missing blur leaves the keyboard up; missing
-      // Keyboard.dismiss races on iOS when focus is in-flight; missing
-      // setExpanded(false) leaves the expanded card on screen.
+      submissionIdRef.current = null;
       inputRef.current?.blur();
       Keyboard.dismiss();
       setExpanded(false);
     } catch {
-      setText(textSnap);
-      setAttachments(attachmentsSnap);
-      mentionsSnap.forEach((m) =>
-        useMentionDraftStore.getState().toggle(m),
-      );
+      if (textRef.current.length === 0) setText(textSnap);
+      setAttachments((current) => {
+        const currentIds = new Set(current.map((item) => item.localId));
+        return [
+          ...attachmentsSnap.filter((item) => !currentIds.has(item.localId)),
+          ...current,
+        ];
+      });
+      const currentMentions = useMentionDraftStore.getState().mentions;
+      mentionsSnap.forEach((mention) => {
+        if (
+          !currentMentions.some(
+            (item) => item.type === mention.type && item.id === mention.id,
+          )
+        ) {
+          useMentionDraftStore.getState().toggle(mention);
+        }
+      });
     } finally {
       setSubmitting(false);
     }
@@ -548,6 +568,11 @@ export function MessageComposer({
             />
           </View>
         ) : null}
+        {hasFailedUpload ? (
+          <Text className="px-3 pb-1 text-xs text-destructive">
+            {t("composer.upload_failed_retry")}
+          </Text>
+        ) : null}
 
         <TextInput
           ref={inputRef}
@@ -571,6 +596,7 @@ export function MessageComposer({
             iconSize={20}
             color={mentions.length > 0 ? theme.primary : undefined}
             onPress={onAtPress}
+            disabled={disabled}
             accessibilityLabel={t("composer.mention")}
             className="h-8 w-8"
           />
@@ -578,6 +604,7 @@ export function MessageComposer({
             name="image-outline"
             iconSize={20}
             onPress={onImagePress}
+            disabled={disabled}
             accessibilityLabel={t("composer.upload_image")}
             className="h-8 w-8"
           />
@@ -585,6 +612,7 @@ export function MessageComposer({
             name="attach-outline"
             iconSize={20}
             onPress={onFilePress}
+            disabled={disabled}
             accessibilityLabel={t("composer.upload_file")}
             className="h-8 w-8"
           />

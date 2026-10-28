@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { onlineManager } from "@tanstack/react-query";
 import { api } from "./api";
 import { useServerStore } from "./server-store";
 
@@ -44,6 +45,18 @@ describe("api.deleteComment", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("fails writes before fetch while the device is offline", async () => {
+    onlineManager.setOnline(false);
+    try {
+      await expect(api.deleteComment("comment-1")).rejects.toMatchObject({
+        name: "OfflineError",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 });
 

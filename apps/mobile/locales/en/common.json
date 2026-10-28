@@ -40,6 +40,7 @@
     "saving": "Saving...",
     "sending": "Sending...",
     "offline": "Offline",
+    "offline_read_only": "Offline · Cached data is read-only",
     "empty": "Nothing here yet",
     "error": "Something went wrong"
   },

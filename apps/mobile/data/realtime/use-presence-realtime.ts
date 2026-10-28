@@ -20,6 +20,7 @@
  * Reconnect: re-invalidate runtimes + agents + task projections after missed events.
  */
 import { useQueryClient } from "@tanstack/react-query";
+import { useRunNoticeStore } from "@/data/stores/run-notice-store";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 
 export function usePresenceRealtime() {
@@ -61,7 +62,14 @@ export function usePresenceRealtime() {
         // progress / message intentionally absent.
         ws.on("task:queued", invalidateTaskProjections),
         ws.on("task:dispatch", invalidateTaskProjections),
-        ws.on("task:completed", invalidateTaskProjections),
+        ws.on("task:completed", (payload) => {
+          invalidateTaskProjections();
+          useRunNoticeStore.getState().showNotice({
+            taskId: payload.task_id,
+            issueId: payload.issue_id,
+            chatSessionId: payload.chat_session_id,
+          });
+        }),
         ws.on("task:failed", invalidateTaskProjections),
         ws.on("task:cancelled", invalidateTaskProjections),
 

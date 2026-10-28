@@ -18,6 +18,7 @@ import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { MessageComposer } from "@/components/composer/message-composer";
 import { useT } from "@/lib/i18n";
+import { useIsOffline } from "@/lib/use-device-online";
 
 export function InlineCommentComposer({ issueId }: { issueId: string }) {
   const createComment = useCreateComment(issueId);
@@ -25,20 +26,24 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const replyTarget = useReplyTargetStore((s) => s.target);
   const clearReplyTarget = useReplyTargetStore((s) => s.clear);
+  const offline = useIsOffline();
 
   const onSubmit = useCallback(
     async ({
       content,
       attachmentIds,
+      submissionId,
     }: {
       content: string;
       attachmentIds: string[];
+      submissionId: string;
     }) => {
       try {
         await createComment.mutateAsync({
           content,
           parentId: replyTarget?.commentId,
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+          submissionId,
         });
       } catch (err) {
         // Rethrow so MessageComposer's catch path restores text + chips.
@@ -61,6 +66,8 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
       placeholder={t("comments.composer_placeholder")}
       pillLabel={t("comments.composer_pill")}
       pillIcon="chatbubble-ellipses-outline"
+      disabled={offline}
+      disabledReason={t("common:states.offline_read_only")}
       replyTarget={
         replyTarget
           ? {

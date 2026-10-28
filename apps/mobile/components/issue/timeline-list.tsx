@@ -44,6 +44,7 @@ interface Props {
   issue: Issue;
   entries: TimelineEntry[] | undefined;
   timelineLoading: boolean;
+  timelineError?: string | null;
   refreshing: boolean;
   onRefresh: () => void;
   /** Inbox deep-link target. Root comment id OR reply id — replies live
@@ -77,11 +78,13 @@ export function TimelineList({
   issue,
   entries,
   timelineLoading,
+  timelineError,
   refreshing,
   onRefresh,
   highlightCommentId,
   highlightNonce,
 }: Props) {
+  const { t } = useT("issues");
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to comment cards / chip rows / reactions normally.
@@ -301,6 +304,18 @@ export function TimelineList({
       {timelineLoading && (!entries || entries.length === 0) ? (
         <View className="py-6 items-center">
           <ActivityIndicator />
+        </View>
+      ) : null}
+      {timelineError && (!entries || entries.length === 0) ? (
+        <View className="items-center gap-3 px-4 py-6">
+          <Text className="text-center text-sm text-destructive">
+            {timelineError}
+          </Text>
+          <Pressable onPress={onRefresh} accessibilityRole="button">
+            <Text className="text-sm font-medium text-primary">
+              {t("common:actions.retry")}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
     </View>

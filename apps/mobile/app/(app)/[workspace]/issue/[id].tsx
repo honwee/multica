@@ -198,7 +198,7 @@ export default function IssueDetail() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
         </View>
-      ) : detail.error || !issue ? (
+      ) : !issue ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
             {t("errors.load_failed", {
@@ -218,6 +218,11 @@ export default function IssueDetail() {
             issue={issue}
             entries={timeline.data}
             timelineLoading={timeline.isLoading}
+            timelineError={
+              timeline.error instanceof Error
+                ? t("errors.load_failed", { message: timeline.error.message })
+                : null
+            }
             refreshing={detail.isRefetching || timeline.isRefetching}
             onRefresh={onRefresh}
             highlightCommentId={highlight}

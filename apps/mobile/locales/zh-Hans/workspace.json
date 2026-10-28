@@ -128,6 +128,11 @@
       "no_permission": "你没有权限管理智能体"
     }
   },
+  "run_completion": {
+    "title": "运行已完成",
+    "open": "打开",
+    "dismiss": "关闭通知"
+  },
   "actions": {
     "retry": "重试",
     "sign_out": "退出登录"

@@ -16,10 +16,17 @@ import { clearToken, getToken, setToken } from "./secure-storage";
 import { invalidateSessionEpoch } from "./session-epoch";
 import { useWorkspaceStore } from "./workspace-store";
 import { useServerStore } from "./server-store";
+import {
+  clearCachedUser,
+  readCachedUser,
+  writeCachedUser,
+} from "./auth-cache";
+import { clearSessionCache } from "./clear-session-cache";
 
 interface AuthState {
   user: User | null;
   isLoading: boolean;
+  isRestoredOffline: boolean;
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
@@ -39,6 +46,7 @@ function assertValidSession(token: string, user: User): void {
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
+  isRestoredOffline: false,
 
   initialize: async () => {
     await useServerStore.getState().initialize();
@@ -50,13 +58,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     const token = await getToken();
     if (!token) {
-      set({ isLoading: false });
+      set({ user: null, isLoading: false, isRestoredOffline: false });
       return;
     }
     api.setToken(token);
     try {
       const user = await api.getMe();
-      set({ user, isLoading: false });
+      await writeCachedUser(user).catch(() => {});
+      set({ user, isLoading: false, isRestoredOffline: false });
     } catch (err) {
       // Only clear token on a genuine 401. Network blips / 5xx keep the
       // token so the next launch (or a manual refresh) can retry.
@@ -65,10 +74,17 @@ export const useAuthStore = create<AuthState>((set) => ({
         // in flight has to learn the credential is dead now, not once the
         // Keychain write lands.
         invalidateSessionEpoch();
-        await clearToken();
+        await Promise.allSettled([clearToken(), clearCachedUser()]);
         api.setToken(null);
+        set({ user: null, isLoading: false, isRestoredOffline: false });
+        return;
       }
-      set({ user: null, isLoading: false });
+      const cachedUser = await readCachedUser().catch(() => null);
+      set({
+        user: cachedUser,
+        isLoading: false,
+        isRestoredOffline: cachedUser !== null,
+      });
     }
   },
 
@@ -84,8 +100,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     // result over this one.
     invalidateSessionEpoch();
     await setToken(token);
+    await clearSessionCache();
+    await writeCachedUser(user).catch(() => {});
     api.setToken(token);
-    set({ user });
+    set({ user, isRestoredOffline: false });
     return user;
   },
 
@@ -100,8 +118,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user = await api.getMe();
       assertValidSession(normalizedToken, user);
       await setToken(normalizedToken);
+      await clearSessionCache();
+      await writeCachedUser(user).catch(() => {});
       api.setToken(normalizedToken);
-      set({ user });
+      set({ user, isRestoredOffline: false });
       return user;
     } catch (error) {
       api.setToken(previousToken);
@@ -114,10 +134,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     // below is async, so until it lands a concurrent read still returns the
     // token being removed — the epoch is what makes this instant.
     invalidateSessionEpoch();
-    await clearToken();
+    await Promise.allSettled([
+      clearToken(),
+      clearCachedUser(),
+      clearSessionCache(),
+    ]);
     api.setToken(null);
-    set({ user: null });
+    set({ user: null, isRestoredOffline: false });
   },
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    void writeCachedUser(user).catch(() => {});
+    set({ user });
+  },
 }));

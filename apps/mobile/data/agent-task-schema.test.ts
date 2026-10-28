@@ -52,3 +52,12 @@ describe("AgentTaskSchema failure_reason (#7913 regression)", () => {
     );
   });
 });
+
+describe("AgentTaskSchema active status compatibility", () => {
+  it.each(["deferred", "waiting_local_directory"])(
+    "preserves %s instead of falling back to queued",
+    (status) => {
+      expect(AgentTaskSchema.parse({ id: "task-1", status }).status).toBe(status);
+    },
+  );
+});

@@ -37,8 +37,11 @@ export function useIssuesRealtime() {
 
   useWSSubscriptions(
     (ws, wsId) => {
-      const invalidateList = () =>
-        qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      const invalidateList = async () => {
+        const queryKey = issueKeys.list(wsId);
+        await qc.cancelQueries({ queryKey });
+        await qc.invalidateQueries({ queryKey });
+      };
 
       return [
         ws.on("issue:created", (payload) => {

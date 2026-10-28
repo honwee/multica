@@ -1,13 +1,18 @@
 import { QueryClient } from "@tanstack/react-query";
 import { EMPTY_APP_CONFIG } from "@multica/core/api/schemas";
 import type { AppConfigResponse } from "@multica/core/api/schemas";
-import type { Issue, TimelineEntry } from "@multica/core/types";
+import type { Comment, Issue, TimelineEntry } from "@multica/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/data/api";
 import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issue-keys";
-import { useDeleteComment } from "./issues";
+import {
+  appendTimelineEntry,
+  commentToTimelineEntry,
+} from "@/data/realtime/issue-ws-updaters";
+import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
+import { useCreateComment, useDeleteComment } from "./issues";
 
 const state = vi.hoisted(() => ({
   qc: undefined as unknown as QueryClient,
@@ -30,10 +35,17 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 });
 
 vi.mock("@/data/api", () => ({
-  api: { deleteComment: vi.fn(async () => undefined) },
+  api: {
+    createComment: vi.fn(),
+    deleteComment: vi.fn(async () => undefined),
+  },
 }));
 
-vi.mock("@/data/auth-store", () => ({ useAuthStore: vi.fn() }));
+vi.mock("@/data/auth-store", () => ({
+  useAuthStore: (
+    selector: (s: { user: { id: string } }) => unknown,
+  ) => selector({ user: { id: "user-1" } }),
+}));
 
 vi.mock("@/data/workspace-store", () => ({
   useWorkspaceStore: (
@@ -117,5 +129,120 @@ describe("useDeleteComment", () => {
     for (const key of [issueKeys.detail(wsId, issueId), myKey, issueKeys.list(wsId)]) {
       expect(state.qc.getQueryState(key)?.isInvalidated).toBe(true);
     }
+  });
+});
+
+describe("useCreateComment reconciliation", () => {
+  function serverComment(): Comment {
+    return {
+      id: "comment-new",
+      issue_id: issueId,
+      author_type: "member",
+      author_id: "user-1",
+      content: "hello",
+      type: "comment",
+      parent_id: null,
+      reactions: [],
+      attachments: [],
+      created_at: "2026-09-11T07:01:00Z",
+      updated_at: "2026-09-11T07:01:00Z",
+      revision: 1,
+      issue_revision: 4,
+      resolved_at: null,
+      resolved_by_type: null,
+      resolved_by_id: null,
+    };
+  }
+
+  beforeEach(() => {
+    state.qc = new QueryClient();
+    vi.mocked(api.createComment).mockReset();
+    useFailedCommentsStore.setState({ failed: {} });
+  });
+
+  it("keeps exactly one real row when WS arrives before HTTP success", async () => {
+    const server = serverComment();
+    const response = Promise.withResolvers<Comment>();
+    vi.mocked(api.createComment).mockReturnValue(response.promise);
+    state.qc.setQueryData<TimelineEntry[]>(timelineKey, []);
+    state.qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), {
+      id: issueId,
+      revision: 1,
+    } as Issue);
+
+    const pending = useCreateComment(issueId).mutateAsync({
+      content: server.content,
+      submissionId: "submission-1",
+    });
+    await vi.waitFor(() => {
+      expect(state.qc.getQueryData<TimelineEntry[]>(timelineKey)?.map((e) => e.id)).toEqual([
+        "optimistic-submission-1",
+      ]);
+    });
+
+    useFailedCommentsStore.getState().markFailed("optimistic-submission-1", {
+      content: server.content,
+      submissionId: "submission-1",
+      error: "stale failure",
+    });
+    appendTimelineEntry(state.qc, wsId, issueId, commentToTimelineEntry(server));
+    expect(state.qc.getQueryData<TimelineEntry[]>(timelineKey)?.map((e) => e.id)).toEqual([
+      server.id,
+    ]);
+
+    response.resolve(server);
+    await pending;
+
+    const timeline = state.qc.getQueryData<TimelineEntry[]>(timelineKey);
+    expect(timeline).toHaveLength(1);
+    expect(timeline?.[0]).toMatchObject({
+      id: server.id,
+      content: server.content,
+      revision: 1,
+    });
+    expect(useFailedCommentsStore.getState().failed["optimistic-submission-1"]).toBeUndefined();
+    expect(api.createComment).toHaveBeenCalledWith(issueId, server.content, {
+      parentId: undefined,
+      attachmentIds: undefined,
+    });
+    expect(state.qc.getQueryState(timelineKey)?.isInvalidated).toBe(true);
+    expect(state.qc.getQueryState(issueKeys.detail(wsId, issueId))?.isInvalidated).toBe(true);
+  });
+
+  it("reuses the same optimistic row on retry without duplicates", async () => {
+    const server = serverComment();
+    const vars = { content: server.content, submissionId: "submission-retry" };
+    const optimisticId = "optimistic-submission-retry";
+    state.qc.setQueryData<TimelineEntry[]>(timelineKey, []);
+    vi.mocked(api.createComment).mockRejectedValueOnce(new Error("offline"));
+
+    await expect(useCreateComment(issueId).mutateAsync(vars)).rejects.toThrow("offline");
+
+    expect(state.qc.getQueryData<TimelineEntry[]>(timelineKey)?.map((e) => e.id)).toEqual([
+      optimisticId,
+    ]);
+    expect(useFailedCommentsStore.getState().failed[optimisticId]).toMatchObject({
+      content: server.content,
+      submissionId: vars.submissionId,
+    });
+
+    const response = Promise.withResolvers<Comment>();
+    vi.mocked(api.createComment).mockReturnValueOnce(response.promise);
+    const retry = useCreateComment(issueId).mutateAsync(vars);
+    await vi.waitFor(() => {
+      expect(state.qc.getQueryData<TimelineEntry[]>(timelineKey)?.map((e) => e.id)).toEqual([
+        optimisticId,
+      ]);
+      expect(useFailedCommentsStore.getState().failed[optimisticId]).toBeUndefined();
+    });
+
+    response.resolve(server);
+    await retry;
+
+    expect(state.qc.getQueryData<TimelineEntry[]>(timelineKey)?.map((e) => e.id)).toEqual([
+      server.id,
+    ]);
+    expect(useFailedCommentsStore.getState().failed[optimisticId]).toBeUndefined();
+    expect(api.createComment).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ComponentProps } from "react";
+import { View } from "react-native";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@/data/queries/workspaces";
@@ -14,6 +15,8 @@ import { usePinsRealtime } from "@/data/realtime/use-pins-realtime";
 import { usePresenceRealtime } from "@/data/realtime/use-presence-realtime";
 import { useWorkspacePresencePrefetch } from "@/lib/use-workspace-presence-prefetch";
 import { ModalCloseButton } from "@/components/ui/modal-close-button";
+import { DeviceOfflineBanner } from "@/components/workspace/device-offline-banner";
+import { RunCompletionNotice } from "@/components/agent/run-completion-notice";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
@@ -142,7 +145,9 @@ export default function WorkspaceLayout() {
   return (
     <RealtimeProvider>
       <RealtimeSubscriptions />
-      <Stack>
+      <View className="flex-1">
+        <DeviceOfflineBanner />
+        <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
           name="issue/[id]"
@@ -373,7 +378,9 @@ export default function WorkspaceLayout() {
             headerLeft: () => <ModalCloseButton />,
           }}
         />
-      </Stack>
+        </Stack>
+        <RunCompletionNotice />
+      </View>
     </RealtimeProvider>
   );
 }

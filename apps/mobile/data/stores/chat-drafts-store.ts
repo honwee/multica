@@ -1,57 +1,76 @@
-/**
- * Per-session chat drafts. In-memory only — drafts survive tab switches and
- * navigation, but are lost on app cold start. v1 doesn't persist (an
- * SecureStore-backed write on every keystroke would be wasteful; if user
- * feedback shows people lose work to backgrounding kills, persist via the
- * usual debounced flush pattern in v2).
- *
- * Key conventions:
- *   - Real session id (UUID) for any existing session
- *   - DRAFT_NEW_SESSION sentinel for the not-yet-created new-chat input
- */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 export const DRAFT_NEW_SESSION = "__new__";
 
-interface ChatDraftsState {
-  drafts: Record<string, string>;
-  setDraft: (sessionId: string, text: string) => void;
-  clearDraft: (sessionId: string) => void;
-  /** Move the `__new__` draft onto a freshly-created session id without
-   *  the user seeing an empty input on the first frame after send. */
-  promoteNewDraft: (newSessionId: string) => void;
+export function chatDraftKey(
+  workspaceId: string,
+  sessionId: string,
+): string {
+  return `${workspaceId}:${sessionId}`;
 }
 
-export const useChatDraftsStore = create<ChatDraftsState>((set, get) => ({
-  drafts: {},
-  setDraft: (sessionId, text) => {
-    const current = get().drafts;
-    // Skip the set when the value is identical — Zustand would still emit
-    // a notification and trigger a re-render of every selector subscriber.
-    if (current[sessionId] === text) return;
-    if (text === "") {
-      // Empty input == no draft; prune so we don't accumulate dead keys.
-      if (!(sessionId in current)) return;
-      const next = { ...current };
-      delete next[sessionId];
-      set({ drafts: next });
-      return;
-    }
-    set({ drafts: { ...current, [sessionId]: text } });
-  },
-  clearDraft: (sessionId) => {
-    const current = get().drafts;
-    if (!(sessionId in current)) return;
-    const next = { ...current };
-    delete next[sessionId];
-    set({ drafts: next });
-  },
-  promoteNewDraft: (newSessionId) => {
-    const current = get().drafts;
-    const pending = current[DRAFT_NEW_SESSION];
-    if (!pending) return;
-    const next = { ...current, [newSessionId]: pending };
-    delete next[DRAFT_NEW_SESSION];
-    set({ drafts: next });
-  },
-}));
+interface ChatDraftsState {
+  drafts: Record<string, string>;
+  setDraft: (key: string, text: string) => void;
+  clearDraft: (key: string) => void;
+  clearAll: () => void;
+  promoteDraft: (sourceKey: string, targetKey: string) => void;
+}
+
+export function mergeChatDrafts(
+  persisted: Record<string, string> | undefined,
+  current: Record<string, string>,
+): Record<string, string> {
+  return { ...persisted, ...current };
+}
+
+export const useChatDraftsStore = create<ChatDraftsState>()(
+  persist(
+    (set, get) => ({
+      drafts: {},
+      setDraft: (key, text) => {
+        const current = get().drafts;
+        if (current[key] === text) return;
+        if (text === "") {
+          if (!(key in current)) return;
+          const next = { ...current };
+          delete next[key];
+          set({ drafts: next });
+          return;
+        }
+        set({ drafts: { ...current, [key]: text } });
+      },
+      clearDraft: (key) => {
+        const current = get().drafts;
+        if (!(key in current)) return;
+        const next = { ...current };
+        delete next[key];
+        set({ drafts: next });
+      },
+      clearAll: () => set({ drafts: {} }),
+      promoteDraft: (sourceKey, targetKey) => {
+        const current = get().drafts;
+        const pending = current[sourceKey];
+        if (!pending) return;
+        const next = { ...current, [targetKey]: pending };
+        delete next[sourceKey];
+        set({ drafts: next });
+      },
+    }),
+    {
+      name: "multica-mobile-chat-drafts-v1",
+      version: 1,
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({ drafts: state.drafts }),
+      merge: (persisted, current) => {
+        const state = persisted as Partial<ChatDraftsState> | undefined;
+        return {
+          ...current,
+          drafts: mergeChatDrafts(state?.drafts, current.drafts),
+        };
+      },
+    },
+  ),
+);

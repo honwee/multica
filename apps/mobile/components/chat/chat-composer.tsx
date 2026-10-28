@@ -42,8 +42,8 @@ interface Props {
   /** Fired on every keystroke. The caller writes to the drafts store. */
   onChangeText: (next: string) => void;
   /** Send the serialised markdown content + the completed attachments'
-   *  server ids. Caller resets the input by setting `value=""` after a
-   *  successful send. */
+   *  server ids. MessageComposer clears only the submitted snapshot and
+   *  preserves text entered while the request is in flight. */
   onSend: (content: string, attachmentIds: string[]) => Promise<void> | void;
   /** Cancel the in-flight agent task. Only callable while `sending===true`. */
   onStop: () => void;

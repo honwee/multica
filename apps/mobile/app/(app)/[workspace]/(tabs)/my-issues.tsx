@@ -135,7 +135,7 @@ export default function MyIssues() {
       ) : null}
       {isLoading ? (
         <IssuesLoading />
-      ) : error ? (
+      ) : error && !data ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
             {t("errors.load_failed", {

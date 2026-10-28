@@ -3,6 +3,7 @@ import type { User } from "@multica/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "./auth-store";
+import { ApiError } from "./api";
 
 const apiMock = vi.hoisted(() => ({
   getToken: vi.fn(),
@@ -31,6 +32,16 @@ const workspaceMock = vi.hoisted(() => ({
   clear: vi.fn(),
 }));
 
+const authCacheMock = vi.hoisted(() => ({
+  readCachedUser: vi.fn(async () => null as User | null),
+  writeCachedUser: vi.fn(async () => {}),
+  clearCachedUser: vi.fn(async () => {}),
+}));
+
+const sessionCacheMock = vi.hoisted(() => ({
+  clearSessionCache: vi.fn(async () => {}),
+}));
+
 vi.mock("./api", () => ({
   api: apiMock,
   ApiError: class ApiError extends Error {
@@ -52,6 +63,8 @@ vi.mock("./server-store", () => ({
 vi.mock("./workspace-store", () => ({
   useWorkspaceStore: { getState: () => workspaceMock },
 }));
+vi.mock("./auth-cache", () => authCacheMock);
+vi.mock("./clear-session-cache", () => sessionCacheMock);
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -171,7 +184,14 @@ describe("mobile auth store email verification", () => {
 describe("mobile auth cold-start restoration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    useAuthStore.setState({ user: null, isLoading: true });
+    useAuthStore.setState({
+      user: null,
+      isLoading: true,
+      isRestoredOffline: false,
+    });
+    authCacheMock.writeCachedUser.mockResolvedValue(undefined);
+    authCacheMock.clearCachedUser.mockResolvedValue(undefined);
+    sessionCacheMock.clearSessionCache.mockResolvedValue(undefined);
   });
 
   it("restores the server before the workspace and Keychain token", async () => {
@@ -193,5 +213,30 @@ describe("mobile auth cold-start restoration", () => {
     expect(order).toEqual(["server", "workspace", "token"]);
     expect(apiMock.setToken).not.toHaveBeenCalled();
     expect(useAuthStore.getState().isLoading).toBe(false);
+  });
+
+  it("uses the cached identity read-only after a network failure", async () => {
+    const user = makeUser();
+    storageMock.getToken.mockResolvedValue("jwt");
+    apiMock.getMe.mockRejectedValue(new TypeError("Network request failed"));
+    authCacheMock.readCachedUser.mockResolvedValue(user);
+
+    await useAuthStore.getState().initialize();
+
+    expect(useAuthStore.getState().user).toEqual(user);
+    expect(useAuthStore.getState().isRestoredOffline).toBe(true);
+    expect(storageMock.clearToken).not.toHaveBeenCalled();
+  });
+
+  it("never restores the cached identity after a 401", async () => {
+    storageMock.getToken.mockResolvedValue("expired-jwt");
+    apiMock.getMe.mockRejectedValue(new ApiError("Unauthorized", 401));
+
+    await useAuthStore.getState().initialize();
+
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isRestoredOffline).toBe(false);
+    expect(authCacheMock.readCachedUser).not.toHaveBeenCalled();
+    expect(storageMock.clearToken).toHaveBeenCalled();
   });
 });

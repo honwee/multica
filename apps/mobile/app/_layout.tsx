@@ -7,11 +7,14 @@ import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
-import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import NetInfo from "@react-native-community/netinfo";
 import { PortalHost } from "@rn-primitives/portal";
 import { api } from "@/data/api";
 import { maybeRenewSession } from "@/data/session-renewal";
 import { queryClient } from "@/data/query-client";
+import { queryPersistOptions } from "@/data/query-persistence";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { SessionActivityBoundary } from "@/components/auth/session-activity-boundary";
@@ -60,6 +63,16 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     void initialize().then(() => maybeRenewSession());
   }, [initialize, qc]);
 
+  useEffect(() => {
+    return NetInfo.addEventListener((state) => {
+      const online =
+        state.isConnected === true && state.isInternetReachable !== false;
+      if (online && useAuthStore.getState().isRestoredOffline) {
+        void initialize().then(() => maybeRenewSession());
+      }
+    });
+  }, [initialize]);
+
   // Foreground transitions are one of the two "someone is using this" signals;
   // SessionActivityBoundary below supplies the other, so an app that stays
   // foregrounded for longer than the check interval still renews. Deliberately
@@ -82,7 +95,10 @@ export default function RootLayout() {
       <MobileI18nProvider>
         <SafeAreaProvider>
           <KeyboardProvider>
-            <QueryClientProvider client={queryClient}>
+            <PersistQueryClientProvider
+              client={queryClient}
+              persistOptions={queryPersistOptions}
+            >
               <ThemeProvider value={NAV_THEME[colorScheme]}>
                 <AuthInitializer>
                   <SessionActivityBoundary>
@@ -98,7 +114,7 @@ export default function RootLayout() {
                   </SessionActivityBoundary>
                 </AuthInitializer>
               </ThemeProvider>
-            </QueryClientProvider>
+            </PersistQueryClientProvider>
           </KeyboardProvider>
         </SafeAreaProvider>
       </MobileI18nProvider>

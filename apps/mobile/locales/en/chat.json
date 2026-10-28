@@ -13,6 +13,7 @@
     "mention": "Mention someone or an issue",
     "upload_image": "Upload image",
     "upload_file": "Upload file",
+    "upload_failed_retry": "Upload failed. Tap the file to retry, or remove it before sending.",
     "send": "Send",
     "default_placeholder": "Type a message…",
     "unavailable": "Chat unavailable",

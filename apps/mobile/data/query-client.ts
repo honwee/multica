@@ -22,12 +22,13 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60 * 1000, // 1 minute
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      gcTime: 7 * 24 * 60 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: true, // honored via focusManager bridge below
     },
     mutations: {
       retry: false,
+      networkMode: "always",
     },
   },
 });

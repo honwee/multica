@@ -1,14 +1,9 @@
 /**
  * Single row inside the agent-runs formSheet route
  * (`app/(app)/[workspace]/issue/[id]/runs.tsx`). Same component for active
- * and past tasks —
- * the trailing Cancel button is conditional on `status in {queued,
- * dispatched, running}`, and the status badge / colour swaps based on the
+ * and past tasks — the trailing Cancel button follows the shared active-run
+ * lifecycle helper, and the status badge / colour swaps based on the
  * AgentTask.status enum.
- *
- * Tapping a past row is a no-op in v1 — the transcript-detail screen is
- * explicitly out of scope per /Users/qingnaiyuan/.claude/plans/
- * ok-plan-linked-taco.md.
  */
 import { Alert, Pressable, View } from "react-native";
 import type { AgentTask } from "@multica/core/types";
@@ -19,22 +14,18 @@ import { useActorLookup } from "@/data/use-actor-name";
 import { runFailureBadgeLabel } from "@/lib/run-failure-badge";
 import { timeAgo } from "@/lib/time-ago";
 import { useT } from "@/lib/i18n";
+import { isActiveAgentRun } from "@/lib/agent-run";
+import { useIsOffline } from "@/lib/use-device-online";
 
 interface Props {
   task: AgentTask;
   issueId: string;
 }
 
-const ACTIVE_STATUSES: readonly AgentTask["status"][] = [
-  "queued",
-  "dispatched",
-  "running",
-];
-
 export function RunRow({ task, issueId }: Props) {
   const { getName } = useActorLookup();
   const { t } = useT("issues");
-  const isActive = ACTIVE_STATUSES.includes(task.status);
+  const isActive = isActiveAgentRun(task);
   const summary =
     task.trigger_summary?.trim() || fallbackSummary(task, t);
   // Past tasks use completed_at when present (server fills it for terminal
@@ -93,6 +84,7 @@ function CancelButton({
 }) {
   const mutation = useCancelTask(issueId);
   const { t } = useT("issues");
+  const offline = useIsOffline();
 
   const onPress = () => {
     Alert.alert(
@@ -112,7 +104,7 @@ function CancelButton({
   return (
     <Pressable
       onPress={onPress}
-      disabled={mutation.isPending}
+      disabled={offline || mutation.isPending}
       className="px-3 py-1.5 rounded-md bg-secondary active:opacity-70"
     >
       <Text className="text-xs font-medium text-foreground">

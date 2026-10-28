@@ -5,13 +5,12 @@
  * pagination was dropped in #2322).
  *
  * Optimistic strategy:
- *   - Cancel timeline refetches.
- *   - Snapshot the current cache.
- *   - Append a synthetic comment-typed TimelineEntry to the end of the list
- *     (newest position, since the array is ASC).
- *   - On error: roll back to the snapshot.
- *   - On settled: invalidate so the server's real comment row replaces the
- *     synthetic one (real id, real created_at).
+ *   - Cancel timeline refetches and snapshot the current cache.
+ *   - Upsert a synthetic comment-typed TimelineEntry, using a stable id when
+ *     the caller supplies a submission id.
+ *   - On error: keep the synthetic entry and record its failed payload.
+ *   - On success: replace the synthetic entry with the server comment and
+ *     invalidate the timeline.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -69,6 +68,8 @@ export type ToggleIssueReactionVars = {
 
 export type CreateCommentVars = {
   content: string;
+  /** Client-only correlation id reused by retries of the same submission. */
+  submissionId?: string;
   /** When set, the new comment is a threaded reply to this comment id. */
   parentId?: string;
   /** Attachment ids previously returned by `useFileAttach.pickAndUpload*`,
@@ -88,13 +89,13 @@ export function useCreateComment(issueId: string) {
   return useMutation({
     mutationFn: ({ content, parentId, attachmentIds }: CreateCommentVars) =>
       api.createComment(issueId, content, { parentId, attachmentIds }),
-    onMutate: async ({ content, parentId }) => {
+    onMutate: async ({ content, parentId, submissionId }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<TimelineEntry[]>(key);
       if (!userId) return { prev, key, optimisticId: null };
 
-      const optimisticId = `optimistic-${Date.now()}`;
+      const optimisticId = `optimistic-${submissionId ?? Date.now()}`;
       const optimistic: TimelineEntry = {
         type: "comment",
         id: optimisticId,
@@ -109,10 +110,16 @@ export function useCreateComment(issueId: string) {
         attachments: [],
       };
 
-      // ASC list: new comment goes to the end (newest position on screen).
-      qc.setQueryData<TimelineEntry[]>(key, (old) =>
-        old ? [...old, optimistic] : [optimistic],
-      );
+      qc.setQueryData<TimelineEntry[]>(key, (old) => {
+        if (!old) return [optimistic];
+        if (!old.some((entry) => entry.id === optimisticId)) {
+          return [...old, optimistic];
+        }
+        return old.map((entry) =>
+          entry.id === optimisticId ? optimistic : entry,
+        );
+      });
+      useFailedCommentsStore.getState().clear(optimisticId);
 
       return { prev, key, optimisticId };
     },
@@ -127,6 +134,7 @@ export function useCreateComment(issueId: string) {
       if (ctx?.optimisticId) {
         useFailedCommentsStore.getState().markFailed(ctx.optimisticId, {
           content: vars.content,
+          submissionId: vars.submissionId,
           parentId: vars.parentId,
           attachmentIds: vars.attachmentIds,
           error: err instanceof Error ? err.message : "Send failed",
@@ -135,15 +143,30 @@ export function useCreateComment(issueId: string) {
     },
     // Invalidate only on success — the failed-comment path needs the cache
     // to keep its optimistic entry so the inline retry UI has something to
-    // render against. The success refetch replaces the synthetic id with
-    // the server-issued one (same ASC bottom position).
-    onSuccess: (comment) => {
+    // render against.
+    onSuccess: (comment, _vars, ctx) => {
+      const key = issueKeys.timeline(wsId, issueId);
+      const optimisticId = ctx?.optimisticId;
+      const entry = commentToTimelineEntry(comment);
+      qc.setQueryData<TimelineEntry[]>(key, (old) => {
+        if (!old) return old;
+        const next = optimisticId
+          ? old.filter((current) => current.id !== optimisticId)
+          : old;
+        return next.some(
+          (current) => current.id === entry.id && current.type === entry.type,
+        )
+          ? next
+          : [...next, entry];
+      });
+      if (optimisticId) {
+        useFailedCommentsStore.getState().clear(optimisticId);
+      }
       if (wsId) {
+        replaceCommentTimelineEntry(qc, wsId, issueId, entry);
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
       }
-      qc.invalidateQueries({
-        queryKey: issueKeys.timeline(wsId, issueId),
-      });
+      qc.invalidateQueries({ queryKey: key });
     },
   });
 }
