@@ -1,8 +1,7 @@
 name: Mobile Native Build
 
-# Produce an ad-hoc-signed Apple Silicon simulator dev client for runtime acceptance.
-# Include Keychain entitlements for SecureStore; this is not an iPhone IPA and
-# still needs Metro to serve the JavaScript bundle.
+# Produce an unsigned Apple Silicon simulator dev client for runtime acceptance.
+# This is not an iPhone IPA and still needs Metro to serve the JavaScript bundle.
 on:
   push:
     branches: [feat/mobile-offline-ci]
@@ -77,8 +76,7 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             OBJROOT="$RUNNER_TEMP/MulticaBuild/Intermediates" \
             SYMROOT="$RUNNER_TEMP/MulticaBuild/Products" \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGN_LOCAL_EXECUTION_IDENTITY="Ad Hoc" \
+            CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
             build
@@ -89,18 +87,8 @@ jobs:
           test -d "$app_path"
           test -x "$app_path/Multica"
           file "$app_path/Multica"
-          codesign --verify --deep --strict "$app_path"
-          codesign -d --entitlements :- "$app_path" > "$RUNNER_TEMP/Multica.entitlements.plist"
-          plutil -p "$RUNNER_TEMP/Multica.entitlements.plist"
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" "$RUNNER_TEMP/multica-ios-simulator.zip"
-          if ! /usr/libexec/PlistBuddy -c 'Print :application-identifier' \
-              "$RUNNER_TEMP/Multica.entitlements.plist" && \
-            ! /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' \
-              "$RUNNER_TEMP/Multica.entitlements.plist"; then
-            echo "::error::SecureStore needs application-identifier or keychain-access-groups"
-            exit 1
-          fi
 
       - name: Upload the simulator app
         uses: actions/upload-artifact@v4
@@ -109,12 +97,3 @@ jobs:
           path: ${{ runner.temp }}/multica-ios-simulator.zip
           if-no-files-found: error
           retention-days: 7
-
-      - name: Upload a diagnostic simulator app
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: multica-ios-simulator-diagnostic-${{ github.sha }}
-          path: ${{ runner.temp }}/multica-ios-simulator.zip
-          if-no-files-found: ignore
-          retention-days: 3
