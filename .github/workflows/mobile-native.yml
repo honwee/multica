@@ -90,9 +90,10 @@ jobs:
           test -x "$app_path/Multica"
           file "$app_path/Multica"
           codesign --verify --deep --strict "$app_path"
-          codesign -d --entitlements "$RUNNER_TEMP/Multica.entitlements.plist" "$app_path"
+          codesign -d --entitlements :- "$app_path" > "$RUNNER_TEMP/Multica.entitlements.plist"
           /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' \
             "$RUNNER_TEMP/Multica.entitlements.plist"
+          plutil -p "$RUNNER_TEMP/Multica.entitlements.plist"
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" "$RUNNER_TEMP/multica-ios-simulator.zip"
 
