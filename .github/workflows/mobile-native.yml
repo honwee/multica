@@ -1,7 +1,8 @@
 name: Mobile Native Build
 
-# Produce an unsigned Apple Silicon simulator dev client for runtime acceptance.
-# This is not an iPhone IPA and still needs Metro to serve the JavaScript bundle.
+# Produce an ad-hoc-signed Apple Silicon simulator dev client for runtime acceptance.
+# Include Keychain entitlements for SecureStore; this is not an iPhone IPA and
+# still needs Metro to serve the JavaScript bundle.
 on:
   push:
     branches: [feat/mobile-offline-ci]
@@ -76,7 +77,8 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             OBJROOT="$RUNNER_TEMP/MulticaBuild/Intermediates" \
             SYMROOT="$RUNNER_TEMP/MulticaBuild/Products" \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_LOCAL_EXECUTION_IDENTITY="Ad Hoc" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
             build
@@ -87,6 +89,10 @@ jobs:
           test -d "$app_path"
           test -x "$app_path/Multica"
           file "$app_path/Multica"
+          codesign --verify --deep --strict "$app_path"
+          codesign -d --entitlements "$RUNNER_TEMP/Multica.entitlements.plist" "$app_path"
+          /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' \
+            "$RUNNER_TEMP/Multica.entitlements.plist"
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" "$RUNNER_TEMP/multica-ios-simulator.zip"
 
