@@ -1,0 +1,94 @@
+name: Mobile Native Build
+
+# Produce an unsigned Apple Silicon simulator dev client for runtime acceptance.
+# This is not an iPhone IPA and still needs Metro to serve the JavaScript bundle.
+on:
+  push:
+    branches: [feat/mobile-offline-ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify mobile source
+        run: |
+          pnpm --filter @multica/mobile typecheck
+          pnpm --filter @multica/mobile lint
+          pnpm --filter @multica/mobile test
+
+      - name: Record native toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          pod --version
+          cmake --version
+
+      - name: Generate the native iOS project
+        run: APP_ENV=production pnpm --filter @multica/mobile exec expo prebuild -p ios --no-install
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
+        env:
+          LANG: en_US.UTF-8
+          LC_ALL: en_US.UTF-8
+        run: pod install --repo-update
+
+      - name: Build the simulator app
+        run: |
+          xcodebuild \
+            -workspace apps/mobile/ios/Multica.xcworkspace \
+            -scheme Multica \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            SDKROOT=iphonesimulator \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            OBJROOT="$RUNNER_TEMP/MulticaBuild/Intermediates" \
+            SYMROOT="$RUNNER_TEMP/MulticaBuild/Products" \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
+            build
+
+      - name: Package the simulator app
+        run: |
+          app_path="$RUNNER_TEMP/MulticaBuild/Products/Debug-iphonesimulator/Multica.app"
+          test -d "$app_path"
+          test -x "$app_path/Multica"
+          file "$app_path/Multica"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" "$RUNNER_TEMP/multica-ios-simulator.zip"
+
+      - name: Upload the simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-ios-simulator-${{ github.sha }}
+          path: ${{ runner.temp }}/multica-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
