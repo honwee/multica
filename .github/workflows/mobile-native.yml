@@ -91,11 +91,16 @@ jobs:
           file "$app_path/Multica"
           codesign --verify --deep --strict "$app_path"
           codesign -d --entitlements :- "$app_path" > "$RUNNER_TEMP/Multica.entitlements.plist"
-          /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' \
-            "$RUNNER_TEMP/Multica.entitlements.plist"
           plutil -p "$RUNNER_TEMP/Multica.entitlements.plist"
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" "$RUNNER_TEMP/multica-ios-simulator.zip"
+          if ! /usr/libexec/PlistBuddy -c 'Print :application-identifier' \
+              "$RUNNER_TEMP/Multica.entitlements.plist" && \
+            ! /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' \
+              "$RUNNER_TEMP/Multica.entitlements.plist"; then
+            echo "::error::SecureStore needs application-identifier or keychain-access-groups"
+            exit 1
+          fi
 
       - name: Upload the simulator app
         uses: actions/upload-artifact@v4
@@ -104,3 +109,12 @@ jobs:
           path: ${{ runner.temp }}/multica-ios-simulator.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload a diagnostic simulator app
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-ios-simulator-diagnostic-${{ github.sha }}
+          path: ${{ runner.temp }}/multica-ios-simulator.zip
+          if-no-files-found: ignore
+          retention-days: 3
