@@ -18,6 +18,9 @@ jobs:
   simulator-build:
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      # ExpoModulesJSI requires Swift tools 6.2; the image default is Xcode 16.4.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -42,9 +45,11 @@ jobs:
 
       - name: Record native toolchain
         run: |
+          test -d "$DEVELOPER_DIR"
           sw_vers
           uname -m
           xcodebuild -version
+          xcrun swift --version
           xcrun --sdk iphonesimulator --show-sdk-version
           pod --version
           cmake --version
