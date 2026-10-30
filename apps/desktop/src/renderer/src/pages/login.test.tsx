@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { DesktopLoginPage } from "./login";
 
 const mockOpenExternal = vi.hoisted(() => vi.fn());
@@ -7,6 +8,7 @@ const mockFeishuAppId = vi.hoisted(() => ({ value: "cli_test" }));
 const APP_URL = "https://fde.lumistedu.com";
 
 type LoginPageMockProps = {
+  logo?: ReactNode;
   onGoogleLogin?: () => void;
   onFeishuLogin?: () => void;
 };
@@ -16,27 +18,36 @@ vi.mock("@multica/core/config", () => ({
     selector({ feishuAppId: mockFeishuAppId.value }),
 }));
 
-vi.mock("@multica/views/auth", () => ({
-  LoginPage: (props: LoginPageMockProps) => (
-    <div>
-      <button data-testid="google" onClick={props.onGoogleLogin}>
-        Google
-      </button>
-      {props.onFeishuLogin ? (
-        <button data-testid="feishu" onClick={props.onFeishuLogin}>
-          Feishu
-        </button>
-      ) : null}
-    </div>
-  ),
-}));
+vi.mock("@multica/views/auth", async () => {
+  const actual = await vi.importActual<typeof import("@multica/views/auth")>(
+    "@multica/views/auth",
+  );
+  return {
+    ...actual,
+    LoginPage: (props: LoginPageMockProps) => (
+      <div>
+        <div data-testid="brand">{props.logo}</div>
+        {props.onGoogleLogin ? (
+          <button data-testid="google" onClick={props.onGoogleLogin}>
+            Google
+          </button>
+        ) : null}
+        {props.onFeishuLogin ? (
+          <button data-testid="feishu" onClick={props.onFeishuLogin}>
+            Feishu
+          </button>
+        ) : null}
+      </div>
+    ),
+  };
+});
 
 vi.mock("@multica/views/platform", () => ({
   DragStrip: () => <div />,
 }));
 
 vi.mock("@multica/ui/components/common/multica-icon", () => ({
-  MulticaIcon: () => <div />,
+  MulticaIcon: () => <span data-testid="multica-mark" />,
 }));
 
 describe("DesktopLoginPage", () => {
@@ -71,18 +82,22 @@ describe("DesktopLoginPage", () => {
     );
   });
 
-  it("keeps the existing Google desktop handoff", () => {
+  it("does not offer Google login", () => {
     render(<DesktopLoginPage />);
-    fireEvent.click(screen.getByTestId("google"));
-    expect(mockOpenExternal).toHaveBeenCalledWith(
-      `${APP_URL}/login?platform=desktop`,
-    );
+    expect(screen.queryByTestId("google")).not.toBeInTheDocument();
   });
 
   it("hides Feishu login when the backend has no app id", () => {
     mockFeishuAppId.value = "";
     render(<DesktopLoginPage />);
     expect(screen.queryByTestId("feishu")).not.toBeInTheDocument();
-    expect(screen.getByTestId("google")).toBeInTheDocument();
+    expect(screen.queryByTestId("google")).not.toBeInTheDocument();
+  });
+
+  it("renders the shared Lumist and Multica branding", () => {
+    render(<DesktopLoginPage />);
+    expect(screen.getByTestId("brand")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "路觅教育" })).toBeInTheDocument();
+    expect(screen.getByTestId("multica-mark")).toBeInTheDocument();
   });
 });

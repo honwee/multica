@@ -24,6 +24,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
+import { cn } from "@multica/ui/lib/utils";
 
 // Types
 
@@ -331,7 +332,7 @@ export function LoginPage({
 
   if (step === "cli_confirm" && existingUser) {
     return (
-      <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+      <div className={cn("flex min-h-svh items-center justify-center", className)}>
         <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
@@ -373,7 +374,7 @@ export function LoginPage({
 
   if (step === "code") {
     return (
-      <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+      <div className={cn("flex min-h-svh items-center justify-center", className)}>
         <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
@@ -442,7 +443,7 @@ export function LoginPage({
   // Email step
 
   return (
-    <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+    <div className={cn("flex min-h-svh items-center justify-center", className)}>
       <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
         <CardHeader className="text-center">
           {logo && <div className="mx-auto mb-4">{logo}</div>}
