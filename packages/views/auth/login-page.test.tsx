@@ -458,6 +458,19 @@ describe("LoginPage", () => {
     expect(dest.searchParams.get("state")).toBe("provider:feishu");
   });
 
+  it("uses an external Feishu handler instead of navigating internally", async () => {
+    const onFeishuLogin = vi.fn();
+    const user = userEvent.setup();
+    renderWithI18n(
+      <LoginPage onSuccess={onSuccess} onFeishuLogin={onFeishuLogin} />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    );
+    expect(onFeishuLogin).toHaveBeenCalledTimes(1);
+    expect(window.location.href).toBe("http://localhost:3000");
+  });
+
   // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------

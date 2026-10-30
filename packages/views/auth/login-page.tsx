@@ -64,6 +64,8 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override Feishu login handler (e.g. desktop opens browser externally). When provided, renders the Feishu button even if `feishu` config is omitted. */
+  onFeishuLogin?: () => void;
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -109,6 +111,7 @@ export function LoginPage({
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onFeishuLogin,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
@@ -302,6 +305,10 @@ export function LoginPage({
   };
 
   const handleFeishuLogin = () => {
+    if (onFeishuLogin) {
+      onFeishuLogin();
+      return;
+    }
     if (!feishu) return;
     const params = new URLSearchParams({
       client_id: feishu.appId,
@@ -506,7 +513,7 @@ export function LoginPage({
               {t(($) => $.signin.google)}
             </Button>
           )}
-          {feishu && (
+          {(feishu || onFeishuLogin) && (
             <Button
               type="button"
               variant="outline"
