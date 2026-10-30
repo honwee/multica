@@ -99,6 +99,17 @@ describe("LoginPage", () => {
     mockListMyInvitations.mockResolvedValue([]);
   });
 
+  it("renders the Lumist co-brand alongside the Multica product name", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      screen.getByRole("img", { name: "路觅教育" }).getAttribute("src"),
+    ).toContain("lumist-logo.png");
+    expect(
+      screen.getByText("Sign in to Multica", { exact: true }),
+    ).toBeInTheDocument();
+  });
+
   // Shared LoginPage behavior is canonical in
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.

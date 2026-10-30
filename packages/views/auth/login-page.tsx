@@ -51,6 +51,11 @@ interface CliCallbackConfig {
 interface LoginPageProps {
   /** Logo element rendered above the title */
   logo?: ReactNode;
+  /** Optional classes for the full-page layout and the sign-in card. */
+  className?: string;
+  cardClassName?: string;
+  /** Optional classes for the email step's footer actions. */
+  footerClassName?: string;
   /** Called after successful login. The workspace list is seeded into React
    *  Query before this fires, so the caller can compute a destination URL. */
   onSuccess: () => void;
@@ -105,6 +110,9 @@ export function validateCliCallback(cliCallback: string): boolean {
 
 export function LoginPage({
   logo,
+  className,
+  cardClassName,
+  footerClassName,
   onSuccess,
   google,
   feishu,
@@ -323,8 +331,8 @@ export function LoginPage({
 
   if (step === "cli_confirm" && existingUser) {
     return (
-      <div className="flex min-h-svh items-center justify-center">
-        <Card className="w-full max-w-sm">
+      <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+        <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
             <CardTitle className="text-display-sm">
@@ -365,8 +373,8 @@ export function LoginPage({
 
   if (step === "code") {
     return (
-      <div className="flex min-h-svh items-center justify-center">
-        <Card className="w-full max-w-sm">
+      <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+        <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
             <CardTitle className="text-display-sm">
@@ -434,8 +442,8 @@ export function LoginPage({
   // Email step
 
   return (
-    <div className="flex min-h-svh items-center justify-center">
-      <Card className="w-full max-w-sm">
+    <div className={`flex min-h-svh items-center justify-center ${className ?? ""}`}>
+      <Card className={`w-full max-w-sm ${cardClassName ?? ""}`}>
         <CardHeader className="text-center">
           {logo && <div className="mx-auto mb-4">{logo}</div>}
           <CardTitle className="text-display-sm">
@@ -471,7 +479,7 @@ export function LoginPage({
             )}
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col gap-3">
+        <CardFooter className={`flex flex-col gap-3 ${footerClassName ?? ""}`}>
           <Button
             type="submit"
             form="login-form"

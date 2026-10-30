@@ -27,6 +27,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
+import Image from "next/image";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
 
@@ -222,6 +223,19 @@ function LoginPageContent() {
 
   return (
     <LoginPage
+      className="bg-white px-6 py-12"
+      cardClassName="max-w-md gap-6 rounded-none border-0 bg-transparent py-0 shadow-none"
+      footerClassName="border-0 bg-transparent px-4 pb-0"
+      logo={
+        <Image
+          src="/branding/lumist-logo.png"
+          alt="路觅教育"
+          width={320}
+          height={92}
+          priority
+          className="h-14 w-auto sm:h-16"
+        />
+      }
       onSuccess={handleSuccess}
       google={
         googleClientId
