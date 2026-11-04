@@ -33,7 +33,7 @@ export function DesktopLoginPage() {
     <div className="flex h-screen flex-col">
       <DragStrip />
       <LoginPage
-        className="min-h-0 flex-1 bg-white px-6 py-12"
+        className="min-h-0 flex-1 bg-background px-6 py-12"
         cardClassName="max-w-md gap-6 rounded-none border-0 bg-transparent py-0 shadow-none"
         footerClassName="border-0 bg-transparent px-4 pb-0"
         logo={
