@@ -289,7 +289,8 @@ func matchMembers(users []lark.OrgUser, members []Member, warnings map[string]st
 		addCandidates(candidates, index.union[user.UnionID])
 		addCandidates(candidates, index.feishu[user.OpenID])
 		addCandidates(candidates, index.channel[user.OpenID])
-		addCandidates(candidates, index.email[strings.ToLower(user.Email)])
+		addCandidates(candidates, index.email[strings.ToLower(strings.TrimSpace(user.EnterpriseEmail))])
+		addCandidates(candidates, index.email[strings.ToLower(strings.TrimSpace(user.Email))])
 		if len(candidates) > 1 {
 			addWarning(warnings, fmt.Sprintf("identity conflict for Feishu user %q; automatic changes skipped", orgUserIdentity(user)))
 			for memberIndex := range candidates {
@@ -333,7 +334,7 @@ func addCandidates(candidates map[int]struct{}, indexes []int) {
 }
 
 func orgUserIdentity(user lark.OrgUser) string {
-	for _, identity := range []string{user.UnionID, user.OpenID, strings.ToLower(user.Email), user.Name} {
+	for _, identity := range []string{user.UnionID, user.OpenID, user.LoginEmail(), user.Name} {
 		if identity != "" {
 			return identity
 		}

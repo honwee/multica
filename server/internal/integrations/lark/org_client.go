@@ -31,14 +31,18 @@ type OrgDepartment struct {
 }
 
 // OrgUser is a user and every directly fetched department they belong to.
+// EnterpriseEmail is the tenant-managed mailbox and the identity the login
+// flow keys accounts by; Email is the personal mailbox from the contact
+// profile and only a fallback.
 type OrgUser struct {
-	OpenID        string
-	UnionID       string
-	Email         string
-	Name          string
-	JobTitle      string
-	DepartmentIDs []string
-	Active        bool
+	OpenID          string
+	UnionID         string
+	Email           string
+	EnterpriseEmail string
+	Name            string
+	JobTitle        string
+	DepartmentIDs   []string
+	Active          bool
 }
 
 // OrgSnapshot is complete only when every department and user page succeeded.
@@ -207,12 +211,13 @@ func (c *httpAPIClient) fetchOrgDepartmentUsers(ctx context.Context, creds Insta
 			Msg  string `json:"msg"`
 			Data struct {
 				Items []struct {
-					OpenID   string `json:"open_id"`
-					UnionID  string `json:"union_id"`
-					Email    string `json:"email"`
-					Name     string `json:"name"`
-					JobTitle string `json:"job_title"`
-					Status   struct {
+					OpenID          string `json:"open_id"`
+					UnionID         string `json:"union_id"`
+					Email           string `json:"email"`
+					EnterpriseEmail string `json:"enterprise_email"`
+					Name            string `json:"name"`
+					JobTitle        string `json:"job_title"`
+					Status          struct {
 						IsResigned bool `json:"is_resigned"`
 					} `json:"status"`
 				} `json:"items"`
@@ -231,12 +236,13 @@ func (c *httpAPIClient) fetchOrgDepartmentUsers(ctx context.Context, creds Insta
 		}
 		for _, item := range resp.Data.Items {
 			users = append(users, OrgUser{
-				OpenID:   item.OpenID,
-				UnionID:  item.UnionID,
-				Email:    item.Email,
-				Name:     item.Name,
-				JobTitle: item.JobTitle,
-				Active:   !item.Status.IsResigned,
+				OpenID:          item.OpenID,
+				UnionID:         item.UnionID,
+				Email:           item.Email,
+				EnterpriseEmail: item.EnterpriseEmail,
+				Name:            item.Name,
+				JobTitle:        item.JobTitle,
+				Active:          !item.Status.IsResigned,
 			})
 		}
 
@@ -286,4 +292,13 @@ func isOrgScopeErrorCode(code int) bool {
 	default:
 		return false
 	}
+}
+
+// LoginEmail is the address the login flow would key this user's account by:
+// the enterprise mailbox first, then the personal one, lowercased.
+func (u OrgUser) LoginEmail() string {
+	if email := strings.ToLower(strings.TrimSpace(u.EnterpriseEmail)); email != "" {
+		return email
+	}
+	return strings.ToLower(strings.TrimSpace(u.Email))
 }

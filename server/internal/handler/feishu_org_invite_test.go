@@ -16,6 +16,7 @@ func previewFeishuInviteSnapshot(t *testing.T, fixture feishuOrgHandlerFixture) 
 		Complete: true,
 		Users: []lark.OrgUser{
 			{OpenID: "ou_email", UnionID: "on_email", Email: "person@example.com", Name: "Email User", Active: true},
+			{OpenID: "ou_corp", UnionID: "on_corp", Email: "corp-personal@example.com", EnterpriseEmail: "Corp@Example.com", Name: "Corp User", Active: true},
 			{OpenID: "ou_openid", UnionID: "on_openid", Name: "OpenID User", Active: true},
 		},
 	}
@@ -36,6 +37,7 @@ func TestFeishuInvitationByUnionID(t *testing.T) {
 		wantName  string
 	}{
 		{name: "uses the available email", unionID: "on_email", wantEmail: "person@example.com", wantName: "Email User"},
+		{name: "prefers the enterprise email like login", unionID: "on_corp", wantEmail: "corp@example.com", wantName: "Corp User"},
 		{name: "uses the OpenID fallback alias", unionID: "on_openid", wantEmail: "ou_openid@feishu.invalid", wantName: "OpenID User"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

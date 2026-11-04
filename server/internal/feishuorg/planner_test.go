@@ -317,6 +317,11 @@ func TestBuildPlanIdentityFallbacks(t *testing.T) {
 			member: Member{Email: "Person@Example.com"},
 			user:   lark.OrgUser{Email: "person@example.COM"},
 		},
+		{
+			name:   "enterprise email",
+			member: Member{Email: "person@corp.example.com"},
+			user:   lark.OrgUser{Email: "personal@example.com", EnterpriseEmail: "Person@Corp.Example.com"},
+		},
 	}
 
 	for _, tt := range tests {

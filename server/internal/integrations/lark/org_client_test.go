@@ -64,10 +64,10 @@ func TestOrgClientFetchOrganization(t *testing.T) {
 			{ID: "od_platform", Name: "Platform"},
 		},
 		Users: []OrgUser{
-			{OpenID: "ou_alice", UnionID: "on_alice", Email: "alice@example.com", Name: "Alice", JobTitle: "CEO", DepartmentIDs: []string{"0", "od_eng", "od_platform"}, Active: true},
-			{OpenID: "ou_bob", UnionID: "on_bob", Email: "bob@example.com", Name: "Bob", JobTitle: "Contractor", DepartmentIDs: []string{"0", "od_design"}, Active: false},
-			{OpenID: "ou_carol", UnionID: "on_carol", Email: "carol@example.com", Name: "Carol", JobTitle: "Engineer", DepartmentIDs: []string{"od_eng"}, Active: true},
-			{OpenID: "ou_dave", UnionID: "on_dave", Email: "dave@example.com", Name: "Dave", JobTitle: "Designer", DepartmentIDs: []string{"od_eng"}, Active: true},
+			{OpenID: "ou_alice", UnionID: "on_alice", Email: "alice@example.com", EnterpriseEmail: "alice@corp.example.com", Name: "Alice", JobTitle: "CEO", DepartmentIDs: []string{"0", "od_eng", "od_platform"}, Active: true},
+			{OpenID: "ou_bob", UnionID: "on_bob", Email: "bob@example.com", EnterpriseEmail: "bob@corp.example.com", Name: "Bob", JobTitle: "Contractor", DepartmentIDs: []string{"0", "od_design"}, Active: false},
+			{OpenID: "ou_carol", UnionID: "on_carol", Email: "carol@example.com", EnterpriseEmail: "carol@corp.example.com", Name: "Carol", JobTitle: "Engineer", DepartmentIDs: []string{"od_eng"}, Active: true},
+			{OpenID: "ou_dave", UnionID: "on_dave", Email: "dave@example.com", EnterpriseEmail: "dave@corp.example.com", Name: "Dave", JobTitle: "Designer", DepartmentIDs: []string{"od_eng"}, Active: true},
 		},
 		Complete: true,
 	}
@@ -285,11 +285,12 @@ func orgTestDepartment(id, name string) map[string]any {
 
 func orgTestUser(openID, unionID, email, name, jobTitle string, resigned bool) map[string]any {
 	return map[string]any{
-		"open_id":   openID,
-		"union_id":  unionID,
-		"email":     email,
-		"name":      name,
-		"job_title": jobTitle,
-		"status":    map[string]any{"is_resigned": resigned},
+		"open_id":          openID,
+		"union_id":         unionID,
+		"email":            email,
+		"enterprise_email": strings.Replace(email, "@example.com", "@corp.example.com", 1),
+		"name":             name,
+		"job_title":        jobTitle,
+		"status":           map[string]any{"is_resigned": resigned},
 	}
 }

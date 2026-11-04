@@ -47,7 +47,9 @@ func (h *Handler) resolveFeishuInvitationEmail(ctx context.Context, workspaceID 
 			if !user.Active {
 				return "", errFeishuInviteeInactive
 			}
-			if email := strings.ToLower(strings.TrimSpace(user.Email)); email != "" {
+			// Same precedence as FeishuLogin, so the invitation lands on the
+			// account the invitee gets when they sign in.
+			if email := user.LoginEmail(); email != "" {
 				return email, nil
 			}
 			if openID := strings.ToLower(strings.TrimSpace(user.OpenID)); openID != "" {
@@ -84,8 +86,10 @@ func (h *Handler) addFeishuInvitationNames(ctx context.Context, workspaceID pgty
 			if openID := strings.ToLower(strings.TrimSpace(user.OpenID)); openID != "" {
 				names[openID+"@feishu.invalid"] = user.Name
 			}
-			if email := strings.ToLower(strings.TrimSpace(user.Email)); email != "" {
-				names[email] = user.Name
+			for _, email := range []string{user.EnterpriseEmail, user.Email} {
+				if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
+					names[email] = user.Name
+				}
 			}
 		}
 		for i := range invitations {
