@@ -11,10 +11,56 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceWhatsNewSeenVersion = `-- name: AdvanceWhatsNewSeenVersion :one
+UPDATE "user" SET
+    whats_new_seen_version = $1::text,
+    updated_at = now()
+WHERE id = $2
+  AND (
+    whats_new_seen_version IS NULL
+    OR string_to_array(whats_new_seen_version, '.')::int[] < string_to_array($1::text, '.')::int[]
+  )
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
+`
+
+type AdvanceWhatsNewSeenVersionParams struct {
+	Version string      `json:"version"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+// Only moves forward: an older client reporting an older release must not
+// resurface highlights a newer client already dismissed. Both sides are
+// validated MAJOR.MINOR.PATCH strings, so the int[] casts cannot fail and
+// compare numerically (0.7.10 > 0.7.9). No row comes back when the stored
+// version is already at or past the requested one.
+func (q *Queries) AdvanceWhatsNewSeenVersion(ctx context.Context, arg AdvanceWhatsNewSeenVersionParams) (User, error) {
+	row := q.db.QueryRow(ctx, advanceWhatsNewSeenVersion, arg.Version, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.FeishuOpenID,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 type CreateUserParams struct {
@@ -41,13 +87,14 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id FROM "user"
 WHERE id = $1
 `
 
@@ -69,13 +116,14 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id FROM "user"
 WHERE email = $1
 `
 
@@ -97,13 +145,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
 }
 
 const getUserByFeishuOpenID = `-- name: GetUserByFeishuOpenID :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id FROM "user"
 WHERE feishu_open_id = $1
 `
 
@@ -125,6 +174,7 @@ func (q *Queries) GetUserByFeishuOpenID(ctx context.Context, feishuOpenID pgtype
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
@@ -176,7 +226,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 type JoinCloudWaitlistParams struct {
@@ -206,6 +256,7 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
@@ -216,7 +267,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -237,6 +288,7 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
@@ -247,7 +299,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 type PatchUserOnboardingParams struct {
@@ -277,6 +329,7 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
@@ -287,7 +340,7 @@ UPDATE "user" SET
     feishu_open_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 type SetUserFeishuOpenIDParams struct {
@@ -313,6 +366,7 @@ func (q *Queries) SetUserFeishuOpenID(ctx context.Context, arg SetUserFeishuOpen
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err
@@ -331,7 +385,7 @@ UPDATE "user" SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, feishu_open_id
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, feishu_open_id
 `
 
 type UpdateUserParams struct {
@@ -380,6 +434,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
 		&i.FeishuOpenID,
 	)
 	return i, err

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -518,4 +519,30 @@ func TestGetLarkInstallationBotInfo_ReturnsLiveMetadata(t *testing.T) {
 	if memberResponse.Code != http.StatusForbidden {
 		t.Fatalf("member bot info status = %d, want 403", memberResponse.Code)
 	}
+}
+
+func TestLarkInstallationReceiptWireShape(t *testing.T) {
+	now := time.Date(2026, 10, 29, 0, 0, 0, 123000000, time.UTC)
+	row := lark.Installation{AppSecretEncrypted: []byte("never expose"), BindingGeneration: "private-generation"}
+	check := func(want bool) {
+		t.Helper()
+		raw, err := json.Marshal(larkInstallationToResponse(row))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		_, present := body["first_message_received_at"]
+		if present != want {
+			t.Fatalf("receipt present=%v want %v", present, want)
+		}
+		if strings.Contains(string(raw), "private-generation") || strings.Contains(string(raw), "never expose") {
+			t.Fatal("installation internals exposed")
+		}
+	}
+	check(false)
+	row.FirstMessageReceivedAt = &now
+	check(true)
 }

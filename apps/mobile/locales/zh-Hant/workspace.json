@@ -1,0 +1,154 @@
+{
+  "title": "選擇工作區",
+  "members": "成員",
+  "agents": "AI 代理",
+  "select": "選擇工作區",
+  "switch": {
+    "title": "切換工作區",
+    "message": "切換到 {{name}}？",
+    "confirm": "切換",
+    "current_a11y": "{{name}} 是當前工作區",
+    "switch_a11y": "切換到 {{name}}"
+  },
+  "empty": "你還沒有加入任何工作區。請聯絡工作區管理員以獲取邀請。",
+  "agent": {
+    "title": "AI 代理",
+    "empty": "還沒有 AI 代理",
+    "empty_detail": "點按右上角新建 AI 代理，或點按編輯按鈕調整設定。",
+    "search_placeholder": "搜尋 AI 代理...",
+    "model": "模型：{{model}}",
+    "runtime_default": "使用執行時預設模型",
+    "runtime_required": "需繫結執行時",
+    "permission_unavailable": "你沒有權限與此 AI 代理聊天",
+    "status": {
+      "online": "執行時在線",
+      "unstable": "執行時連線不穩定",
+      "offline": "執行時離線",
+      "archived": "已歸檔",
+      "checking": "正在檢查執行時..."
+    },
+    "access": {
+      "workspace": "工作區成員",
+      "specific_people": "指定成員",
+      "owner_only": "僅所有者"
+    },
+    "scope": {
+      "active": "活躍",
+      "archived": "已歸檔"
+    },
+    "empty_archived": "沒有已歸檔的 AI 代理",
+    "actions_a11y": "{{name}}的操作",
+    "runs": {
+      "title": "執行記錄",
+      "view": "檢視執行記錄",
+      "active": "進行中",
+      "past": "歷史",
+      "empty": "還沒有執行記錄",
+      "empty_detail": "任務和聊天產生的執行會顯示在這裡。",
+      "load_failed": "執行記錄載入失敗：{{message}}",
+      "load_more": "載入更多",
+      "load_more_failed": "更早的執行載入失敗，請下拉重試。",
+      "linked_issue": "關聯任務",
+      "open_issue": "開啟任務",
+      "details_a11y": "展開或收起執行詳情",
+      "cancel": "取消執行",
+      "cancel_title": "取消這次執行？",
+      "cancel_message": "AI 代理將在目前步驟結束後停止。",
+      "keep_running": "繼續執行",
+      "cancel_confirm": "取消執行",
+      "retry": "重試",
+      "retry_queued": "已加入重試佇列",
+      "action_failed": "執行操作失敗。",
+      "quota_unavailable": "執行時未回報剩餘提供商額度；如有用量記錄，會顯示在每次執行中。",
+      "usage": "已記錄用量 · 輸入 {{input}} · 輸出 {{output}}",
+      "usage_unavailable": "這次執行沒有用量記錄。",
+      "transcript_failed": "執行詳情載入失敗。",
+      "no_transcript": "沒有記錄執行詳情。",
+      "status": {
+        "queued": "排隊中",
+        "deferred": "等待重試",
+        "dispatched": "正在啟動",
+        "waiting_local_directory": "等待目錄",
+        "running": "執行中",
+        "completed": "已完成",
+        "failed": "失敗",
+        "cancelled": "已取消"
+      }
+    },
+    "lifecycle": {
+      "edit": "編輯 AI 代理",
+      "archive": "歸檔 AI 代理",
+      "restore": "恢復 AI 代理",
+      "archive_title": "歸檔 {{name}}？",
+      "archive_message": "該 AI 代理將從活躍列表中隱藏，之後可以恢復。",
+      "archive_confirm": "歸檔",
+      "restore_title": "恢復 {{name}}？",
+      "restore_message": "該 AI 代理將保留現有設定並恢復使用。",
+      "restore_confirm": "恢復",
+      "pending": "正在更新 AI 代理…",
+      "failed": "AI 代理更新失敗。"
+    },
+    "errors": {
+      "load_failed": "AI 代理載入失敗：{{message}}"
+    },
+    "editor": {
+      "title_create": "新建 AI 代理",
+      "title_edit": "編輯 AI 代理",
+      "create_a11y": "新建 AI 代理",
+      "edit_a11y": "編輯 {{name}}",
+      "name": "名稱",
+      "name_placeholder": "例如：iOS 開發",
+      "description": "描述",
+      "description_placeholder": "選填，便於成員理解職責",
+      "runtime": "執行時",
+      "runtime_placeholder": "選擇執行時",
+      "runtime_no_access": "無存取權限",
+      "runtimes_empty": "此工作區還沒有已註冊的執行時。",
+      "saved_custom_runtime": "已儲存的執行時 · 不在目前目錄中",
+      "model": "模型",
+      "model_placeholder": "留空使用執行時預設模型",
+      "models_loading": "正在探索模型…",
+      "models_offline": "執行時離線，模型目錄無法使用。仍可手動輸入模型 ID。",
+      "models_managed": "此執行時自行管理模型。可保留執行時預設值，或輸入受支援的自訂值。",
+      "models_empty": "執行時未回報模型，可手動輸入模型 ID。",
+      "runtime_recommended": "執行時推薦",
+      "model_unavailable": "無法在此執行時上執行",
+      "saved_custom_model": "已儲存的自訂模型",
+      "custom_model": "自訂模型 ID",
+      "use_custom_model": "使用此模型",
+      "instructions": "指令",
+      "instructions_placeholder": "描述職責、工作方式和邊界",
+      "visibility": "可見性",
+      "workspace": "工作區成員",
+      "private": "僅自己",
+      "create": "建立 AI 代理",
+      "save": "儲存",
+      "save_failed": "儲存失敗：{{message}}",
+      "visibility_owner_only": "只有 AI 代理所有者可以修改可見性",
+      "no_permission": "你沒有權限管理 AI 代理"
+    }
+  },
+  "run_completion": {
+    "title": "執行已完成",
+    "open": "開啟",
+    "dismiss": "關閉通知"
+  },
+  "actions": {
+    "retry": "重試",
+    "sign_out": "退出登入"
+  },
+  "auth": {
+    "signed_in_as": "當前登入帳號"
+  },
+  "errors": {
+    "load_failed": "工作區載入失敗：{{message}}"
+  },
+  "pins": {
+    "errors": {
+      "load_failed": "固定項載入失敗：{{message}}"
+    },
+    "empty": "還沒有固定項。",
+    "unavailable_issue": "該固定任務不可用。",
+    "unavailable_project": "該固定專案不可用。"
+  }
+}

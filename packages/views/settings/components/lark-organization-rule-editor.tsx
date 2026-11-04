@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search } from "@multica/ui/icons";
 import type {
   Agent,
   LarkOrganizationCatalog,

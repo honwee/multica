@@ -242,6 +242,15 @@ export default function WorkspaceLayout() {
         <Stack.Screen name="agent/[id]/picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
         <Stack.Screen name="agent/new-picker/runtime" options={AGENT_PICKER_SHEET_OPTIONS} />
         <Stack.Screen name="agent/new-picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen
+          name="issue/[id]/run/[taskId]"
+          options={{
+            title: t("navigation:routes.execution_record"),
+            // Opened above the runs formSheet; dismiss back to that sheet.
+            presentation: "modal",
+            headerLeft: () => <ModalCloseButton />,
+          }}
+        />
         {/* Full emoji picker for a comment reaction. Pushed from the "+"
             button inside the comment long-press tapback row — see
             components/issue/comment-context-menu.tsx. */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, RotateCcw } from "lucide-react";
+import { LoaderCircle, RotateCcw } from "@multica/ui/icons";
 import type {
   LarkOrganizationAgentChange,
   LarkOrganizationSyncChange,

@@ -12,7 +12,7 @@ export function LumistBrand({ logo, className }: LumistBrandProps) {
     <div className={cn("flex items-center justify-center gap-4", className)}>
       {logo}
       <span aria-hidden="true" className="h-8 w-px bg-border" />
-      <MulticaIcon bordered size="lg" />
+      <MulticaIcon size={40} />
     </div>
   );
 }
