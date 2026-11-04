@@ -113,21 +113,22 @@ func (q *Queries) CreateFeishuOrgRoleMapping(ctx context.Context, arg CreateFeis
 
 const createFeishuOrgSyncRun = `-- name: CreateFeishuOrgSyncRun :one
 INSERT INTO feishu_org_sync_run (
-    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id
+    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id, directory_fetched_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at
+RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at, directory_fetched_at
 `
 
 type CreateFeishuOrgSyncRunParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	Mode           string      `json:"mode"`
-	Status         string      `json:"status"`
-	Revision       int64       `json:"revision"`
-	Plan           []byte      `json:"plan"`
-	RequestedBy    pgtype.UUID `json:"requested_by"`
-	ReplayedFromID pgtype.UUID `json:"replayed_from_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Mode               string             `json:"mode"`
+	Status             string             `json:"status"`
+	Revision           int64              `json:"revision"`
+	Plan               []byte             `json:"plan"`
+	RequestedBy        pgtype.UUID        `json:"requested_by"`
+	ReplayedFromID     pgtype.UUID        `json:"replayed_from_id"`
+	DirectoryFetchedAt pgtype.Timestamptz `json:"directory_fetched_at"`
 }
 
 func (q *Queries) CreateFeishuOrgSyncRun(ctx context.Context, arg CreateFeishuOrgSyncRunParams) (FeishuOrgSyncRun, error) {
@@ -139,6 +140,7 @@ func (q *Queries) CreateFeishuOrgSyncRun(ctx context.Context, arg CreateFeishuOr
 		arg.Plan,
 		arg.RequestedBy,
 		arg.ReplayedFromID,
+		arg.DirectoryFetchedAt,
 	)
 	var i FeishuOrgSyncRun
 	err := row.Scan(
@@ -153,6 +155,7 @@ func (q *Queries) CreateFeishuOrgSyncRun(ctx context.Context, arg CreateFeishuOr
 		&i.ReplayedFromID,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.DirectoryFetchedAt,
 	)
 	return i, err
 }
@@ -397,7 +400,7 @@ func (q *Queries) GetFeishuOrgInstallationForWorkspace(ctx context.Context, arg 
 }
 
 const getFeishuOrgSyncRunInWorkspace = `-- name: GetFeishuOrgSyncRunInWorkspace :one
-SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
+SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at, directory_fetched_at FROM feishu_org_sync_run
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -421,6 +424,7 @@ func (q *Queries) GetFeishuOrgSyncRunInWorkspace(ctx context.Context, arg GetFei
 		&i.ReplayedFromID,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.DirectoryFetchedAt,
 	)
 	return i, err
 }
@@ -782,7 +786,7 @@ func (q *Queries) ListFeishuOrgRoleMappings(ctx context.Context, workspaceID pgt
 }
 
 const listFeishuOrgSyncRuns = `-- name: ListFeishuOrgSyncRuns :many
-SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
+SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at, directory_fetched_at FROM feishu_org_sync_run
 WHERE workspace_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT 20
@@ -809,6 +813,7 @@ func (q *Queries) ListFeishuOrgSyncRuns(ctx context.Context, workspaceID pgtype.
 			&i.ReplayedFromID,
 			&i.CreatedAt,
 			&i.CompletedAt,
+			&i.DirectoryFetchedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -961,7 +966,7 @@ SET status = $1,
     error = $3,
     completed_at = $4
 WHERE id = $5 AND workspace_id = $6
-RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at
+RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at, directory_fetched_at
 `
 
 type UpdateFeishuOrgSyncRunParams struct {
@@ -995,6 +1000,7 @@ func (q *Queries) UpdateFeishuOrgSyncRun(ctx context.Context, arg UpdateFeishuOr
 		&i.ReplayedFromID,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.DirectoryFetchedAt,
 	)
 	return i, err
 }

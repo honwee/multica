@@ -44,14 +44,19 @@ func (s *FeishuOrgContactSync) NotifyContactChange(_ context.Context, inst lark.
 	key := uuidToString(inst.ID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if timer, ok := s.pending[key]; ok {
-		timer.Reset(s.delay)
+	// Reset reports false once the timer has fired; its callback is then
+	// about to run (or waiting on this lock), so a fresh timer is needed and
+	// the old callback must not remove it from pending.
+	if timer, ok := s.pending[key]; ok && timer.Reset(s.delay) {
 		return
 	}
 	slog.Debug("feishu org: contact event scheduled a directory refresh", "installation_id", key, "event_type", eventType)
-	s.pending[key] = time.AfterFunc(s.delay, func() {
+	var timer *time.Timer
+	timer = time.AfterFunc(s.delay, func() {
 		s.mu.Lock()
-		delete(s.pending, key)
+		if s.pending[key] == timer {
+			delete(s.pending, key)
+		}
 		s.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -59,4 +64,5 @@ func (s *FeishuOrgContactSync) NotifyContactChange(_ context.Context, inst lark.
 			slog.Warn("feishu org: event-driven sync failed", "installation_id", key, "error", err)
 		}
 	})
+	s.pending[key] = timer
 }

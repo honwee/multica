@@ -34,6 +34,8 @@ type feishuOrgApplyOptions struct {
 	// automatic runs have no human reviewing them, so owner-affecting changes
 	// are skipped instead of refused.
 	automatic bool
+	// directory is the version the plan is built from, recorded on the run.
+	directory db.FeishuOrgDirectory
 }
 
 // applyFeishuOrgSync rebuilds the plan from the directory inside one
@@ -51,7 +53,7 @@ func (h *Handler) applyFeishuOrgSync(ctx context.Context, actor feishuOrgActor, 
 		if tx != nil {
 			_ = tx.Rollback(ctx)
 		}
-		_, _ = h.createFeishuOrgSyncRun(ctx, h.Queries, actor, opts.mode, "failed", config.Revision, plan, cause.Error(), sourceID)
+		_, _ = h.createFeishuOrgSyncRun(ctx, h.Queries, actor, opts.mode, "failed", config.Revision, plan, cause.Error(), sourceID, opts.directory.FetchedAt)
 		return db.FeishuOrgSyncRun{}, cause
 	}
 	tx, err := h.TxStarter.Begin(ctx)
@@ -163,7 +165,7 @@ func (h *Handler) applyFeishuOrgSync(ctx context.Context, actor feishuOrgActor, 
 	if err := qtx.ApplyFeishuOrgGroupStates(ctx, actor.workspaceID); err != nil {
 		return fail(err)
 	}
-	run, err := h.createFeishuOrgSyncRun(ctx, qtx, actor, opts.mode, "completed", config.Revision, plan, "", sourceID)
+	run, err := h.createFeishuOrgSyncRun(ctx, qtx, actor, opts.mode, "completed", config.Revision, plan, "", sourceID, opts.directory.FetchedAt)
 	if err != nil {
 		return fail(err)
 	}
@@ -187,35 +189,25 @@ func (h *Handler) feishuOrgSkipOwnerChanges(ctx context.Context, q *db.Queries, 
 	if err != nil {
 		return plan, err
 	}
-	roles := make(map[string]string, len(members))
-	for _, member := range members {
-		roles[uuidToString(member.UserID)] = member.Role
-	}
-	skippedUsers := make(map[string]struct{})
+	roles := feishuOrgMemberRoles(members)
+	// Owners whose disable or restore is skipped keep their membership state
+	// as it is: applying their group changes would either strip access from
+	// a live owner or activate groups for a still-disabled one.
+	frozenMembership := make(map[string]struct{})
 	for i := range plan.Changes {
 		change := &plan.Changes[i]
-		if change.Action == "skipped" {
+		if change.Action == "skipped" || !feishuOrgChangeAffectsOwner(*change, roles) {
 			continue
 		}
-		affectsOwner := false
-		switch change.Action {
-		case "member_disabled", "member_restored":
-			affectsOwner = roles[change.UserID] == "owner"
-		case "role_changed":
-			affectsOwner = change.Before == "owner" || change.After == "owner"
-		}
-		if !affectsOwner {
-			continue
+		if change.Action == "member_disabled" || change.Action == "member_restored" {
+			frozenMembership[change.UserID] = struct{}{}
 		}
 		change.Reason = change.Action + " " + feishuOrgAutoSkipReason
 		change.Action = "skipped"
-		skippedUsers[change.UserID] = struct{}{}
 	}
-	// A disabled owner must keep their groups too, since the disable itself
-	// is skipped; otherwise the plan would strip access from a live owner.
 	kept := plan.Changes[:0]
 	for _, change := range plan.Changes {
-		if _, skipped := skippedUsers[change.UserID]; skipped && change.Action == "group_left" && roles[change.UserID] == "owner" {
+		if _, frozen := frozenMembership[change.UserID]; frozen && (change.Action == "group_left" || change.Action == "group_joined") {
 			continue
 		}
 		kept = append(kept, change)
@@ -223,7 +215,7 @@ func (h *Handler) feishuOrgSkipOwnerChanges(ctx context.Context, q *db.Queries, 
 	plan.Changes = kept
 	assignments := plan.RoleAssignments[:0]
 	for _, assignment := range plan.RoleAssignments {
-		if assignment.Role == "owner" || roles[assignment.UserID] == "owner" {
+		if feishuOrgAssignmentAffectsOwner(assignment, roles) {
 			continue
 		}
 		assignments = append(assignments, assignment)
@@ -245,27 +237,33 @@ func (h *Handler) SyncFeishuOrganizations(ctx context.Context) (int, error) {
 	if len(configs) == 0 {
 		return 0, nil
 	}
-	refreshed := make(map[string]lark.OrgSnapshot)
+	type refreshResult struct {
+		directory db.FeishuOrgDirectory
+		snapshot  lark.OrgSnapshot
+		err       error
+	}
+	// One fetch per installation, successful or not: a tenant whose app lost
+	// its scopes must not be crawled once per workspace sharing it.
+	refreshed := make(map[string]refreshResult)
 	var firstErr error
 	applied := 0
 	for _, config := range configs {
 		installationKey := uuidToString(config.InstallationID)
-		snapshot, ok := refreshed[installationKey]
+		result, ok := refreshed[installationKey]
 		if !ok {
-			snapshot, err = h.refreshFeishuOrgDirectory(ctx, config.InstallationID, pgtype.UUID{})
-			if err != nil {
-				slog.Warn("feishu org auto sync: directory refresh failed", "installation_id", installationKey, "error", err)
+			result.directory, result.snapshot, result.err = h.refreshFeishuOrgDirectory(ctx, config.InstallationID, pgtype.UUID{})
+			refreshed[installationKey] = result
+			if result.err != nil {
+				slog.Warn("feishu org auto sync: directory refresh failed", "installation_id", installationKey, "error", result.err)
 				if firstErr == nil {
-					firstErr = err
+					firstErr = result.err
 				}
-				continue
 			}
-			refreshed[installationKey] = snapshot
 		}
-		if !config.AutoSync {
+		if result.err != nil || !config.AutoSync {
 			continue
 		}
-		if _, err := h.autoApplyFeishuOrg(ctx, config, snapshot); err != nil {
+		if _, err := h.autoApplyFeishuOrg(ctx, config, result.directory, result.snapshot); err != nil {
 			slog.Warn("feishu org auto sync: apply failed", "workspace_id", uuidToString(config.WorkspaceID), "error", err)
 			if firstErr == nil {
 				firstErr = err
@@ -281,20 +279,31 @@ func (h *Handler) SyncFeishuOrganizations(ctx context.Context) (int, error) {
 // and auto-applies every workspace configured on it. The Lark connector
 // calls it when Feishu reports a contact change.
 func (h *Handler) SyncFeishuOrganizationInstallation(ctx context.Context, installationID pgtype.UUID) error {
-	snapshot, err := h.refreshFeishuOrgDirectory(ctx, installationID, pgtype.UUID{})
-	if err != nil {
-		return err
-	}
 	configs, err := h.Queries.ListEnabledFeishuOrgConfigs(ctx)
 	if err != nil {
 		return err
 	}
-	var firstErr error
+	// A bot installed for messaging only has no directory to keep; skip the
+	// contact crawl unless some workspace syncs from this installation.
+	relevant := configs[:0]
 	for _, config := range configs {
-		if config.InstallationID != installationID || !config.AutoSync {
+		if config.InstallationID == installationID {
+			relevant = append(relevant, config)
+		}
+	}
+	if len(relevant) == 0 {
+		return nil
+	}
+	directory, snapshot, err := h.refreshFeishuOrgDirectory(ctx, installationID, pgtype.UUID{})
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, config := range relevant {
+		if !config.AutoSync {
 			continue
 		}
-		if _, err := h.autoApplyFeishuOrg(ctx, config, snapshot); err != nil {
+		if _, err := h.autoApplyFeishuOrg(ctx, config, directory, snapshot); err != nil {
 			slog.Warn("feishu org event sync: apply failed", "workspace_id", uuidToString(config.WorkspaceID), "error", err)
 			if firstErr == nil {
 				firstErr = err
@@ -307,24 +316,25 @@ func (h *Handler) SyncFeishuOrganizationInstallation(ctx context.Context, instal
 // refreshFeishuOrgDirectory fetches the organization behind an installation
 // and stores it as the shared directory. The installation must be active;
 // shared access is validated by the configs that point at it.
-func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, installationID, fetchedBy pgtype.UUID) (lark.OrgSnapshot, error) {
+func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, installationID, fetchedBy pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, error) {
+	none := db.FeishuOrgDirectory{}
 	if h.LarkInstallations == nil || h.LarkAPIClient == nil {
-		return lark.OrgSnapshot{}, errors.New("feishu org: lark integration not configured")
+		return none, lark.OrgSnapshot{}, errors.New("feishu org: lark integration not configured")
 	}
 	orgClient, ok := h.LarkAPIClient.(lark.OrgAPIClient)
 	if !ok {
-		return lark.OrgSnapshot{}, errors.New("feishu org: lark organization API not configured")
+		return none, lark.OrgSnapshot{}, errors.New("feishu org: lark organization API not configured")
 	}
 	installation, err := h.LarkInstallations.Get(ctx, installationID)
 	if err != nil {
-		return lark.OrgSnapshot{}, err
+		return none, lark.OrgSnapshot{}, err
 	}
 	if lark.InstallationStatus(installation.Status) != lark.InstallationActive {
-		return lark.OrgSnapshot{}, errors.New("feishu org: installation is not active")
+		return none, lark.OrgSnapshot{}, errors.New("feishu org: installation is not active")
 	}
 	secret, err := h.LarkInstallations.DecryptAppSecret(installation)
 	if err != nil {
-		return lark.OrgSnapshot{}, err
+		return none, lark.OrgSnapshot{}, err
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -332,33 +342,34 @@ func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, installationID,
 		AppID: installation.AppID, AppSecret: secret, TenantKey: installation.TenantKey.String, Region: lark.Region(installation.Region),
 	})
 	if err != nil {
-		return lark.OrgSnapshot{}, err
+		return none, lark.OrgSnapshot{}, err
 	}
 	if !snapshot.Complete {
-		return lark.OrgSnapshot{}, errors.New("feishu org: fetched directory is incomplete")
+		return none, lark.OrgSnapshot{}, errors.New("feishu org: fetched directory is incomplete")
 	}
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
-		return lark.OrgSnapshot{}, err
+		return none, lark.OrgSnapshot{}, err
 	}
-	if _, err := h.Queries.UpsertFeishuOrgDirectory(ctx, db.UpsertFeishuOrgDirectoryParams{
+	directory, err := h.Queries.UpsertFeishuOrgDirectory(ctx, db.UpsertFeishuOrgDirectoryParams{
 		InstallationID: installationID, Snapshot: snapshotJSON, FetchedBy: fetchedBy,
-	}); err != nil {
-		return lark.OrgSnapshot{}, err
+	})
+	if err != nil {
+		return none, lark.OrgSnapshot{}, err
 	}
-	return snapshot, nil
+	return directory, snapshot, nil
 }
 
 // autoApplyFeishuOrg applies the current plan for one workspace on behalf of
 // the admin who last saved the configuration, falling back to the earliest
 // active owner. The run is recorded with mode "auto".
-func (h *Handler) autoApplyFeishuOrg(ctx context.Context, config db.FeishuOrgConfig, snapshot lark.OrgSnapshot) (db.FeishuOrgSyncRun, error) {
+func (h *Handler) autoApplyFeishuOrg(ctx context.Context, config db.FeishuOrgConfig, directory db.FeishuOrgDirectory, snapshot lark.OrgSnapshot) (db.FeishuOrgSyncRun, error) {
 	actorID, err := h.feishuOrgAutomaticActor(ctx, config)
 	if err != nil {
 		return db.FeishuOrgSyncRun{}, err
 	}
 	actor := feishuOrgActor{workspaceID: config.WorkspaceID, userID: actorID}
-	return h.applyFeishuOrgSync(ctx, actor, config, snapshot, feishuOrgApplyOptions{mode: "auto", automatic: true})
+	return h.applyFeishuOrgSync(ctx, actor, config, snapshot, feishuOrgApplyOptions{mode: "auto", automatic: true, directory: directory})
 }
 
 func (h *Handler) feishuOrgAutomaticActor(ctx context.Context, config db.FeishuOrgConfig) (pgtype.UUID, error) {

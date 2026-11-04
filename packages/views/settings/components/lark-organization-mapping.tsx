@@ -147,7 +147,9 @@ export function LarkOrganizationMapping({
   const canApply = Boolean(
     canManage && displayedRun &&
       (displayedRun.mode === "preview" || displayedRun.mode === "replay") &&
-      displayedRun.status === "preview" && displayedRun.revision === config?.revision,
+      displayedRun.status === "preview" && displayedRun.revision === config?.revision &&
+      // The directory a preview was planned against must still be current.
+      (!displayedRun.directory_fetched_at || !catalog || displayedRun.directory_fetched_at === catalog.snapshot_at),
   );
   const canReplay = Boolean(
     canManage && displayedRun && (displayedRun.mode === "preview" || displayedRun.mode === "replay"),
@@ -326,7 +328,17 @@ export function LarkOrganizationMapping({
                   {canManage && (
                     <div className="flex items-center gap-2 pb-2">
                       <Label htmlFor={`${id}-enabled`}>{t(($) => $.lark.organization.enabled)}</Label>
-                      <Switch id={`${id}-enabled`} checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} disabled={pending !== null} />
+                      <Switch
+                        id={`${id}-enabled`}
+                        checked={enabled}
+                        onCheckedChange={(checked) => {
+                          setEnabled(checked === true);
+                          // Automatic sync has no meaning while sync is off; clear it
+                          // so re-enabling later does not silently resume unattended applies.
+                          if (checked !== true) setAutoSync(false);
+                        }}
+                        disabled={pending !== null}
+                      />
                     </div>
                   )}
                   {canManage && (
@@ -436,7 +448,7 @@ export function LarkOrganizationMapping({
                   agentNames={agentNames}
                   canApply={canApply}
                   canReplay={canReplay}
-                  stale={displayedRun.revision !== config?.revision && displayedRun.status === "preview"}
+                  stale={displayedRun.status === "preview" && (displayedRun.revision !== config?.revision || (!!displayedRun.directory_fetched_at && !!catalog && displayedRun.directory_fetched_at !== catalog.snapshot_at))}
                   pending={pending}
                   onReplay={() => displayedRun && replay(displayedRun)}
                   onApply={() => setApplyOpen(true)}

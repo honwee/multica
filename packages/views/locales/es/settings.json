@@ -1017,7 +1017,7 @@
       "apply_confirm_title": "¿Aplicar esta vista previa?",
       "apply_confirm_description": "Se actualizarán los roles del espacio de trabajo y las asociaciones de agentes según esta vista previa.",
       "apply_confirm_cancel": "Cancelar",
-      "stale_preview": "La configuración ha cambiado. Vuelve a previsualizar antes de aplicar.",
+      "stale_preview": "La configuración o el directorio de la organización cambiaron. Vuelve a previsualizar antes de aplicar.",
       "sync_now": "Sincronizar y previsualizar",
       "sync_waiting": "Leyendo la organización y calculando los cambios. Tiempo transcurrido: {{seconds}} s",
       "stats_departments": "Departamentos",

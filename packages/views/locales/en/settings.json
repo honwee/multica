@@ -1035,7 +1035,7 @@
       "apply_confirm_title": "Apply this preview?",
       "apply_confirm_description": "This updates workspace roles and agent associations to match this preview.",
       "apply_confirm_cancel": "Cancel",
-      "stale_preview": "Configuration changed. Preview again before applying.",
+      "stale_preview": "Configuration or organization directory changed. Preview again before applying.",
       "sync_now": "Sync & preview",
       "sync_waiting": "Reading the organization and calculating changes. Elapsed: {{seconds}}s",
       "stats_departments": "Departments",

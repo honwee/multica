@@ -37,6 +37,14 @@ func (h *Handler) joinFeishuOrganizationWorkspaces(ctx context.Context, user db.
 		if !config.AutoSync {
 			continue
 		}
+		// Membership is the cheap check; only load a directory for a
+		// workspace the user is not already in.
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: user.ID, WorkspaceID: config.WorkspaceID}); err == nil {
+			continue
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("feishu org join: membership lookup failed", "workspace_id", uuidToString(config.WorkspaceID), "error", err)
+			continue
+		}
 		key := uuidToString(config.InstallationID)
 		snapshot, ok := directories[key]
 		if !ok {
@@ -125,8 +133,11 @@ func (h *Handler) joinFeishuOrgWorkspace(ctx context.Context, config db.FeishuOr
 	if !access.Entitled() {
 		return nil
 	}
+	// A role from a rule is recorded as managed so later syncs keep it in
+	// step. Owner is capped to admin and left unmanaged: the next run then
+	// plans the promotion as a role change an owner can apply by hand.
 	role := access.Role
-	managed := role != ""
+	managed := role != "" && role != "owner"
 	switch role {
 	case "":
 		role = "member"

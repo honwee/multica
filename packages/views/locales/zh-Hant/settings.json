@@ -1030,7 +1030,7 @@
       "apply_confirm_title": "套用此預覽？",
       "apply_confirm_description": "工作區角色和 AI 代理關聯將依此預覽更新。",
       "apply_confirm_cancel": "取消",
-      "stale_preview": "設定已變更，請重新預覽後再套用。",
+      "stale_preview": "設定或組織目錄已變更，請重新預覽後再套用。",
       "sync_now": "同步並預覽",
       "sync_waiting": "正在讀取組織架構並計算差異，已等待 {{seconds}} 秒。",
       "stats_departments": "部門",

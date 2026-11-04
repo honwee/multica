@@ -3514,6 +3514,7 @@ export const LarkOrganizationSyncRunSchema = z.object({
   error: z.string().default(""),
   requested_by: z.string().default(""),
   replayed_from_id: z.string().nullable().optional(),
+  directory_fetched_at: z.string().nullable().optional(),
   created_at: z.string(),
   completed_at: z.string().nullable().optional(),
 }).loose();

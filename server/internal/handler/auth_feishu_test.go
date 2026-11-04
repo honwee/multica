@@ -351,7 +351,10 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
 		InstallationID: fixture.installationID, Enabled: true, AutoSync: true,
-		Mappings: []LarkOrganizationMappingResponse{{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")}},
+		Mappings: []LarkOrganizationMappingResponse{
+			{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")},
+			{Kind: "department", ExternalID: "d3", ExternalName: "Leadership", MemberRole: feishuOrgRole("owner")},
+		},
 	})
 	w := httptest.NewRecorder()
 	testHandler.UpdateLarkOrganization(w, req)
@@ -360,13 +363,15 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 	}
 	joinerEmail := "feishu-joiner-" + fixture.workspaceID + "@corp.example.com"
 	outsiderEmail := "feishu-outsider-" + fixture.workspaceID + "@corp.example.com"
-	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2`, joinerEmail, outsiderEmail)
+	leaderEmail := "feishu-leader-" + fixture.workspaceID + "@corp.example.com"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2 OR email = $3`, joinerEmail, outsiderEmail, leaderEmail)
 	snapshot, _ := json.Marshal(lark.OrgSnapshot{
 		Complete:    true,
-		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}, {ID: "d2", Name: "Sales", ParentID: "0"}},
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}, {ID: "d2", Name: "Sales", ParentID: "0"}, {ID: "d3", Name: "Leadership", ParentID: "0"}},
 		Users: []lark.OrgUser{
 			{OpenID: "ou_joiner_dir", UnionID: "on_joiner", EnterpriseEmail: joinerEmail, Name: "Joiner", DepartmentIDs: []string{"d1"}, Active: true},
 			{OpenID: "ou_outsider_dir", UnionID: "on_outsider", EnterpriseEmail: outsiderEmail, Name: "Outsider", DepartmentIDs: []string{"d2"}, Active: true},
+			{OpenID: "ou_leader_dir", UnionID: "on_leader", EnterpriseEmail: leaderEmail, Name: "Leader", DepartmentIDs: []string{"d3"}, Active: true},
 		},
 	})
 	if _, err := testHandler.Queries.UpsertFeishuOrgDirectory(context.Background(), db.UpsertFeishuOrgDirectoryParams{
@@ -411,5 +416,15 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 	outsider := login("on_outsider", "ou_outsider_login", outsiderEmail)
 	if count := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, outsider.User.ID); count != 0 {
 		t.Fatal("a user outside every rule must not be admitted")
+	}
+
+	// An owner rule never grants owner unattended: the person joins as an
+	// unmanaged admin so a later manual apply can promote them.
+	leader := login("on_leader", "ou_leader_login", leaderEmail)
+	if err := testPool.QueryRow(context.Background(), `SELECT role, feishu_managed_role FROM member WHERE workspace_id = $1 AND user_id = $2 AND disabled_at IS NULL`, fixture.workspaceID, leader.User.ID).Scan(&role, &managed); err != nil {
+		t.Fatalf("leader is not a member: %v", err)
+	}
+	if role != "admin" || managed.Valid {
+		t.Fatalf("leader role = %q managed = %+v, want unmanaged admin", role, managed)
 	}
 }

@@ -143,9 +143,9 @@ ORDER BY fom.group_id;
 
 -- name: CreateFeishuOrgSyncRun :one
 INSERT INTO feishu_org_sync_run (
-    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id
+    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id, directory_fetched_at
 ) VALUES (
-    @workspace_id, @mode, @status, @revision, @plan, @requested_by, @replayed_from_id
+    @workspace_id, @mode, @status, @revision, @plan, @requested_by, @replayed_from_id, @directory_fetched_at
 )
 RETURNING *;
 

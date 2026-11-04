@@ -801,7 +801,7 @@ func TestFeishuOrgRejectsCrossWorkspaceRun(t *testing.T) {
 	sourceFixture := newFeishuOrgHandlerFixture(t)
 	otherFixture := newFeishuOrgHandlerFixture(t)
 	actor := feishuOrgActor{workspaceID: parseUUID(sourceFixture.workspaceID), userID: parseUUID(sourceFixture.ownerID)}
-	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, emptyFeishuOrgPlan(), "", pgtype.UUID{})
+	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, emptyFeishuOrgPlan(), "", pgtype.UUID{}, pgtype.Timestamptz{})
 	if err != nil {
 		t.Fatalf("create source run: %v", err)
 	}
@@ -994,6 +994,15 @@ func TestFeishuOrgApplyRequiresFetchedDirectory(t *testing.T) {
 	previewRun := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
 	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID); count != 1 {
 		t.Fatalf("directory rows after preview = %d, want 1", count)
+	}
+	// A refresh after the preview invalidates the reviewed plan.
+	dbfx.Exec(t, `UPDATE feishu_org_directory SET fetched_at = now() + interval '1 second' WHERE installation_id = $1`, fixture.installationID)
+	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusConflict || !strings.Contains(applied.Body.String(), "directory changed") {
+		t.Fatalf("apply after directory refresh status = %d, want 409 directory changed; body=%s", applied.Code, applied.Body.String())
+	}
+	replayed := decodeFeishuOrgRun(t, replayFeishuOrg(t, fixture, previewRun.ID))
+	if applied := applyFeishuOrg(t, fixture, replayed.ID); applied.Code != http.StatusOK {
+		t.Fatalf("apply of a fresh replay status = %d, body=%s", applied.Code, applied.Body.String())
 	}
 	dbfx.Exec(t, `DELETE FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID)
 	if replayed := replayFeishuOrg(t, fixture, previewRun.ID); replayed.Code != http.StatusConflict {

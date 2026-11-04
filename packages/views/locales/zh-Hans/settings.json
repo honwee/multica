@@ -1030,7 +1030,7 @@
       "apply_confirm_title": "应用此预览？",
       "apply_confirm_description": "工作区角色和智能体关联将按此预览更新。",
       "apply_confirm_cancel": "取消",
-      "stale_preview": "配置已变更，请重新预览后再应用。",
+      "stale_preview": "配置或组织目录已变更，请重新预览后再应用。",
       "sync_now": "同步并预览",
       "sync_waiting": "正在读取组织架构并计算差异，已等待 {{seconds}} 秒。",
       "stats_departments": "部门",

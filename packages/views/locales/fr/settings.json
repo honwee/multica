@@ -1033,7 +1033,7 @@
       "apply_confirm_title": "Appliquer cet aperçu ?",
       "apply_confirm_description": "Les rôles de l’espace de travail et les associations d’agents seront mis à jour selon cet aperçu.",
       "apply_confirm_cancel": "Annuler",
-      "stale_preview": "La configuration a changé. Créez un nouvel aperçu avant d’appliquer les changements.",
+      "stale_preview": "La configuration ou l'annuaire de l'organisation a changé. Prévisualisez à nouveau avant d'appliquer.",
       "console_description": "Lisez les données d’organisation Feishu pour configurer les autorisations Multica, sans associer d’agent.",
       "connection_connected": "Connecté",
       "sync_now": "Synchroniser et prévisualiser",

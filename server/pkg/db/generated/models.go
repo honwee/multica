@@ -767,17 +767,18 @@ type FeishuOrgRoleMapping struct {
 }
 
 type FeishuOrgSyncRun struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Mode           string             `json:"mode"`
-	Status         string             `json:"status"`
-	Revision       int64              `json:"revision"`
-	Plan           []byte             `json:"plan"`
-	Error          pgtype.Text        `json:"error"`
-	RequestedBy    pgtype.UUID        `json:"requested_by"`
-	ReplayedFromID pgtype.UUID        `json:"replayed_from_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Mode               string             `json:"mode"`
+	Status             string             `json:"status"`
+	Revision           int64              `json:"revision"`
+	Plan               []byte             `json:"plan"`
+	Error              pgtype.Text        `json:"error"`
+	RequestedBy        pgtype.UUID        `json:"requested_by"`
+	ReplayedFromID     pgtype.UUID        `json:"replayed_from_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	DirectoryFetchedAt pgtype.Timestamptz `json:"directory_fetched_at"`
 }
 
 type GithubInstallation struct {

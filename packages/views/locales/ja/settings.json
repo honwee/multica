@@ -1028,7 +1028,7 @@
       "apply_confirm_title": "このプレビューを適用しますか？",
       "apply_confirm_description": "ワークスペースのロールとエージェントの関連付けがこのプレビューどおりに更新されます。",
       "apply_confirm_cancel": "キャンセル",
-      "stale_preview": "設定が変更されました。適用する前に再度プレビューしてください。",
+      "stale_preview": "設定または組織ディレクトリが変更されました。適用する前にもう一度プレビューしてください。",
       "console_description": "Feishu の組織情報を読み取り、Multica ワークスペースの権限を設定します。エージェント連携は不要です。",
       "connection_connected": "接続済み",
       "sync_now": "同期してプレビュー",

@@ -146,6 +146,9 @@ export interface LarkOrganizationSyncRun {
   error: string;
   requested_by: string;
   replayed_from_id?: string | null;
+  /** Directory version the plan was built from; compare with the catalog's
+   * snapshot_at to tell whether the plan is still current. */
+  directory_fetched_at?: string | null;
   created_at: string;
   completed_at?: string | null;
 }
