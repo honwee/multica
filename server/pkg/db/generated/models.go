@@ -717,13 +717,6 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type FeishuOrgAgentMapping struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	GroupID     pgtype.UUID        `json:"group_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type FeishuOrgConfig struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	InstallationID pgtype.UUID        `json:"installation_id"`

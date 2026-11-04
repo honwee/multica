@@ -3,13 +3,11 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Search } from "@multica/ui/icons";
 import type {
-  Agent,
   LarkOrganizationCatalog,
   LarkOrganizationMemberRole,
   LarkOrganizationMapping,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -46,14 +44,12 @@ export function LarkOrganizationRuleEditor({
   open,
   mapping,
   catalog,
-  agents,
   onOpenChange,
   onSave,
 }: {
   open: boolean;
   mapping: LarkOrganizationMapping | null;
   catalog: LarkOrganizationCatalog | null | undefined;
-  agents: Agent[];
   onOpenChange: (open: boolean) => void;
   onSave: (mapping: LarkOrganizationMapping) => void;
 }) {
@@ -63,7 +59,6 @@ export function LarkOrganizationRuleEditor({
   const [externalId, setExternalId] = useState("");
   const [externalName, setExternalName] = useState("");
   const [memberRole, setMemberRole] = useState<LarkOrganizationMemberRole | null>("member");
-  const [agentIds, setAgentIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [showError, setShowError] = useState(false);
 
@@ -73,7 +68,6 @@ export function LarkOrganizationRuleEditor({
     setExternalId(mapping?.external_id ?? "");
     setExternalName(mapping?.external_name ?? "");
     setMemberRole(mapping ? mapping.member_role : "member");
-    setAgentIds(mapping?.agent_ids ?? []);
     setSearch("");
     setShowError(false);
   }, [open, mapping]);
@@ -149,7 +143,6 @@ export function LarkOrganizationRuleEditor({
       external_id: externalId,
       external_name: externalName || selected?.name || externalId,
       member_role: memberRole,
-      agent_ids: agentIds,
     });
     onOpenChange(false);
   }
@@ -258,27 +251,6 @@ export function LarkOrganizationRuleEditor({
           </div>
           {showError && <p className="text-caption text-destructive">{t(($) => $.lark.organization.source_required)}</p>}
         </div>
-        <fieldset className="space-y-2">
-          <legend className="text-caption font-medium">{t(($) => $.lark.organization.agents)}</legend>
-          <p className="text-caption text-muted-foreground">{t(($) => $.lark.organization.agent_scope_note)}</p>
-          <div className="grid max-h-32 gap-2 overflow-y-auto sm:grid-cols-2">
-            {agents.map((agent) => {
-              const checked = agentIds.includes(agent.id);
-              return (
-                <div key={agent.id} className="flex items-center gap-2">
-                  <Checkbox
-                    id={`${id}-agent-${agent.id}`}
-                    checked={checked}
-                    onCheckedChange={(next) => setAgentIds((current) =>
-                      next === true ? [...current, agent.id] : current.filter((item) => item !== agent.id),
-                    )}
-                  />
-                  <Label htmlFor={`${id}-agent-${agent.id}`} className="truncate font-normal">{agent.name}</Label>
-                </div>
-              );
-            })}
-          </div>
-        </fieldset>
         <DialogFooter>
           <DialogClose render={<Button variant="outline" />}>
             {t(($) => $.lark.organization.apply_confirm_cancel)}

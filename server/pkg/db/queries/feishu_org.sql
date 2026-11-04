@@ -63,11 +63,6 @@ INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
 VALUES (@workspace_id, @group_id, @role)
 RETURNING *;
 
--- name: ListFeishuOrgAgentMappings :many
-SELECT * FROM feishu_org_agent_mapping
-WHERE workspace_id = $1
-ORDER BY created_at, group_id, agent_id;
-
 -- name: ListFeishuOrgAgentTargets :many
 SELECT ait.agent_id, ait.target_id AS group_id
 FROM agent_invocation_target ait
@@ -79,26 +74,11 @@ WHERE a.workspace_id = $1
   AND ait.target_type = 'team'
 ORDER BY ait.agent_id, ait.target_id;
 
--- name: DeleteFeishuOrgAgentMappings :exec
-DELETE FROM feishu_org_agent_mapping
-WHERE workspace_id = $1;
-
--- name: CreateFeishuOrgAgentMapping :one
-INSERT INTO feishu_org_agent_mapping (workspace_id, group_id, agent_id)
-VALUES (@workspace_id, @group_id, @agent_id)
-RETURNING *;
-
 -- name: DeleteAgentInvocationTarget :exec
 DELETE FROM agent_invocation_target
 WHERE agent_id = @agent_id
   AND target_type = @target_type
   AND target_id = @target_id;
-
--- name: SetAgentPublicTo :one
-UPDATE agent
-SET permission_mode = 'public_to', updated_at = now()
-WHERE id = @id AND workspace_id = @workspace_id
-RETURNING *;
 
 -- name: UpsertFeishuOrgMembership :one
 INSERT INTO feishu_org_membership (workspace_id, group_id, user_id, active)
@@ -241,9 +221,6 @@ deleted_sync_runs AS (
 ),
 deleted_memberships AS (
     DELETE FROM feishu_org_membership WHERE workspace_id = $1
-),
-deleted_agent_mappings AS (
-    DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1
 ),
 deleted_role_mappings AS (
     DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1

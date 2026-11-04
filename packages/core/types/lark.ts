@@ -102,12 +102,13 @@ export interface LarkOrganizationConfig {
 
 export type LarkOrganizationMemberRole = "owner" | "admin" | "member";
 
+/** One organization rule. Agent access is granted from the agent access
+ * picker against an applied group, not from the rule. */
 export interface LarkOrganizationMapping {
-  kind: "department" | "job_title" | string;
+  kind: "department" | "job_title" | "user" | string;
   external_id: string;
   external_name: string;
   member_role: LarkOrganizationMemberRole | null;
-  agent_ids: string[];
 }
 
 export interface LarkOrganizationSyncChange {

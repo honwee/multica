@@ -18,7 +18,6 @@ func cleanupInheritedFeishuOrg(t *testing.T, workspaceID string) {
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_sync_run WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_membership WHERE workspace_id = $1`, workspaceID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_group WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_config WHERE workspace_id = $1`, workspaceID)
@@ -29,7 +28,7 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{{
 		Kind: "department", ExternalID: "d1", ExternalName: "Engineering",
-		MemberRole: feishuOrgRole("member"), AgentIDs: []string{fixture.agentID},
+		MemberRole: feishuOrgRole("member"),
 	}}); w.Code != http.StatusOK {
 		t.Fatalf("save source config: status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -72,10 +71,6 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	roles, err := testHandler.Queries.ListFeishuOrgRoleMappings(context.Background(), workspaceID)
 	if err != nil || len(roles) != 1 || roles[0].Role != "member" {
 		t.Fatalf("unexpected inherited role mappings: %+v err=%v", roles, err)
-	}
-	agents, err := testHandler.Queries.ListFeishuOrgAgentMappings(context.Background(), workspaceID)
-	if err != nil || len(agents) != 0 {
-		t.Fatalf("agent bindings must not be inherited: %+v err=%v", agents, err)
 	}
 	runs, err := testHandler.Queries.ListFeishuOrgSyncRuns(context.Background(), workspaceID)
 	if err != nil || len(runs) != 1 || runs[0].Mode != "preview" || runs[0].Status != "preview" {

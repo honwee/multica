@@ -10,12 +10,11 @@ import (
 )
 
 type Mapping struct {
-	GroupID      string   `json:"group_id"`
-	Kind         string   `json:"kind"`
-	ExternalID   string   `json:"external_id"`
-	ExternalName string   `json:"external_name"`
-	MemberRole   string   `json:"member_role"`
-	AgentIDs     []string `json:"agent_ids"`
+	GroupID      string `json:"group_id"`
+	Kind         string `json:"kind"`
+	ExternalID   string `json:"external_id"`
+	ExternalName string `json:"external_name"`
+	MemberRole   string `json:"member_role"`
 }
 
 type Member struct {

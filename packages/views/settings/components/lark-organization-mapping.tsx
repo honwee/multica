@@ -99,10 +99,7 @@ export function LarkOrganizationMapping({
     );
     setEnabled(config?.enabled ?? false);
     setMappings(
-      (data?.mappings ?? []).map((mapping) => ({
-        ...mapping,
-        agent_ids: [...mapping.agent_ids],
-      })),
+      (data?.mappings ?? []).map((mapping) => ({ ...mapping })),
     );
   }, [data, activeInstallations]);
 
@@ -356,7 +353,6 @@ export function LarkOrganizationMapping({
                   <TableHeader><TableRow>
                     <TableHead>{t(($) => $.lark.organization.rule_source)}</TableHead>
                     <TableHead>{t(($) => $.lark.organization.member_role)}</TableHead>
-                    <TableHead>{t(($) => $.lark.organization.agents)}</TableHead>
                     {canManage && <TableHead className="w-24"><span className="sr-only">{t(($) => $.lark.organization.rule_actions)}</span></TableHead>}
                   </TableRow></TableHeader>
                   <TableBody>
@@ -378,11 +374,6 @@ export function LarkOrganizationMapping({
                             </div>
                           </TableCell>
                           <TableCell>{mapping.member_role ?? t(($) => $.lark.organization.no_member_role)}</TableCell>
-                          <TableCell className="whitespace-normal">
-                            {mapping.agent_ids.length
-                              ? mapping.agent_ids.map((agentId) => agentNames.get(agentId) ?? t(($) => $.lark.organization.unknown_agent)).join(", ")
-                              : t(($) => $.lark.organization.no_agent_grant)}
-                          </TableCell>
                           {canManage && (
                             <TableCell>
                               <div className="flex justify-end">
@@ -464,7 +455,6 @@ export function LarkOrganizationMapping({
           open={editorOpen}
           mapping={editingMapping}
           catalog={catalog}
-          agents={agents}
           onOpenChange={setEditorOpen}
           onSave={editMapping}
         />

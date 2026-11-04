@@ -117,30 +117,6 @@ func (q *Queries) CloneLatestFeishuOrgSnapshot(ctx context.Context, arg CloneLat
 	return err
 }
 
-const createFeishuOrgAgentMapping = `-- name: CreateFeishuOrgAgentMapping :one
-INSERT INTO feishu_org_agent_mapping (workspace_id, group_id, agent_id)
-VALUES ($1, $2, $3)
-RETURNING workspace_id, group_id, agent_id, created_at
-`
-
-type CreateFeishuOrgAgentMappingParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	GroupID     pgtype.UUID `json:"group_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
-}
-
-func (q *Queries) CreateFeishuOrgAgentMapping(ctx context.Context, arg CreateFeishuOrgAgentMappingParams) (FeishuOrgAgentMapping, error) {
-	row := q.db.QueryRow(ctx, createFeishuOrgAgentMapping, arg.WorkspaceID, arg.GroupID, arg.AgentID)
-	var i FeishuOrgAgentMapping
-	err := row.Scan(
-		&i.WorkspaceID,
-		&i.GroupID,
-		&i.AgentID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const createFeishuOrgRoleMapping = `-- name: CreateFeishuOrgRoleMapping :one
 INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
 VALUES ($1, $2, $3)
@@ -251,16 +227,6 @@ func (q *Queries) DeleteAgentInvocationTarget(ctx context.Context, arg DeleteAge
 	return err
 }
 
-const deleteFeishuOrgAgentMappings = `-- name: DeleteFeishuOrgAgentMappings :exec
-DELETE FROM feishu_org_agent_mapping
-WHERE workspace_id = $1
-`
-
-func (q *Queries) DeleteFeishuOrgAgentMappings(ctx context.Context, workspaceID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteFeishuOrgAgentMappings, workspaceID)
-	return err
-}
-
 const deleteFeishuOrgDataByWorkspace = `-- name: DeleteFeishuOrgDataByWorkspace :exec
 WITH
 deleted_sync_runs AS (
@@ -268,9 +234,6 @@ deleted_sync_runs AS (
 ),
 deleted_memberships AS (
     DELETE FROM feishu_org_membership WHERE workspace_id = $1
-),
-deleted_agent_mappings AS (
-    DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1
 ),
 deleted_role_mappings AS (
     DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1
@@ -512,37 +475,6 @@ func (q *Queries) ListActiveFeishuOrgGroups(ctx context.Context, workspaceID pgt
 			&i.Active,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listFeishuOrgAgentMappings = `-- name: ListFeishuOrgAgentMappings :many
-SELECT workspace_id, group_id, agent_id, created_at FROM feishu_org_agent_mapping
-WHERE workspace_id = $1
-ORDER BY created_at, group_id, agent_id
-`
-
-func (q *Queries) ListFeishuOrgAgentMappings(ctx context.Context, workspaceID pgtype.UUID) ([]FeishuOrgAgentMapping, error) {
-	rows, err := q.db.Query(ctx, listFeishuOrgAgentMappings, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []FeishuOrgAgentMapping{}
-	for rows.Next() {
-		var i FeishuOrgAgentMapping
-		if err := rows.Scan(
-			&i.WorkspaceID,
-			&i.GroupID,
-			&i.AgentID,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -891,55 +823,6 @@ func (q *Queries) RestoreFeishuOrgMember(ctx context.Context, arg RestoreFeishuO
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
-	)
-	return i, err
-}
-
-const setAgentPublicTo = `-- name: SetAgentPublicTo :one
-UPDATE agent
-SET permission_mode = 'public_to', updated_at = now()
-WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
-`
-
-type SetAgentPublicToParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) SetAgentPublicTo(ctx context.Context, arg SetAgentPublicToParams) (Agent, error) {
-	row := q.db.QueryRow(ctx, setAgentPublicTo, arg.ID, arg.WorkspaceID)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-		&i.Model,
-		&i.ThinkingLevel,
-		&i.ComposioToolkitAllowlist,
-		&i.PermissionMode,
-		&i.Kind,
-		&i.SystemKey,
-		&i.DisabledRuntimeSkills,
-		&i.ServiceTier,
-		&i.ConversationStarters,
 	)
 	return i, err
 }

@@ -31,12 +31,14 @@ type LarkOrganizationConfigResponse struct {
 	UpdatedAt      string `json:"updated_at"`
 }
 
+// LarkOrganizationMappingResponse is one organization rule. Agent access is
+// not part of a rule: owners grant their agents to an applied group from the
+// agent access picker, and the sync only revokes grants whose group is gone.
 type LarkOrganizationMappingResponse struct {
-	Kind         string   `json:"kind"`
-	ExternalID   string   `json:"external_id"`
-	ExternalName string   `json:"external_name"`
-	MemberRole   *string  `json:"member_role"`
-	AgentIDs     []string `json:"agent_ids"`
+	Kind         string  `json:"kind"`
+	ExternalID   string  `json:"external_id"`
+	ExternalName string  `json:"external_name"`
+	MemberRole   *string `json:"member_role"`
 }
 
 type LarkOrganizationSyncRunResponse struct {
@@ -138,33 +140,19 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 	if err != nil {
 		return response, err
 	}
-	agentMappings, err := h.Queries.ListFeishuOrgAgentMappings(ctx, workspaceID)
-	if err != nil {
-		return response, err
-	}
 	rolesByGroup := make(map[string]string, len(roleMappings))
 	for _, mapping := range roleMappings {
 		rolesByGroup[uuidToString(mapping.GroupID)] = mapping.Role
-	}
-	agentsByGroup := make(map[string][]string)
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		agentsByGroup[groupID] = append(agentsByGroup[groupID], uuidToString(mapping.AgentID))
 	}
 	for _, group := range groups {
 		if !group.Configured {
 			continue
 		}
 		groupID := uuidToString(group.ID)
-		agentIDs := agentsByGroup[groupID]
-		if agentIDs == nil {
-			agentIDs = []string{}
-		}
 		mapping := LarkOrganizationMappingResponse{
 			Kind:         group.Kind,
 			ExternalID:   group.ExternalID,
 			ExternalName: group.ExternalName,
-			AgentIDs:     agentIDs,
 		}
 		if role := rolesByGroup[groupID]; role != "" {
 			mapping.MemberRole = &role
@@ -266,7 +254,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 	}
 
 	seenGroups := make(map[string]struct{}, len(request.Mappings))
-	seenAgents := make(map[string]struct{})
 	requiresOwner := false
 	for i := range request.Mappings {
 		mapping := &request.Mappings[i]
@@ -296,33 +283,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 			mapping.MemberRole = &role
 			requiresOwner = requiresOwner || role == "owner"
 		}
-		agentsInGroup := make(map[string]struct{}, len(mapping.AgentIDs))
-		for i, agentID := range mapping.AgentIDs {
-			agentUUID, valid := parseUUIDOrBadRequest(w, agentID, "agent_id")
-			if !valid {
-				return
-			}
-			canonicalAgentID := uuidToString(agentUUID)
-			mapping.AgentIDs[i] = canonicalAgentID
-			if _, duplicate := agentsInGroup[canonicalAgentID]; duplicate {
-				writeError(w, http.StatusBadRequest, "duplicate agent in organization mapping")
-				return
-			}
-			agentsInGroup[canonicalAgentID] = struct{}{}
-			if _, checked := seenAgents[canonicalAgentID]; checked {
-				continue
-			}
-			agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentUUID, WorkspaceID: actor.workspaceID})
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "agent_id must belong to the current workspace")
-				return
-			}
-			if agent.OwnerID != actor.userID {
-				writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-				return
-			}
-			seenAgents[canonicalAgentID] = struct{}{}
-		}
 	}
 	if requiresOwner && actor.member.Role != "owner" {
 		writeError(w, http.StatusForbidden, "only a workspace owner can configure owner role mappings")
@@ -350,28 +310,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusForbidden, "only a workspace owner can configure owner role mappings")
 		return
 	}
-	oldAgentMappings, err := qtx.ListFeishuOrgAgentMappings(r.Context(), actor.workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-		return
-	}
-	for _, mapping := range oldAgentMappings {
-		seenAgents[uuidToString(mapping.AgentID)] = struct{}{}
-	}
-	for agentID := range seenAgents {
-		agent, err := qtx.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: parseUUID(agentID), WorkspaceID: actor.workspaceID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-			return
-		}
-		if agent.OwnerID != actor.userID {
-			writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-			return
-		}
-	}
 	if _, err := qtx.UpsertFeishuOrgConfig(r.Context(), db.UpsertFeishuOrgConfigParams{
 		WorkspaceID: actor.workspaceID, InstallationID: installationID, Enabled: request.Enabled,
 	}); err != nil {
@@ -379,10 +317,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := qtx.DeleteFeishuOrgRoleMappings(r.Context(), actor.workspaceID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-		return
-	}
-	if err := qtx.DeleteFeishuOrgAgentMappings(r.Context(), actor.workspaceID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 		return
 	}
@@ -400,15 +334,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		if mapping.MemberRole != nil {
 			if _, err := qtx.CreateFeishuOrgRoleMapping(r.Context(), db.CreateFeishuOrgRoleMappingParams{
 				WorkspaceID: actor.workspaceID, GroupID: group.ID, Role: *mapping.MemberRole,
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-				return
-			}
-		}
-		for _, agentID := range mapping.AgentIDs {
-			agentUUID := parseUUID(agentID)
-			if _, err := qtx.CreateFeishuOrgAgentMapping(r.Context(), db.CreateFeishuOrgAgentMappingParams{
-				WorkspaceID: actor.workspaceID, GroupID: group.ID, AgentID: agentUUID,
 			}); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 				return
@@ -620,18 +545,6 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	for _, change := range plan.AgentChanges {
-		agent, err := qtx.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: parseUUID(change.AgentID), WorkspaceID: actor.workspaceID})
-		if err != nil {
-			fail(err)
-			return
-		}
-		if agent.OwnerID != actor.userID {
-			_ = tx.Rollback(r.Context())
-			writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-			return
-		}
-	}
 	invalidateUsers := make(map[string]struct{})
 	type disconnectSignal struct {
 		userID   string
@@ -691,20 +604,11 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		}
 		invalidateUsers[assignment.UserID] = struct{}{}
 	}
+	// Agent changes are cleanup only: a team grant whose group left the
+	// rules no longer admits anyone, so removing it does not need the agent
+	// owner. Grants themselves are made from the agent access picker.
 	for _, change := range plan.AgentChanges {
 		switch change.Action {
-		case "agent_granted":
-			agentID := parseUUID(change.AgentID)
-			if _, err := qtx.SetAgentPublicTo(r.Context(), db.SetAgentPublicToParams{ID: agentID, WorkspaceID: actor.workspaceID}); err != nil {
-				fail(err)
-				return
-			}
-			if err := qtx.CreateAgentInvocationTarget(r.Context(), db.CreateAgentInvocationTargetParams{
-				AgentID: agentID, TargetType: invocationTargetTeam, TargetID: parseUUID(change.GroupID), CreatedBy: actor.userID,
-			}); err != nil {
-				fail(err)
-				return
-			}
 		case "agent_revoked":
 			if err := qtx.DeleteAgentInvocationTarget(r.Context(), db.DeleteAgentInvocationTargetParams{
 				AgentID: parseUUID(change.AgentID), TargetType: invocationTargetTeam, TargetID: parseUUID(change.GroupID),
@@ -859,10 +763,6 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 	if err != nil {
 		return feishuorg.Plan{}, err
 	}
-	agentMappings, err := q.ListFeishuOrgAgentMappings(ctx, workspaceID)
-	if err != nil {
-		return feishuorg.Plan{}, err
-	}
 	membershipRows, err := q.ListFeishuOrgMemberships(ctx, workspaceID)
 	if err != nil {
 		return feishuorg.Plan{}, err
@@ -876,11 +776,6 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 	for _, mapping := range roleMappings {
 		rolesByGroup[uuidToString(mapping.GroupID)] = mapping.Role
 	}
-	agentsByGroup := make(map[string][]string)
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		agentsByGroup[groupID] = append(agentsByGroup[groupID], uuidToString(mapping.AgentID))
-	}
 	mappings := make([]feishuorg.Mapping, 0, len(groups))
 	for _, group := range groups {
 		if !group.Configured {
@@ -889,7 +784,7 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 		groupID := uuidToString(group.ID)
 		mappings = append(mappings, feishuorg.Mapping{
 			GroupID: groupID, Kind: group.Kind, ExternalID: group.ExternalID, ExternalName: group.ExternalName,
-			MemberRole: rolesByGroup[groupID], AgentIDs: agentsByGroup[groupID],
+			MemberRole: rolesByGroup[groupID],
 		})
 	}
 	trackedUsers := make(map[string]struct{})
@@ -908,49 +803,27 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 	if err != nil {
 		return feishuorg.Plan{}, err
 	}
+	// Team grants live on the agent (agent_invocation_target) and are made
+	// from the access picker. The sync only revokes grants whose group was
+	// removed from the rules, so a deleted department does not linger as a
+	// dead allow-list entry.
 	targetRows, err := q.ListFeishuOrgAgentTargets(ctx, workspaceID)
 	if err != nil {
 		return feishuorg.Plan{}, err
-	}
-	agentRows, err := q.ListAllAgents(ctx, workspaceID)
-	if err != nil {
-		return feishuorg.Plan{}, err
-	}
-	permissionModeByAgent := make(map[string]string, len(agentRows))
-	for _, agent := range agentRows {
-		permissionModeByAgent[uuidToString(agent.ID)] = agent.PermissionMode
 	}
 	groupByID := make(map[string]db.FeishuOrgGroup, len(groups))
 	for _, group := range groups {
 		groupByID[uuidToString(group.ID)] = group
 	}
-	desired := make(map[string]feishuorg.AgentChange, len(agentMappings))
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		group := groupByID[groupID]
-		if !group.Configured {
+	plan.AgentChanges = []feishuorg.AgentChange{}
+	for _, row := range targetRows {
+		group := groupByID[uuidToString(row.GroupID)]
+		if group.Configured {
 			continue
 		}
-		agentID := uuidToString(mapping.AgentID)
-		desired[agentID+"\x00"+groupID] = feishuorg.AgentChange{AgentID: agentID, GroupID: groupID, GroupName: group.ExternalName, Action: "agent_granted"}
-	}
-	current := make(map[string]feishuorg.AgentChange, len(targetRows))
-	for _, row := range targetRows {
-		agentID := uuidToString(row.AgentID)
-		groupID := uuidToString(row.GroupID)
-		current[agentID+"\x00"+groupID] = feishuorg.AgentChange{AgentID: agentID, GroupID: groupID, GroupName: groupByID[groupID].ExternalName, Action: "agent_revoked"}
-	}
-	plan.AgentChanges = []feishuorg.AgentChange{}
-	for key, change := range desired {
-		_, targetExists := current[key]
-		if !targetExists || !groupByID[change.GroupID].Active || permissionModeByAgent[change.AgentID] != "public_to" {
-			plan.AgentChanges = append(plan.AgentChanges, change)
-		}
-	}
-	for key, change := range current {
-		if _, ok := desired[key]; !ok {
-			plan.AgentChanges = append(plan.AgentChanges, change)
-		}
+		plan.AgentChanges = append(plan.AgentChanges, feishuorg.AgentChange{
+			AgentID: uuidToString(row.AgentID), GroupID: uuidToString(row.GroupID), GroupName: group.ExternalName, Action: "agent_revoked",
+		})
 	}
 	sort.Slice(plan.AgentChanges, func(i, j int) bool {
 		if plan.AgentChanges[i].AgentID != plan.AgentChanges[j].AgentID {

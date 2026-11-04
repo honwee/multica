@@ -3479,7 +3479,6 @@ export const LarkOrganizationMappingSchema = z.object({
   external_id: z.string(),
   external_name: z.string().default(""),
   member_role: z.enum(["owner", "admin", "member"]).nullable().catch(null),
-  agent_ids: z.array(z.string()).catch([]).default([]),
 }).loose();
 
 export const LarkOrganizationSyncChangeSchema = z.object({
