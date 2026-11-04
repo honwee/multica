@@ -1,12 +1,22 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RUNTIME_CONFIG,
   deriveWsUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
 } from "./runtime-config";
 
 describe("runtime config", () => {
+  it("defaults new desktop installations to the Lumist FDE deployment", () => {
+    expect(DEFAULT_RUNTIME_CONFIG).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://fde.lumistedu.com",
+      wsUrl: "wss://fde.lumistedu.com/ws",
+      appUrl: "https://fde.lumistedu.com",
+    });
+  });
+
   it("derives https/wss compatible URLs from apiUrl", () => {
     expect(
       parseRuntimeConfig(
