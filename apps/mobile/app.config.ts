@@ -14,7 +14,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const isProd = env === "production";
   const isStaging = env === "staging";
   const bundleIdentifier = isProd
-    ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "ai.multica.mobile")
+    ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "com.lumistedu.multica")
     : isStaging
       ? (process.env.EXPO_BUNDLE_IDENTIFIER_STAGING ?? "ai.multica.mobile.staging")
       : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev");
@@ -27,7 +27,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ? "Multica (Staging)"
         : "Multica (Dev)",
     slug: "multica-mobile",
-    version: "0.1.0",
+    version: "0.2.0",
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
