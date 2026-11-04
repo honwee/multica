@@ -726,6 +726,15 @@ type FeishuOrgConfig struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FeishuOrgDirectory struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Snapshot       []byte             `json:"snapshot"`
+	FetchedAt      pgtype.Timestamptz `json:"fetched_at"`
+	FetchedBy      pgtype.UUID        `json:"fetched_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type FeishuOrgGroup struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
@@ -761,7 +770,6 @@ type FeishuOrgSyncRun struct {
 	Mode           string             `json:"mode"`
 	Status         string             `json:"status"`
 	Revision       int64              `json:"revision"`
-	Snapshot       []byte             `json:"snapshot"`
 	Plan           []byte             `json:"plan"`
 	Error          pgtype.Text        `json:"error"`
 	RequestedBy    pgtype.UUID        `json:"requested_by"`

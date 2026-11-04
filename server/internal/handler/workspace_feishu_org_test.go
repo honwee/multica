@@ -72,8 +72,10 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	if err != nil || len(roles) != 1 || roles[0].Role != "member" {
 		t.Fatalf("unexpected inherited role mappings: %+v err=%v", roles, err)
 	}
+	// Run history stays with the source; the directory is shared through
+	// the installation, so the catalog below still renders.
 	runs, err := testHandler.Queries.ListFeishuOrgSyncRuns(context.Background(), workspaceID)
-	if err != nil || len(runs) != 1 || runs[0].Mode != "preview" || runs[0].Status != "preview" {
+	if err != nil || len(runs) != 0 {
 		t.Fatalf("unexpected inherited sync runs: %+v err=%v", runs, err)
 	}
 

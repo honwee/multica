@@ -65,6 +65,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"dingtalk_group_route":               workspaceDelete,
 	"feedback":                           workspaceDeleteDetach,
 	"feishu_org_config":                  workspaceDelete,
+	"feishu_org_directory":               workspaceDelete,
 	"feishu_org_group":                   workspaceDelete,
 	"feishu_org_membership":              workspaceDelete,
 	"feishu_org_role_mapping":            workspaceDelete,

@@ -129,11 +129,32 @@ ORDER BY fom.group_id;
 
 -- name: CreateFeishuOrgSyncRun :one
 INSERT INTO feishu_org_sync_run (
-    workspace_id, mode, status, revision, snapshot, plan, requested_by, replayed_from_id
+    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id
 ) VALUES (
-    @workspace_id, @mode, @status, @revision, @snapshot, @plan, @requested_by, @replayed_from_id
+    @workspace_id, @mode, @status, @revision, @plan, @requested_by, @replayed_from_id
 )
 RETURNING *;
+
+-- name: UpsertFeishuOrgDirectory :one
+-- The directory is shared by every workspace configured on the installation.
+INSERT INTO feishu_org_directory (installation_id, snapshot, fetched_at, fetched_by)
+VALUES (@installation_id, @snapshot, now(), @fetched_by)
+ON CONFLICT (installation_id) DO UPDATE SET
+    snapshot = EXCLUDED.snapshot,
+    fetched_at = now(),
+    fetched_by = EXCLUDED.fetched_by,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetFeishuOrgDirectory :one
+SELECT * FROM feishu_org_directory
+WHERE installation_id = $1;
+
+-- name: GetFeishuOrgDirectoryForWorkspace :one
+SELECT d.*
+FROM feishu_org_directory d
+JOIN feishu_org_config c ON c.installation_id = d.installation_id
+WHERE c.workspace_id = $1;
 
 -- name: GetFeishuOrgSyncRunInWorkspace :one
 SELECT * FROM feishu_org_sync_run
@@ -276,17 +297,6 @@ JOIN feishu_org_group target_group
   ON target_group.workspace_id = @target_workspace_id
  AND target_group.kind = source_group.kind
  AND target_group.external_id = source_group.external_id;
-
--- name: CloneLatestFeishuOrgSnapshot :exec
-INSERT INTO feishu_org_sync_run (workspace_id, mode, status, revision, snapshot, plan, requested_by)
-SELECT @target_workspace_id, 'preview', 'preview', @revision, snapshot, @plan, @requested_by
-FROM feishu_org_sync_run source_run
-WHERE source_run.workspace_id = @source_workspace_id
-  AND mode = 'preview'
-  AND status = 'preview'
-  AND snapshot->>'Complete' = 'true'
-ORDER BY created_at DESC, id DESC
-LIMIT 1;
 
 -- name: GetFeishuOrgInstallationForWorkspace :one
 -- A workspace may use its own installation, or one shared by the source

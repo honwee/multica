@@ -169,15 +169,14 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 			return response, err
 		}
 		response.SyncRuns = append(response.SyncRuns, converted)
-		if response.Catalog == nil && run.Mode == "preview" && run.Status == "preview" {
-			var snapshot lark.OrgSnapshot
-			if err := json.Unmarshal(run.Snapshot, &snapshot); err != nil {
-				return response, err
-			}
-			if !snapshot.Complete {
-				continue
-			}
-			catalog, err := h.buildLarkOrganizationCatalog(ctx, workspaceID, run, snapshot)
+	}
+	if response.Config != nil {
+		directory, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, config.InstallationID)
+		if err != nil && !errors.Is(err, errFeishuOrgDirectoryMissing) {
+			return response, err
+		}
+		if err == nil {
+			catalog, err := h.buildLarkOrganizationCatalog(ctx, workspaceID, directory, snapshot)
 			if err != nil {
 				return response, err
 			}
@@ -185,6 +184,28 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		}
 	}
 	return response, nil
+}
+
+var errFeishuOrgDirectoryMissing = errors.New("organization directory has not been fetched")
+
+// loadFeishuOrgDirectory returns the installation's fetched directory. An
+// incomplete snapshot counts as missing: nothing may plan against it.
+func loadFeishuOrgDirectory(ctx context.Context, q *db.Queries, installationID pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, error) {
+	directory, err := q.GetFeishuOrgDirectory(ctx, installationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
+	}
+	if err != nil {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, err
+	}
+	var snapshot lark.OrgSnapshot
+	if err := json.Unmarshal(directory.Snapshot, &snapshot); err != nil {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, fmt.Errorf("decode organization directory: %w", err)
+	}
+	if !snapshot.Complete {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
+	}
+	return directory, snapshot, nil
 }
 
 func larkOrganizationSyncRunResponse(row db.FeishuOrgSyncRun) (LarkOrganizationSyncRunResponse, error) {
@@ -386,7 +407,7 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		// audit record. Keep the detached write bounded as well.
 		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer cancel()
-		run, err := h.createFeishuOrgSyncRun(auditCtx, h.Queries, actor, "preview", "failed", config.Revision, nil, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{})
+		run, err := h.createFeishuOrgSyncRun(auditCtx, h.Queries, actor, "preview", "failed", config.Revision, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to audit organization preview")
 			return
@@ -411,17 +432,23 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		fail(err)
 		return
 	}
-	plan, err := h.buildFeishuOrgPlan(r.Context(), h.Queries, actor.workspaceID, snapshot)
-	if err != nil {
-		fail(err)
-		return
-	}
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
 		fail(err)
 		return
 	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "preview", "preview", config.Revision, snapshotJSON, plan, "", pgtype.UUID{})
+	if _, err := h.Queries.UpsertFeishuOrgDirectory(r.Context(), db.UpsertFeishuOrgDirectoryParams{
+		InstallationID: installation.ID, Snapshot: snapshotJSON, FetchedBy: actor.userID,
+	}); err != nil {
+		fail(err)
+		return
+	}
+	plan, err := h.buildFeishuOrgPlan(r.Context(), h.Queries, actor.workspaceID, snapshot)
+	if err != nil {
+		fail(err)
+		return
+	}
+	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "preview", "preview", config.Revision, plan, "", pgtype.UUID{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization preview")
 		return
@@ -447,7 +474,7 @@ func (h *Handler) ReplayLarkOrganizationSync(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
 	}
-	snapshot, ok := feishuOrgRunSnapshot(w, source)
+	snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
 	if !ok {
 		return
 	}
@@ -456,7 +483,7 @@ func (h *Handler) ReplayLarkOrganizationSync(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to recalculate organization preview")
 		return
 	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "replay", "preview", config.Revision, source.Snapshot, plan, "", source.ID)
+	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "replay", "preview", config.Revision, plan, "", source.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization replay")
 		return
@@ -486,7 +513,7 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, "organization sync configuration changed since preview")
 		return
 	}
-	snapshot, ok := feishuOrgRunSnapshot(w, source)
+	snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
 	if !ok {
 		return
 	}
@@ -496,7 +523,7 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		if tx != nil {
 			_ = tx.Rollback(r.Context())
 		}
-		_, _ = h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "apply", "failed", config.Revision, source.Snapshot, plan, cause.Error(), source.ID)
+		_, _ = h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "apply", "failed", config.Revision, plan, cause.Error(), source.ID)
 		writeError(w, http.StatusInternalServerError, "failed to apply organization sync")
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -625,7 +652,7 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		fail(err)
 		return
 	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), qtx, actor, "apply", "completed", config.Revision, source.Snapshot, plan, "", source.ID)
+	run, err := h.createFeishuOrgSyncRun(r.Context(), qtx, actor, "apply", "completed", config.Revision, plan, "", source.ID)
 	if err != nil {
 		fail(err)
 		return
@@ -740,15 +767,16 @@ func (h *Handler) feishuOrgSourceRun(w http.ResponseWriter, r *http.Request) (fe
 	return actor, source, true
 }
 
-func feishuOrgRunSnapshot(w http.ResponseWriter, source db.FeishuOrgSyncRun) (lark.OrgSnapshot, bool) {
-	trimmed := bytes.TrimSpace(source.Snapshot)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}")) || bytes.Equal(trimmed, []byte("null")) {
-		writeError(w, http.StatusConflict, "organization sync run has no snapshot")
+// feishuOrgDirectorySnapshot loads the directory a replay or apply plans
+// against. Both work from the current directory, never from Feishu directly.
+func (h *Handler) feishuOrgDirectorySnapshot(w http.ResponseWriter, r *http.Request, installationID pgtype.UUID) (lark.OrgSnapshot, bool) {
+	_, snapshot, err := loadFeishuOrgDirectory(r.Context(), h.Queries, installationID)
+	if errors.Is(err, errFeishuOrgDirectoryMissing) {
+		writeError(w, http.StatusConflict, "organization directory has not been fetched; run a preview first")
 		return lark.OrgSnapshot{}, false
 	}
-	var snapshot lark.OrgSnapshot
-	if err := json.Unmarshal(trimmed, &snapshot); err != nil {
-		writeError(w, http.StatusInternalServerError, "organization sync run has an invalid snapshot")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load organization directory")
 		return lark.OrgSnapshot{}, false
 	}
 	return snapshot, true
@@ -840,7 +868,6 @@ func (h *Handler) createFeishuOrgSyncRun(
 	actor feishuOrgActor,
 	mode, status string,
 	revision int64,
-	snapshot []byte,
 	plan feishuorg.Plan,
 	errorMessage string,
 	replayedFromID pgtype.UUID,
@@ -858,12 +885,9 @@ func (h *Handler) createFeishuOrgSyncRun(
 	if err != nil {
 		return db.FeishuOrgSyncRun{}, err
 	}
-	if len(bytes.TrimSpace(snapshot)) == 0 {
-		snapshot = []byte("{}")
-	}
 	run, err := q.CreateFeishuOrgSyncRun(ctx, db.CreateFeishuOrgSyncRunParams{
 		WorkspaceID: actor.workspaceID, Mode: mode, Status: status, Revision: revision,
-		Snapshot: snapshot, Plan: planJSON, RequestedBy: actor.userID, ReplayedFromID: replayedFromID,
+		Plan: planJSON, RequestedBy: actor.userID, ReplayedFromID: replayedFromID,
 	})
 	if err != nil || status == "preview" {
 		return run, err

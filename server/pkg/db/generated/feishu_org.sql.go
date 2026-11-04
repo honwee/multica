@@ -86,37 +86,6 @@ func (q *Queries) CloneFeishuOrgRoleMappings(ctx context.Context, arg CloneFeish
 	return err
 }
 
-const cloneLatestFeishuOrgSnapshot = `-- name: CloneLatestFeishuOrgSnapshot :exec
-INSERT INTO feishu_org_sync_run (workspace_id, mode, status, revision, snapshot, plan, requested_by)
-SELECT $1, 'preview', 'preview', $2, snapshot, $3, $4
-FROM feishu_org_sync_run source_run
-WHERE source_run.workspace_id = $5
-  AND mode = 'preview'
-  AND status = 'preview'
-  AND snapshot->>'Complete' = 'true'
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-type CloneLatestFeishuOrgSnapshotParams struct {
-	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
-	Revision          int64       `json:"revision"`
-	Plan              []byte      `json:"plan"`
-	RequestedBy       pgtype.UUID `json:"requested_by"`
-	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
-}
-
-func (q *Queries) CloneLatestFeishuOrgSnapshot(ctx context.Context, arg CloneLatestFeishuOrgSnapshotParams) error {
-	_, err := q.db.Exec(ctx, cloneLatestFeishuOrgSnapshot,
-		arg.TargetWorkspaceID,
-		arg.Revision,
-		arg.Plan,
-		arg.RequestedBy,
-		arg.SourceWorkspaceID,
-	)
-	return err
-}
-
 const createFeishuOrgRoleMapping = `-- name: CreateFeishuOrgRoleMapping :one
 INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
 VALUES ($1, $2, $3)
@@ -144,11 +113,11 @@ func (q *Queries) CreateFeishuOrgRoleMapping(ctx context.Context, arg CreateFeis
 
 const createFeishuOrgSyncRun = `-- name: CreateFeishuOrgSyncRun :one
 INSERT INTO feishu_org_sync_run (
-    workspace_id, mode, status, revision, snapshot, plan, requested_by, replayed_from_id
+    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, workspace_id, mode, status, revision, snapshot, plan, error, requested_by, replayed_from_id, created_at, completed_at
+RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at
 `
 
 type CreateFeishuOrgSyncRunParams struct {
@@ -156,7 +125,6 @@ type CreateFeishuOrgSyncRunParams struct {
 	Mode           string      `json:"mode"`
 	Status         string      `json:"status"`
 	Revision       int64       `json:"revision"`
-	Snapshot       []byte      `json:"snapshot"`
 	Plan           []byte      `json:"plan"`
 	RequestedBy    pgtype.UUID `json:"requested_by"`
 	ReplayedFromID pgtype.UUID `json:"replayed_from_id"`
@@ -168,7 +136,6 @@ func (q *Queries) CreateFeishuOrgSyncRun(ctx context.Context, arg CreateFeishuOr
 		arg.Mode,
 		arg.Status,
 		arg.Revision,
-		arg.Snapshot,
 		arg.Plan,
 		arg.RequestedBy,
 		arg.ReplayedFromID,
@@ -180,7 +147,6 @@ func (q *Queries) CreateFeishuOrgSyncRun(ctx context.Context, arg CreateFeishuOr
 		&i.Mode,
 		&i.Status,
 		&i.Revision,
-		&i.Snapshot,
 		&i.Plan,
 		&i.Error,
 		&i.RequestedBy,
@@ -337,6 +303,46 @@ func (q *Queries) GetFeishuOrgConfig(ctx context.Context, workspaceID pgtype.UUI
 	return i, err
 }
 
+const getFeishuOrgDirectory = `-- name: GetFeishuOrgDirectory :one
+SELECT installation_id, snapshot, fetched_at, fetched_by, created_at, updated_at FROM feishu_org_directory
+WHERE installation_id = $1
+`
+
+func (q *Queries) GetFeishuOrgDirectory(ctx context.Context, installationID pgtype.UUID) (FeishuOrgDirectory, error) {
+	row := q.db.QueryRow(ctx, getFeishuOrgDirectory, installationID)
+	var i FeishuOrgDirectory
+	err := row.Scan(
+		&i.InstallationID,
+		&i.Snapshot,
+		&i.FetchedAt,
+		&i.FetchedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getFeishuOrgDirectoryForWorkspace = `-- name: GetFeishuOrgDirectoryForWorkspace :one
+SELECT d.installation_id, d.snapshot, d.fetched_at, d.fetched_by, d.created_at, d.updated_at
+FROM feishu_org_directory d
+JOIN feishu_org_config c ON c.installation_id = d.installation_id
+WHERE c.workspace_id = $1
+`
+
+func (q *Queries) GetFeishuOrgDirectoryForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (FeishuOrgDirectory, error) {
+	row := q.db.QueryRow(ctx, getFeishuOrgDirectoryForWorkspace, workspaceID)
+	var i FeishuOrgDirectory
+	err := row.Scan(
+		&i.InstallationID,
+		&i.Snapshot,
+		&i.FetchedAt,
+		&i.FetchedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getFeishuOrgInstallationForWorkspace = `-- name: GetFeishuOrgInstallationForWorkspace :one
 SELECT ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at
 FROM channel_installation ci
@@ -387,7 +393,7 @@ func (q *Queries) GetFeishuOrgInstallationForWorkspace(ctx context.Context, arg 
 }
 
 const getFeishuOrgSyncRunInWorkspace = `-- name: GetFeishuOrgSyncRunInWorkspace :one
-SELECT id, workspace_id, mode, status, revision, snapshot, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
+SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -405,7 +411,6 @@ func (q *Queries) GetFeishuOrgSyncRunInWorkspace(ctx context.Context, arg GetFei
 		&i.Mode,
 		&i.Status,
 		&i.Revision,
-		&i.Snapshot,
 		&i.Plan,
 		&i.Error,
 		&i.RequestedBy,
@@ -710,7 +715,7 @@ func (q *Queries) ListFeishuOrgRoleMappings(ctx context.Context, workspaceID pgt
 }
 
 const listFeishuOrgSyncRuns = `-- name: ListFeishuOrgSyncRuns :many
-SELECT id, workspace_id, mode, status, revision, snapshot, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
+SELECT id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at FROM feishu_org_sync_run
 WHERE workspace_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT 20
@@ -731,7 +736,6 @@ func (q *Queries) ListFeishuOrgSyncRuns(ctx context.Context, workspaceID pgtype.
 			&i.Mode,
 			&i.Status,
 			&i.Revision,
-			&i.Snapshot,
 			&i.Plan,
 			&i.Error,
 			&i.RequestedBy,
@@ -890,7 +894,7 @@ SET status = $1,
     error = $3,
     completed_at = $4
 WHERE id = $5 AND workspace_id = $6
-RETURNING id, workspace_id, mode, status, revision, snapshot, plan, error, requested_by, replayed_from_id, created_at, completed_at
+RETURNING id, workspace_id, mode, status, revision, plan, error, requested_by, replayed_from_id, created_at, completed_at
 `
 
 type UpdateFeishuOrgSyncRunParams struct {
@@ -918,7 +922,6 @@ func (q *Queries) UpdateFeishuOrgSyncRun(ctx context.Context, arg UpdateFeishuOr
 		&i.Mode,
 		&i.Status,
 		&i.Revision,
-		&i.Snapshot,
 		&i.Plan,
 		&i.Error,
 		&i.RequestedBy,
@@ -954,6 +957,38 @@ func (q *Queries) UpsertFeishuOrgConfig(ctx context.Context, arg UpsertFeishuOrg
 		&i.InstallationID,
 		&i.Enabled,
 		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertFeishuOrgDirectory = `-- name: UpsertFeishuOrgDirectory :one
+INSERT INTO feishu_org_directory (installation_id, snapshot, fetched_at, fetched_by)
+VALUES ($1, $2, now(), $3)
+ON CONFLICT (installation_id) DO UPDATE SET
+    snapshot = EXCLUDED.snapshot,
+    fetched_at = now(),
+    fetched_by = EXCLUDED.fetched_by,
+    updated_at = now()
+RETURNING installation_id, snapshot, fetched_at, fetched_by, created_at, updated_at
+`
+
+type UpsertFeishuOrgDirectoryParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	Snapshot       []byte      `json:"snapshot"`
+	FetchedBy      pgtype.UUID `json:"fetched_by"`
+}
+
+// The directory is shared by every workspace configured on the installation.
+func (q *Queries) UpsertFeishuOrgDirectory(ctx context.Context, arg UpsertFeishuOrgDirectoryParams) (FeishuOrgDirectory, error) {
+	row := q.db.QueryRow(ctx, upsertFeishuOrgDirectory, arg.InstallationID, arg.Snapshot, arg.FetchedBy)
+	var i FeishuOrgDirectory
+	err := row.Scan(
+		&i.InstallationID,
+		&i.Snapshot,
+		&i.FetchedAt,
+		&i.FetchedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

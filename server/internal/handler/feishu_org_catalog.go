@@ -55,7 +55,7 @@ type LarkOrganizationCatalogResponse struct {
 	WorkspaceMembers []LarkOrganizationWorkspaceMemberResponse `json:"workspace_members"`
 }
 
-func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID pgtype.UUID, run db.FeishuOrgSyncRun, snapshot lark.OrgSnapshot) (*LarkOrganizationCatalogResponse, error) {
+func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID pgtype.UUID, directory db.FeishuOrgDirectory, snapshot lark.OrgSnapshot) (*LarkOrganizationCatalogResponse, error) {
 	memberRows, err := h.Queries.ListFeishuOrgMemberIdentities(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 	matches, blocked := feishuorg.MatchMembers(snapshot.Users, members)
 
 	catalog := &LarkOrganizationCatalogResponse{
-		SnapshotAt:       timestampToString(run.CreatedAt),
+		SnapshotAt:       timestampToString(directory.FetchedAt),
 		Departments:      make([]LarkOrganizationDepartmentResponse, 0, len(snapshot.Departments)),
 		JobTitles:        make([]LarkOrganizationJobTitleResponse, 0),
 		Users:            buildLarkOrganizationUsers(snapshot, matches, blocked),

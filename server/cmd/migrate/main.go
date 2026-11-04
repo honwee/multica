@@ -206,6 +206,7 @@ var concurrentIndexCleanups = map[string]string{
 	"623_feishu_org_sync_run_id_index":                          "feishu_org_sync_run_id_uidx",
 	"624_feishu_org_sync_run_workspace_created_index":           "feishu_org_sync_run_workspace_created_idx",
 	"629_feishu_user_union_id_index":                            "user_feishu_union_id_unique",
+	"632_feishu_org_directory_installation_index":               "feishu_org_directory_installation_uidx",
 	"598_issue_unread_unique_index":                             "issue_unread_workspace_user_issue_uidx",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",

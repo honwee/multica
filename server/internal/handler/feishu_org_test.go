@@ -85,6 +85,7 @@ func newFeishuOrgHandlerFixture(t *testing.T) feishuOrgHandlerFixture {
 		t.Fatalf("create Lark installation: %v", err)
 	}
 	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, uuidToString(installation.ID))
+	dbfx.Cleanup(t, `DELETE FROM feishu_org_directory WHERE installation_id = $1`, uuidToString(installation.ID))
 	previousInstallations := testHandler.LarkInstallations
 	testHandler.LarkInstallations = installations
 	t.Cleanup(func() { testHandler.LarkInstallations = previousInstallations })
@@ -798,9 +799,8 @@ func TestFeishuOrgDisabledSyncRejectsReplayAndApply(t *testing.T) {
 func TestFeishuOrgRejectsCrossWorkspaceRun(t *testing.T) {
 	sourceFixture := newFeishuOrgHandlerFixture(t)
 	otherFixture := newFeishuOrgHandlerFixture(t)
-	snapshot := []byte(`{"Complete":true,"Departments":[],"Users":[]}`)
 	actor := feishuOrgActor{workspaceID: parseUUID(sourceFixture.workspaceID), userID: parseUUID(sourceFixture.ownerID)}
-	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, snapshot, emptyFeishuOrgPlan(), "", pgtype.UUID{})
+	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, emptyFeishuOrgPlan(), "", pgtype.UUID{})
 	if err != nil {
 		t.Fatalf("create source run: %v", err)
 	}
@@ -976,5 +976,29 @@ func TestFeishuOrgCatalogCountsSubDepartments(t *testing.T) {
 	}
 	if platform := byID["d_platform"]; platform.MemberCount != 2 || platform.DirectMemberCount != 1 {
 		t.Fatalf("platform = %+v, want direct 1, subtree 2 (shared member counted once)", platform)
+	}
+}
+
+// TestFeishuOrgApplyRequiresFetchedDirectory: replay and apply plan against
+// the installation's shared directory, so they refuse to run once it is gone
+// instead of silently planning against nothing.
+func TestFeishuOrgApplyRequiresFetchedDirectory(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{Complete: true}
+	wireFeishuOrgAPIClient(t, client)
+	previewRun := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
+	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID); count != 1 {
+		t.Fatalf("directory rows after preview = %d, want 1", count)
+	}
+	dbfx.Exec(t, `DELETE FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID)
+	if replayed := replayFeishuOrg(t, fixture, previewRun.ID); replayed.Code != http.StatusConflict {
+		t.Fatalf("replay without directory status = %d, want 409; body=%s", replayed.Code, replayed.Body.String())
+	}
+	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusConflict {
+		t.Fatalf("apply without directory status = %d, want 409; body=%s", applied.Code, applied.Body.String())
 	}
 }
