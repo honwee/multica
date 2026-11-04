@@ -22,6 +22,10 @@ export type AccessChange = {
 
 type AccessScope = "private" | "workspace" | "members";
 
+/** An organization group (department, job title, …) an agent can be granted
+ *  to. Comes from the applied Feishu organization sync. */
+export type AccessTeam = { id: string; name: string };
+
 
 function selectedTargetIds(
   targets: AgentInvocationTarget[] | undefined | null,
@@ -44,6 +48,7 @@ export function AccessPicker({
   invocationTargets,
   visibility: _visibility,
   members,
+  teams = [],
   ownerId,
   canEdit = true,
   hasComposioAllowlist = false,
@@ -56,6 +61,9 @@ export function AccessPicker({
   invocationTargets: AgentInvocationTarget[] | undefined;
   visibility: AgentVisibility;
   members: MemberWithUser[];
+  /** Organization groups offered next to people. Team ids already granted
+   *  but absent from this list are preserved on save, not shown. */
+  teams?: AccessTeam[];
   ownerId?: string | null;
   canEdit?: boolean;
   hasComposioAllowlist?: boolean;
@@ -86,13 +94,14 @@ export function AccessPicker({
     () => selectedTargetIds(invocationTargets, "member"),
     [invocationTargets],
   );
-  const teamIds = useMemo(
+  const persistedTeams = useMemo(
     () => selectedTargetIds(invocationTargets, "team"),
     [invocationTargets],
   );
 
   const [draftScope, setDraftScope] = useState<AccessScope>(persistedScope);
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
+  const [draftTeams, setDraftTeams] = useState(persistedTeams);
   const [saving, setSaving] = useState(false);
   /** Tracks whether the user has explicitly selected a scope (clicked any
    *  radio). Once true, the picker considers the draft "ready" even if the
@@ -112,32 +121,31 @@ export function AccessPicker({
   // on every render and reset the user's in-progress edits.
   const prevPersistedScopeRef = useRef(persistedScope);
   const prevPersistedMembersRef = useRef(persistedMembers);
+  const prevPersistedTeamsRef = useRef(persistedTeams);
   useEffect(() => {
     const scopeChanged = persistedScope !== prevPersistedScopeRef.current;
-    const membersChanged =
-      persistedMembers.length !== prevPersistedMembersRef.current.length ||
-      persistedMembers.some(
-        (id, i) => id !== prevPersistedMembersRef.current[i],
-      );
-    if (scopeChanged || membersChanged) {
+    const membersChanged = !sameIds(persistedMembers, prevPersistedMembersRef.current);
+    const teamsChanged = !sameIds(persistedTeams, prevPersistedTeamsRef.current);
+    if (scopeChanged || membersChanged || teamsChanged) {
       setDraftScope(persistedScope);
       setDraftMembers(persistedMembers);
+      setDraftTeams(persistedTeams);
       prevPersistedScopeRef.current = persistedScope;
       prevPersistedMembersRef.current = persistedMembers;
+      prevPersistedTeamsRef.current = persistedTeams;
     }
-  }, [persistedScope, persistedMembers]);
+  }, [persistedScope, persistedMembers, persistedTeams]);
 
   const editableMembers = ownerId
     ? members.filter((member) => member.user_id !== ownerId)
     : members;
 
-  const sameMembers =
-    draftMembers.length === persistedMembers.length &&
-    draftMembers.every((id) => persistedMembers.includes(id));
+  const sameMembers = sameIdSet(draftMembers, persistedMembers);
+  const sameTeams = sameIdSet(draftTeams, persistedTeams);
   const dirty =
     draftScope !== persistedScope ||
-    (draftScope === "members" && !sameMembers);
-  const hasMemberTarget = draftMembers.length > 0;
+    (draftScope === "members" && (!sameMembers || !sameTeams));
+  const hasMemberTarget = draftMembers.length > 0 || draftTeams.length > 0;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -157,16 +165,16 @@ export function AccessPicker({
       targets.push({ target_type: "workspace" });
     }
     if (draftScope === "members") {
-      if (draftMembers.length === 0) return null;
+      if (draftMembers.length === 0 && draftTeams.length === 0) return null;
       for (const id of draftMembers) {
         targets.push({ target_type: "member", target_id: id });
       }
-      for (const id of teamIds) {
+      for (const id of draftTeams) {
         targets.push({ target_type: "team", target_id: id });
       }
     }
     return { permission_mode: "public_to", invocation_targets: targets };
-  }, [draftScope, draftMembers, teamIds]);
+  }, [draftScope, draftMembers, draftTeams]);
 
   /** Ready once the user has explicitly selected a scope (hasInteracted) AND
    *  the draft is committable. Does NOT require the draft to differ from the
@@ -184,12 +192,10 @@ export function AccessPicker({
   }, [readyChange, onReadyChange]);
 
   const toggleMember = (userId: string, checked: boolean) => {
-    setDraftMembers((current) => {
-      const next = new Set(current);
-      if (checked) next.add(userId);
-      else next.delete(userId);
-      return Array.from(next);
-    });
+    setDraftMembers((current) => toggleId(current, userId, checked));
+  };
+  const toggleTeam = (teamId: string, checked: boolean) => {
+    setDraftTeams((current) => toggleId(current, teamId, checked));
   };
 
   const save = async () => {
@@ -203,14 +209,20 @@ export function AccessPicker({
   };
 
   if (!canEdit) {
+    const grantLabels = [
+      persistedMembers.length > 0
+        ? t(($) => $.access.trigger_members_count, { count: persistedMembers.length })
+        : "",
+      persistedTeams.length > 0
+        ? t(($) => $.access.trigger_teams_count, { count: persistedTeams.length })
+        : "",
+    ].filter(Boolean);
     const summaryLabel = persistedPrivate
       ? t(($) => $.access.trigger_private)
       : persistedWorkspace
         ? t(($) => $.access.trigger_workspace)
-        : persistedMembers.length > 0
-          ? t(($) => $.access.trigger_members_count, {
-              count: persistedMembers.length,
-            })
+        : grantLabels.length > 0
+          ? grantLabels.join(" · ")
           : t(($) => $.access.trigger_members_empty);
 
     return (
@@ -309,6 +321,41 @@ export function AccessPicker({
             )}
           </div>
 
+          {teams.length > 0 ? (
+            <div className="mt-4" data-testid="access-teams">
+              <p className="text-caption font-medium">{t(($) => $.access.teams_group)}</p>
+              <p className="mt-0.5 mb-2 text-caption text-muted-foreground">
+                {t(($) => $.access.teams_hint)}
+              </p>
+              <div className="max-h-64 divide-y divide-surface-border overflow-y-auto rounded-lg border bg-background overscroll-contain">
+                {teams.map((team) => {
+                  const id = `agent-access-team-${team.id}`;
+                  return (
+                    <div
+                      key={team.id}
+                      className="flex items-center gap-3 px-3 py-3 hover:bg-surface-hover"
+                    >
+                      <Checkbox
+                        id={id}
+                        checked={draftTeams.includes(team.id)}
+                        onCheckedChange={(value) => toggleTeam(team.id, value === true)}
+                      />
+                      <label
+                        htmlFor={id}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                      >
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                          <Users className="size-3.5" aria-hidden="true" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-body">{team.name}</span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {!hasMemberTarget ? (
             <p className="mt-3 text-caption text-destructive" role="alert">
               {t(($) => $.access.shared_target_required)}
@@ -346,6 +393,21 @@ export function AccessPicker({
       )}
     </fieldset>
   );
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
+function toggleId(current: string[], id: string, checked: boolean): string[] {
+  const next = new Set(current);
+  if (checked) next.add(id);
+  else next.delete(id);
+  return Array.from(next);
 }
 
 function AccessChoice({

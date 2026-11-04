@@ -206,3 +206,17 @@ export interface UpdateLarkOrganizationRequest {
   enabled: boolean;
   mappings: LarkOrganizationMapping[];
 }
+
+/** An applied organization group any workspace member may grant an agent
+ * to. Wire shape mirrors `LarkOrganizationGroupResponse` in
+ * `server/internal/handler/feishu_org_groups.go`. */
+export interface LarkOrganizationGroup {
+  id: string;
+  kind: "department" | "job_title" | "user" | string;
+  external_id: string;
+  external_name: string;
+}
+
+export interface ListLarkOrganizationGroupsResponse {
+  groups: LarkOrganizationGroup[];
+}

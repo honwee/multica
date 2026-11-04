@@ -866,7 +866,7 @@
     "private_desc": "只有你可以執行該 AI 代理",
     "shared_title": "共享",
     "shared_desc": "向整個工作區或指定成員開放該 AI 代理",
-    "shared_target_required": "儲存前，請至少選擇一名成員。",
+    "shared_target_required": "儲存前，請至少選擇一名成員或一個團隊。",
     "workspace_title": "整個工作區",
     "workspace_desc": "預設允許工作區內所有成員執行該 AI 代理",
     "members_title": "指定成員",
@@ -878,7 +878,10 @@
     "public_group": "公開訪問",
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
-    "composio_switch_hint": "提示——該 AI 代理已啟用 Composio 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。"
+    "composio_switch_hint": "提示——該 AI 代理已啟用 Composio 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。",
+    "teams_group": "部門與團隊",
+    "teams_hint": "來自飛書組織架構同步。所選群組內的在職成員都可以執行該 AI 代理。",
+    "trigger_teams_count_other": "{{count}} 個團隊"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",

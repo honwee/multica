@@ -904,3 +904,59 @@ func TestFeishuOrgCatalogLinksMemberByLoginUnionID(t *testing.T) {
 	}
 	t.Fatalf("member %s missing from workspace members", fixture.memberID)
 }
+
+// TestListLarkOrganizationGroupsShowsAppliedGroupsToMembers verifies a plain
+// member can list the groups an agent may be granted to, and only those: a
+// never-applied group is hidden, and so is a group whose rule was removed,
+// even before the removal is applied.
+func TestListLarkOrganizationGroupsShowsAppliedGroupsToMembers(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	mappings := []LarkOrganizationMappingResponse{
+		{Kind: "department", ExternalID: "d1", ExternalName: "Engineering"},
+		{Kind: "job_title", ExternalID: "Designer", ExternalName: "Designer"},
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, mappings); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete: true, Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}},
+		Users: []lark.OrgUser{{OpenID: "ou_member", Email: fixture.memberEmail, JobTitle: "Designer", DepartmentIDs: []string{"d1"}, Active: true}},
+	}
+	wireFeishuOrgAPIClient(t, client)
+
+	list := func() ListLarkOrganizationGroupsResponse {
+		t.Helper()
+		req := feishuOrgRequest(fixture.memberID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization/groups", nil)
+		w := httptest.NewRecorder()
+		testHandler.ListLarkOrganizationGroups(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list groups status = %d, body=%s", w.Code, w.Body.String())
+		}
+		var response ListLarkOrganizationGroupsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode groups: %v", err)
+		}
+		return response
+	}
+	if got := list(); len(got.Groups) != 0 {
+		t.Fatalf("groups before apply = %+v, want none", got.Groups)
+	}
+	preview := previewFeishuOrg(t, fixture)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	if applied := applyFeishuOrg(t, fixture, decodeFeishuOrgRun(t, preview).ID); applied.Code != http.StatusOK {
+		t.Fatalf("apply status = %d, body=%s", applied.Code, applied.Body.String())
+	}
+	got := list()
+	if len(got.Groups) != 2 || got.Groups[0].Kind != "department" || got.Groups[0].ExternalName != "Engineering" || got.Groups[1].Kind != "job_title" || got.Groups[1].ExternalID != "Designer" {
+		t.Fatalf("groups after apply = %+v, want Engineering and Designer", got.Groups)
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, mappings[:1]); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := list(); len(got.Groups) != 1 || got.Groups[0].ExternalName != "Engineering" {
+		t.Fatalf("groups after removing a rule = %+v, want only Engineering", got.Groups)
+	}
+}

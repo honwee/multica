@@ -485,6 +485,44 @@ func (q *Queries) IsFeishuOrgTeamMember(ctx context.Context, arg IsFeishuOrgTeam
 	return exists, err
 }
 
+const listActiveFeishuOrgGroups = `-- name: ListActiveFeishuOrgGroups :many
+SELECT id, workspace_id, kind, external_id, external_name, configured, active, created_at, updated_at FROM feishu_org_group
+WHERE workspace_id = $1 AND active AND configured
+ORDER BY kind, external_name, external_id
+`
+
+// Groups that currently grant access: applied (active) and still configured.
+// Members read these to pick team targets for their own agents.
+func (q *Queries) ListActiveFeishuOrgGroups(ctx context.Context, workspaceID pgtype.UUID) ([]FeishuOrgGroup, error) {
+	rows, err := q.db.Query(ctx, listActiveFeishuOrgGroups, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FeishuOrgGroup{}
+	for rows.Next() {
+		var i FeishuOrgGroup
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.ExternalID,
+			&i.ExternalName,
+			&i.Configured,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFeishuOrgAgentMappings = `-- name: ListFeishuOrgAgentMappings :many
 SELECT workspace_id, group_id, agent_id, created_at FROM feishu_org_agent_mapping
 WHERE workspace_id = $1

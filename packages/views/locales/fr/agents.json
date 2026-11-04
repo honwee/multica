@@ -887,7 +887,7 @@
     "private_desc": "Vous seul pouvez exécuter cet agent",
     "shared_title": "Partagé",
     "shared_desc": "Choisissez l'espace de travail ou les personnes précises qui peuvent exécuter cet agent",
-    "shared_target_required": "Sélectionnez au moins une personne avant d'enregistrer.",
+    "shared_target_required": "Sélectionnez au moins une personne ou une équipe avant d'enregistrer.",
     "workspace_title": "Tout l'espace de travail",
     "workspace_desc": "Tous les membres de l'espace de travail peuvent exécuter cet agent",
     "members_title": "Personnes précises",
@@ -899,7 +899,11 @@
     "public_group": "Accès public",
     "owner_only_readonly": "Seul le propriétaire de l'agent peut modifier qui peut l'exécuter.",
     "members_empty": "Aucun membre de l'espace de travail à choisir",
-    "composio_switch_hint": "Attention — cet agent a des applications Composio activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent."
+    "composio_switch_hint": "Attention — cet agent a des applications Composio activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
+    "teams_group": "Services et équipes",
+    "teams_hint": "Synchronisé depuis l'organisation Feishu. Tous les membres actifs d'un groupe sélectionné peuvent exécuter cet agent.",
+    "trigger_teams_count_one": "{{count}} équipe",
+    "trigger_teams_count_other": "{{count}} équipes"
   },
   "profile_card": {
     "unavailable": "Agent indisponible",

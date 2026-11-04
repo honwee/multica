@@ -176,3 +176,81 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     expect(screen.getByTestId("access-readonly")).toBeInTheDocument();
   });
 });
+
+describe("AccessPicker organization teams", () => {
+  beforeEach(() => cleanup());
+  afterEach(() => cleanup());
+
+  const TEAMS = [
+    { id: "team-eng", name: "Engineering" },
+    { id: "team-design", name: "Design" },
+  ];
+
+  it("lets the owner grant a department without picking any person", () => {
+    const { onChange } = renderPicker({ canEdit: true, teams: TEAMS });
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
+    expect(screen.getByTestId("access-teams")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Engineering/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onChange).toHaveBeenCalledWith({
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "team", target_id: "team-eng" }],
+    });
+  });
+
+  it("shows persisted team grants as checked and lets the owner revoke them", () => {
+    const { onChange } = renderPicker({
+      canEdit: true,
+      teams: TEAMS,
+      permissionMode: "public_to",
+      invocationTargets: [
+        { target_type: "member", target_id: "u1" },
+        { target_type: "team", target_id: "team-design" },
+      ],
+    });
+    const design = screen.getByRole("checkbox", { name: /Design/i });
+    expect(design).toBeChecked();
+    fireEvent.click(design);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onChange).toHaveBeenCalledWith({
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "member", target_id: "u1" }],
+    });
+  });
+
+  it("preserves team grants whose group is no longer listed", () => {
+    const { onChange } = renderPicker({
+      canEdit: true,
+      teams: [],
+      permissionMode: "public_to",
+      invocationTargets: [
+        { target_type: "member", target_id: "u1" },
+        { target_type: "team", target_id: "team-retired" },
+      ],
+    });
+    expect(screen.queryByTestId("access-teams")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bob/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onChange).toHaveBeenCalledWith({
+      permission_mode: "public_to",
+      invocation_targets: [
+        { target_type: "member", target_id: "u1" },
+        { target_type: "member", target_id: "u2" },
+        { target_type: "team", target_id: "team-retired" },
+      ],
+    });
+  });
+
+  it("summarizes team grants for non-owners", () => {
+    renderPicker({
+      canEdit: false,
+      teams: TEAMS,
+      permissionMode: "public_to",
+      invocationTargets: [
+        { target_type: "team", target_id: "team-eng" },
+        { target_type: "team", target_id: "team-design" },
+      ],
+    });
+    expect(screen.getByText("2 teams")).toBeInTheDocument();
+  });
+});

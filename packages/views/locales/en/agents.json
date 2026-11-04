@@ -887,7 +887,7 @@
     "private_desc": "Only you can run this agent",
     "shared_title": "Shared",
     "shared_desc": "Choose the workspace or specific people who can run this agent",
-    "shared_target_required": "Select at least one person before saving.",
+    "shared_target_required": "Select at least one person or team before saving.",
     "workspace_title": "Entire workspace",
     "workspace_desc": "All workspace members can run this agent",
     "members_title": "Specific people",
@@ -899,7 +899,11 @@
     "public_group": "Public access",
     "owner_only_readonly": "Only the agent owner can change who can run this agent.",
     "members_empty": "No workspace members to choose from",
-    "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
+    "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent.",
+    "teams_group": "Departments and teams",
+    "teams_hint": "Synced from the Feishu organization. Every active member of a selected group can run this agent.",
+    "trigger_teams_count_one": "{{count}} team",
+    "trigger_teams_count_other": "{{count}} teams"
   },
   "profile_card": {
     "unavailable": "Agent unavailable",

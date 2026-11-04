@@ -259,6 +259,8 @@ export type {
   LarkOrganizationJobTitle,
   LarkOrganizationWorkspaceMember,
   LarkOrganizationResponse,
+  LarkOrganizationGroup,
+  ListLarkOrganizationGroupsResponse,
   UpdateLarkOrganizationRequest,
 } from "./lark";
 export type {

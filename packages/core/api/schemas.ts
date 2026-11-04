@@ -53,6 +53,7 @@ import type {
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
   LarkOrganizationResponse,
+  ListLarkOrganizationGroupsResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -3579,6 +3580,19 @@ export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchem
   requirements: z.array(z.string()),
   sync_runs: z.array(LarkOrganizationSyncRunSchema),
 });
+
+export const LarkOrganizationGroupSchema = z.object({
+  id: z.string(),
+  kind: z.string().default(""),
+  external_id: z.string().default(""),
+  external_name: z.string().default(""),
+}).loose();
+
+export const ListLarkOrganizationGroupsResponseSchema = z.object({
+  groups: z.array(LarkOrganizationGroupSchema).catch([]).default([]),
+}).loose();
+
+export const EMPTY_LARK_ORGANIZATION_GROUPS_RESPONSE: ListLarkOrganizationGroupsResponse = { groups: [] };
 
 export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
   config: null,

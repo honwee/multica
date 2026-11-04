@@ -29,6 +29,13 @@ SELECT * FROM feishu_org_group
 WHERE workspace_id = $1
 ORDER BY kind, external_id;
 
+-- name: ListActiveFeishuOrgGroups :many
+-- Groups that currently grant access: applied (active) and still configured.
+-- Members read these to pick team targets for their own agents.
+SELECT * FROM feishu_org_group
+WHERE workspace_id = $1 AND active AND configured
+ORDER BY kind, external_name, external_id;
+
 -- name: DeactivateFeishuOrgGroupsNotIn :exec
 UPDATE feishu_org_group
 SET configured = false, updated_at = now()
