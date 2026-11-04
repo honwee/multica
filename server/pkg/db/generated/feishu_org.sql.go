@@ -390,7 +390,6 @@ WHERE ci.id = $1
        AND source.enabled
       WHERE shared.workspace_id = $2
         AND shared.installation_id = ci.id
-        AND shared.enabled
     )
   )
 `
@@ -400,6 +399,10 @@ type GetFeishuOrgInstallationForWorkspaceParams struct {
 	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 }
 
+// A workspace may use its own installation, or one shared by the source
+// workspace whose organization sync is enabled. The requesting workspace's
+// own enabled flag is deliberately not a condition: a workspace that turned
+// sync off must still be able to turn it back on.
 func (q *Queries) GetFeishuOrgInstallationForWorkspace(ctx context.Context, arg GetFeishuOrgInstallationForWorkspaceParams) (ChannelInstallation, error) {
 	row := q.db.QueryRow(ctx, getFeishuOrgInstallationForWorkspace, arg.InstallationID, arg.WorkspaceID)
 	var i ChannelInstallation

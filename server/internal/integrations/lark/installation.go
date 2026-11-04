@@ -158,8 +158,9 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 }
 
 // GetOrganizationInstallation resolves an installation owned by this workspace
-// or explicitly shared through an enabled organization configuration. The
-// source configuration must remain present and enabled for shared access.
+// or shared with it through the source workspace's enabled organization
+// configuration. The source configuration must remain present and enabled
+// for shared access; the requesting workspace may have sync switched off.
 func (s *InstallationService) GetOrganizationInstallation(ctx context.Context, id, workspaceID pgtype.UUID) (Installation, error) {
 	row, err := s.queries.GetFeishuOrgInstallationForWorkspace(ctx, db.GetFeishuOrgInstallationForWorkspaceParams{
 		InstallationID: id,

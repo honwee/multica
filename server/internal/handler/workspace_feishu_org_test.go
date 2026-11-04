@@ -104,6 +104,14 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, true, nil); saved.Code != http.StatusOK {
 		t.Fatalf("save with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
 	}
+	// Turning sync off in the inherited workspace must not lock it out of the
+	// shared installation: the next save has to be able to turn it back on.
+	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, false, nil); saved.Code != http.StatusOK {
+		t.Fatalf("disable with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
+	}
+	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, true, nil); saved.Code != http.StatusOK {
+		t.Fatalf("re-enable with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
+	}
 	if err := testHandler.Queries.DeleteFeishuOrgDataByWorkspace(context.Background(), parseUUID(fixture.workspaceID)); err != nil {
 		t.Fatalf("remove source organization config: %v", err)
 	}

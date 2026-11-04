@@ -305,6 +305,10 @@ ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: GetFeishuOrgInstallationForWorkspace :one
+-- A workspace may use its own installation, or one shared by the source
+-- workspace whose organization sync is enabled. The requesting workspace's
+-- own enabled flag is deliberately not a condition: a workspace that turned
+-- sync off must still be able to turn it back on.
 SELECT ci.*
 FROM channel_installation ci
 WHERE ci.id = @installation_id
@@ -320,6 +324,5 @@ WHERE ci.id = @installation_id
        AND source.enabled
       WHERE shared.workspace_id = @workspace_id
         AND shared.installation_id = ci.id
-        AND shared.enabled
     )
   );
