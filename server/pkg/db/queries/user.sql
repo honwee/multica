@@ -10,11 +10,21 @@ WHERE email = $1;
 SELECT * FROM "user"
 WHERE feishu_open_id = $1;
 
--- name: SetUserFeishuOpenID :one
+-- name: GetUserByFeishuUnionID :one
+SELECT * FROM "user"
+WHERE feishu_union_id = $1;
+
+-- name: SetUserFeishuIdentity :one
+-- union_id is stable across every app of the same Feishu developer and is the
+-- primary link; open_id only identifies the user within the login app.
+-- Empty strings leave the stored value untouched so a login that omits a
+-- field never erases an existing link.
 UPDATE "user" SET
-    feishu_open_id = $2,
+    feishu_open_id = COALESCE(NULLIF(@feishu_open_id::text, ''), feishu_open_id),
+    feishu_union_id = COALESCE(NULLIF(@feishu_union_id::text, ''), feishu_union_id),
+    feishu_tenant_key = COALESCE(NULLIF(@feishu_tenant_key::text, ''), feishu_tenant_key),
     updated_at = now()
-WHERE id = $1
+WHERE id = @id
 RETURNING *;
 
 -- name: GetUsersByIDs :many

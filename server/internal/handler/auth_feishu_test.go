@@ -10,7 +10,6 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -231,8 +230,8 @@ func TestFeishuLoginUsesLinkedOpenID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create linked user: %v", err)
 	}
-	if _, err := h.Queries.SetUserFeishuOpenID(context.Background(), db.SetUserFeishuOpenIDParams{
-		ID: existing.ID, FeishuOpenID: pgtype.Text{String: openID, Valid: true},
+	if _, err := h.Queries.SetUserFeishuIdentity(context.Background(), db.SetUserFeishuIdentityParams{
+		ID: existing.ID, FeishuOpenID: openID,
 	}); err != nil {
 		t.Fatalf("link Feishu identity: %v", err)
 	}
@@ -255,5 +254,87 @@ func TestFeishuLoginUsesLinkedOpenID(t *testing.T) {
 	}
 	if _, err := h.Queries.GetUserByEmail(context.Background(), internalEmail); err == nil {
 		t.Fatal("Feishu login created a duplicate open_id account despite the existing link")
+	}
+}
+
+// TestFeishuLoginStoresUnionIdentity verifies that a first sign-in records the
+// union_id and tenant_key next to the open_id, so the organization directory
+// can match the account across every app of the tenant.
+func TestFeishuLoginStoresUnionIdentity(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	email := "feishu-union@lumistedu-test.com"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1`, email)
+	h := *testHandler
+	h.cfg = Config{AllowSignup: true}
+	h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+			return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+		}
+		return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"Union User","enterprise_email":"feishu-union@lumistedu-test.com","open_id":"ou_union_login","union_id":"ON_Union_Login","tenant_key":"tenant_abc"}}`), nil
+	})}
+	req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+	var got LoginResponse
+	testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+
+	user, err := h.Queries.GetUserByEmail(context.Background(), email)
+	if err != nil {
+		t.Fatalf("load user: %v", err)
+	}
+	if !user.FeishuUnionID.Valid || user.FeishuUnionID.String != "on_union_login" {
+		t.Fatalf("stored union_id = %+v, want on_union_login", user.FeishuUnionID)
+	}
+	if !user.FeishuOpenID.Valid || user.FeishuOpenID.String != "ou_union_login" {
+		t.Fatalf("stored open_id = %+v, want ou_union_login", user.FeishuOpenID)
+	}
+	if !user.FeishuTenantKey.Valid || user.FeishuTenantKey.String != "tenant_abc" {
+		t.Fatalf("stored tenant_key = %+v, want tenant_abc", user.FeishuTenantKey)
+	}
+}
+
+// TestFeishuLoginUsesLinkedUnionID proves that a sign-in through a different
+// Feishu app (a different open_id) still lands on the account linked by
+// union_id, and that the newer open_id replaces the stale one.
+func TestFeishuLoginUsesLinkedUnionID(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	email := "linked-union@example.com"
+	internalEmail := "ou_other_app@feishu.invalid"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2`, email, internalEmail)
+
+	h := *testHandler
+	h.cfg = Config{AllowSignup: true}
+	existing, _, err := h.findOrCreateUser(context.Background(), email)
+	if err != nil {
+		t.Fatalf("create linked user: %v", err)
+	}
+	if _, err := h.Queries.SetUserFeishuIdentity(context.Background(), db.SetUserFeishuIdentityParams{
+		ID: existing.ID, FeishuOpenID: "ou_first_app", FeishuUnionID: "on_shared_union",
+	}); err != nil {
+		t.Fatalf("link Feishu identity: %v", err)
+	}
+
+	h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+			return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+		}
+		return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"Other App","open_id":"ou_other_app","union_id":"on_shared_union"}}`), nil
+	})}
+	req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+	var got LoginResponse
+	testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+
+	if got.User.ID != uuidToString(existing.ID) {
+		t.Fatalf("got user ID %q, want union-linked user %q", got.User.ID, uuidToString(existing.ID))
+	}
+	if _, err := h.Queries.GetUserByEmail(context.Background(), internalEmail); err == nil {
+		t.Fatal("Feishu login created a duplicate account despite the union_id link")
+	}
+	user, err := h.Queries.GetUser(context.Background(), existing.ID)
+	if err != nil {
+		t.Fatalf("load user: %v", err)
+	}
+	if !user.FeishuOpenID.Valid || user.FeishuOpenID.String != "ou_other_app" {
+		t.Fatalf("stored open_id = %+v, want the login app's ou_other_app", user.FeishuOpenID)
 	}
 }

@@ -1744,6 +1744,8 @@ type User struct {
 	Timezone            pgtype.Text `json:"timezone"`
 	WhatsNewSeenVersion pgtype.Text `json:"whats_new_seen_version"`
 	FeishuOpenID        pgtype.Text `json:"feishu_open_id"`
+	FeishuUnionID       pgtype.Text `json:"feishu_union_id"`
+	FeishuTenantKey     pgtype.Text `json:"feishu_tenant_key"`
 }
 
 type UserComposioConnection struct {

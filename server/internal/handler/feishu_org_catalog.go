@@ -153,10 +153,16 @@ func feishuOrgMemberInputs(rows []db.ListFeishuOrgMemberIdentitiesRow) []feishuo
 		if row.FeishuOpenID.Valid {
 			feishuOpenID = row.FeishuOpenID.String
 		}
+		// The login-linked union_id joins the bot-binding union_ids: both
+		// identify the same person across every app of the tenant.
+		unionIDs := append([]string{}, row.UnionIds...)
+		if row.FeishuUnionID.Valid && row.FeishuUnionID.String != "" {
+			unionIDs = append(unionIDs, row.FeishuUnionID.String)
+		}
 		members = append(members, feishuorg.Member{
 			MemberID: uuidToString(row.ID), UserID: uuidToString(row.UserID), Name: row.UserName, Email: row.UserEmail,
 			Role: row.Role, FeishuOpenID: feishuOpenID, ManagedRole: managedRole, Disabled: row.DisabledAt.Valid,
-			ChannelOpenIDs: row.ChannelOpenIds, UnionIDs: row.UnionIds,
+			ChannelOpenIDs: row.ChannelOpenIds, UnionIDs: unionIDs,
 		})
 	}
 	return members

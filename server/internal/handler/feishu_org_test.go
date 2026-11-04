@@ -854,3 +854,53 @@ func TestFeishuOrgRejectsCrossWorkspaceRun(t *testing.T) {
 		})
 	}
 }
+
+// TestFeishuOrgCatalogLinksMemberByLoginUnionID covers a member who signed in
+// through the login app: the directory snapshot comes from a different app,
+// so open_id differs and the email is absent, but union_id still links them.
+func TestFeishuOrgCatalogLinksMemberByLoginUnionID(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if _, err := testHandler.Queries.SetUserFeishuIdentity(context.Background(), db.SetUserFeishuIdentityParams{
+		ID: parseUUID(fixture.memberID), FeishuOpenID: "ou_login_app", FeishuUnionID: "on_login_member",
+	}); err != nil {
+		t.Fatalf("link member identity: %v", err)
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_directory_app", UnionID: "on_login_member", Name: "Member", DepartmentIDs: []string{"d1"}, Active: true},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetLarkOrganization status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Catalog == nil {
+		t.Fatal("catalog is missing")
+	}
+	for _, member := range response.Catalog.WorkspaceMembers {
+		if member.UserID != fixture.memberID {
+			continue
+		}
+		if !member.Linked || member.IdentityConflict || len(member.Departments) != 1 || member.Departments[0] != "Engineering" {
+			t.Fatalf("member linked by union_id = %+v, want linked to Engineering", member)
+		}
+		return
+	}
+	t.Fatalf("member %s missing from workspace members", fixture.memberID)
+}

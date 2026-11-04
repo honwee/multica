@@ -597,6 +597,7 @@ SELECT
     u.name AS user_name,
     u.email AS user_email,
     u.feishu_open_id,
+    u.feishu_union_id,
     COALESCE(
         ARRAY_AGG(DISTINCT b.channel_user_id ORDER BY b.channel_user_id)
             FILTER (WHERE b.channel_user_id IS NOT NULL),
@@ -632,6 +633,7 @@ type ListFeishuOrgMemberIdentitiesRow struct {
 	UserName          string             `json:"user_name"`
 	UserEmail         string             `json:"user_email"`
 	FeishuOpenID      pgtype.Text        `json:"feishu_open_id"`
+	FeishuUnionID     pgtype.Text        `json:"feishu_union_id"`
 	ChannelOpenIds    []string           `json:"channel_open_ids"`
 	UnionIds          []string           `json:"union_ids"`
 }
@@ -655,6 +657,7 @@ func (q *Queries) ListFeishuOrgMemberIdentities(ctx context.Context, workspaceID
 			&i.UserName,
 			&i.UserEmail,
 			&i.FeishuOpenID,
+			&i.FeishuUnionID,
 			&i.ChannelOpenIds,
 			&i.UnionIds,
 		); err != nil {

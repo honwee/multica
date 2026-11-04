@@ -1,0 +1,2 @@
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS feishu_union_id TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS feishu_tenant_key TEXT;

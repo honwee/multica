@@ -178,6 +178,7 @@ SELECT
     u.name AS user_name,
     u.email AS user_email,
     u.feishu_open_id,
+    u.feishu_union_id,
     COALESCE(
         ARRAY_AGG(DISTINCT b.channel_user_id ORDER BY b.channel_user_id)
             FILTER (WHERE b.channel_user_id IS NOT NULL),
