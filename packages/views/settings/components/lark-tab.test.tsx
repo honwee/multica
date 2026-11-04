@@ -925,6 +925,10 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText(enSettings.lark.workspace_app_badge)).toBeTruthy();
     expect(screen.queryByText(/Unknown Agent/)).toBeNull();
     expect(screen.queryByTestId("actor-avatar")).toBeNull();
+    // Organization-data connections never receive messages, so the bot
+    // receipt guidance must not ask the admin to verify inbound delivery.
+    expect(screen.queryByText(enSettings.lark.inbound_pending)).toBeNull();
+    expect(screen.queryByText(enSettings.lark.inbound_pending_hint)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: enSettings.lark.bot_details }));
     expect(await screen.findByText(enSettings.lark.workspace_unbound)).toBeTruthy();

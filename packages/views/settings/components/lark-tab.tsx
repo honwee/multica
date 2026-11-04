@@ -303,7 +303,7 @@ function InstallationRow({
                 </span>
               )}
             </p>
-            {isActive && <LarkReceiptGuidance installation={installation} />}
+            {isActive && agentId && <LarkReceiptGuidance installation={installation} />}
             <p className="text-micro text-muted-foreground">
               {t(($) => $.lark.installed_at_label, {
                 when: new Date(installation.installed_at).toLocaleString(locale),
