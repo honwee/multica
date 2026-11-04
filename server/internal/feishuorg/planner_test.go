@@ -575,3 +575,38 @@ func TestBuildPlanDepartmentRuleCoversSubDepartments(t *testing.T) {
 		t.Fatalf("role assignments = %+v, want u1 admin", got.RoleAssignments)
 	}
 }
+
+func TestResolveAccessAndFindUser(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d_eng", Name: "Engineering", ParentID: "0"}, {ID: "d_platform", Name: "Platform", ParentID: "d_eng"}},
+		Users: []lark.OrgUser{
+			{UnionID: "on_platform", OpenID: "ou_platform", EnterpriseEmail: "Platform@Corp.com", Name: "Platform", DepartmentIDs: []string{"d_platform"}, JobTitle: "Engineer", Active: true},
+			{UnionID: "on_outside", Name: "Outside", DepartmentIDs: []string{"0"}, Active: true},
+		},
+	}
+	mappings := []Mapping{
+		{GroupID: "g_eng", Kind: "department", ExternalID: "d_eng", MemberRole: "member"},
+		{GroupID: "g_eng_title", Kind: "job_title", ExternalID: "Engineer", MemberRole: "admin"},
+		{GroupID: "g_bad", Kind: "department", ExternalID: "d_missing", MemberRole: "owner"},
+	}
+	user, ok := FindUser(snapshot, "on_platform", "")
+	if !ok {
+		t.Fatal("FindUser by union id failed")
+	}
+	access := ResolveAccess(snapshot, mappings, user)
+	if !access.Entitled() || access.Role != "admin" || len(access.GroupIDs) != 2 || access.GroupIDs[0] != "g_eng" || access.GroupIDs[1] != "g_eng_title" {
+		t.Fatalf("access = %+v, want admin via job title plus both groups", access)
+	}
+	byEmail, ok := FindUser(snapshot, "", "platform@corp.com")
+	if !ok || byEmail.UnionID != "on_platform" {
+		t.Fatalf("FindUser by enterprise email = %+v ok=%v", byEmail, ok)
+	}
+	outside, _ := FindUser(snapshot, "on_outside", "")
+	if ResolveAccess(snapshot, mappings, outside).Entitled() {
+		t.Fatal("user outside every rule must not be entitled")
+	}
+	if _, ok := FindUser(snapshot, "on_nobody", "nobody@corp.com"); ok {
+		t.Fatal("unknown user must not be found")
+	}
+}

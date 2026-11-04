@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"testing/iotest"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -336,5 +339,77 @@ func TestFeishuLoginUsesLinkedUnionID(t *testing.T) {
 	}
 	if !user.FeishuOpenID.Valid || user.FeishuOpenID.String != "ou_other_app" {
 		t.Fatalf("stored open_id = %+v, want the login app's ou_other_app", user.FeishuOpenID)
+	}
+}
+
+// TestFeishuLoginJoinsWorkspaceByOrganizationRule: with automatic sync on,
+// a first sign-in from someone the rules cover lands them in the workspace
+// with the mapped role; someone outside every rule is not admitted.
+func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	fixture := newFeishuOrgHandlerFixture(t)
+	req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
+		InstallationID: fixture.installationID, Enabled: true, AutoSync: true,
+		Mappings: []LarkOrganizationMappingResponse{{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")}},
+	})
+	w := httptest.NewRecorder()
+	testHandler.UpdateLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	joinerEmail := "feishu-joiner-" + fixture.workspaceID + "@corp.example.com"
+	outsiderEmail := "feishu-outsider-" + fixture.workspaceID + "@corp.example.com"
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2`, joinerEmail, outsiderEmail)
+	snapshot, _ := json.Marshal(lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}, {ID: "d2", Name: "Sales", ParentID: "0"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_joiner_dir", UnionID: "on_joiner", EnterpriseEmail: joinerEmail, Name: "Joiner", DepartmentIDs: []string{"d1"}, Active: true},
+			{OpenID: "ou_outsider_dir", UnionID: "on_outsider", EnterpriseEmail: outsiderEmail, Name: "Outsider", DepartmentIDs: []string{"d2"}, Active: true},
+		},
+	})
+	if _, err := testHandler.Queries.UpsertFeishuOrgDirectory(context.Background(), db.UpsertFeishuOrgDirectoryParams{
+		InstallationID: parseUUID(fixture.installationID), Snapshot: snapshot, FetchedBy: parseUUID(fixture.ownerID),
+	}); err != nil {
+		t.Fatalf("seed directory: %v", err)
+	}
+
+	login := func(unionID, openID, email string) LoginResponse {
+		t.Helper()
+		h := *testHandler
+		h.cfg = Config{AllowSignup: true}
+		h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+				return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+			}
+			return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"Person","enterprise_email":"`+email+`","open_id":"`+openID+`","union_id":"`+unionID+`","tenant_key":"tenant_join"}}`), nil
+		})}
+		req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+		var got LoginResponse
+		testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+		return got
+	}
+
+	joiner := login("on_joiner", "ou_joiner_login", joinerEmail)
+	var role string
+	var managed pgtype.Text
+	if err := testPool.QueryRow(context.Background(), `SELECT role, feishu_managed_role FROM member WHERE workspace_id = $1 AND user_id = $2 AND disabled_at IS NULL`, fixture.workspaceID, joiner.User.ID).Scan(&role, &managed); err != nil {
+		t.Fatalf("joiner is not a member: %v", err)
+	}
+	if role != "admin" || !managed.Valid || managed.String != "admin" {
+		t.Fatalf("joiner role = %q managed = %+v, want admin from the rule", role, managed)
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_membership WHERE workspace_id = $1 AND user_id = $2 AND active`, fixture.workspaceID, joiner.User.ID); count != 1 {
+		t.Fatalf("joiner group memberships = %d, want 1", count)
+	}
+	user, err := testHandler.Queries.GetUser(context.Background(), parseUUID(joiner.User.ID))
+	if err != nil || !user.OnboardedAt.Valid {
+		t.Fatalf("joiner must be marked onboarded: %+v err=%v", user.OnboardedAt, err)
+	}
+
+	outsider := login("on_outsider", "ou_outsider_login", outsiderEmail)
+	if count := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, outsider.User.ID); count != 0 {
+		t.Fatal("a user outside every rule must not be admitted")
 	}
 }

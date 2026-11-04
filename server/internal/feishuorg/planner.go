@@ -519,3 +519,43 @@ func sortedGroupIDs(groups map[string]struct{}) []string {
 func addWarning(warnings map[string]struct{}, warning string) {
 	warnings[warning] = struct{}{}
 }
+
+// Access is what the rules grant one directory user: the groups they belong
+// to and the highest mapped role, or "" when no rule names a role.
+type Access struct {
+	GroupIDs []string
+	Role     string
+}
+
+// Entitled reports whether at least one rule matched the user.
+func (a Access) Entitled() bool { return len(a.GroupIDs) > 0 || a.Role != "" }
+
+// ResolveAccess evaluates the rules for a single directory user, the same
+// way BuildPlan does for existing members. Invalid rules are ignored.
+func ResolveAccess(snapshot lark.OrgSnapshot, mappings []Mapping, user lark.OrgUser) Access {
+	valid := validateMappings(snapshot, mappings, make(map[string]struct{}))
+	groups, role := desiredAccess(user, valid, snapshot.DepartmentClosure())
+	return Access{GroupIDs: sortedGroupIDs(groups), Role: role}
+}
+
+// FindUser locates a directory user by union_id first, then by the login
+// email, and reports whether one was found.
+func FindUser(snapshot lark.OrgSnapshot, unionID, email string) (lark.OrgUser, bool) {
+	unionID = strings.TrimSpace(unionID)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if unionID != "" {
+		for _, user := range snapshot.Users {
+			if user.UnionID == unionID {
+				return user, true
+			}
+		}
+	}
+	if email != "" {
+		for _, user := range snapshot.Users {
+			if user.LoginEmail() == email {
+				return user, true
+			}
+		}
+	}
+	return lark.OrgUser{}, false
+}

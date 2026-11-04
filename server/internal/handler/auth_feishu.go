@@ -290,6 +290,10 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Organization rules may admit the user to workspaces directly, so the
+	// first workspace list after sign-in already includes them.
+	h.joinFeishuOrganizationWorkspaces(r.Context(), user)
+
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		if writeGoogleLoginActionableError(w, err) {
