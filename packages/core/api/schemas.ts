@@ -3470,6 +3470,7 @@ export const LarkInstallationBotInfoSchema = z.object({
 export const LarkOrganizationConfigSchema = z.object({
   installation_id: z.string(),
   enabled: z.boolean(),
+  auto_sync: z.boolean().optional(),
   revision: z.number().int().nonnegative(),
   updated_at: z.string().default(""),
 }).loose();

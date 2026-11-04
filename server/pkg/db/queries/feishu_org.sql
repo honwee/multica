@@ -6,14 +6,28 @@ WHERE workspace_id = $1;
 SELECT pg_advisory_xact_lock(hashtext($1::text));
 
 -- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, installation_id, enabled)
-VALUES (@workspace_id, @installation_id, @enabled)
+INSERT INTO feishu_org_config (workspace_id, installation_id, enabled, auto_sync, updated_by)
+VALUES (@workspace_id, @installation_id, @enabled, @auto_sync, @updated_by)
 ON CONFLICT (workspace_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
+    auto_sync = EXCLUDED.auto_sync,
+    updated_by = EXCLUDED.updated_by,
     revision = feishu_org_config.revision + 1,
     updated_at = now()
 RETURNING *;
+
+-- name: ListEnabledFeishuOrgConfigs :many
+-- Every workspace whose sync is on, grouped by installation so the scheduler
+-- fetches each directory once.
+SELECT * FROM feishu_org_config
+WHERE enabled
+ORDER BY installation_id, workspace_id;
+
+-- name: ListActiveOwnerUserIDs :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND role = 'owner' AND disabled_at IS NULL
+ORDER BY created_at ASC;
 
 -- name: UpsertFeishuOrgGroup :one
 INSERT INTO feishu_org_group (workspace_id, kind, external_id, external_name, configured, active)

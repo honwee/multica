@@ -1808,6 +1808,7 @@ describe("workspace subscription contract", () => {
       await expect(client.updateLarkOrganization("ws-1", {
         installation_id: "installation-1",
         enabled: true,
+        auto_sync: false,
         mappings: [],
       })).rejects.toThrow("Malformed response");
 
@@ -1821,6 +1822,7 @@ describe("workspace subscription contract", () => {
       await expect(client.updateLarkOrganization("ws-1", {
         installation_id: "installation-1",
         enabled: true,
+        auto_sync: false,
         mappings: [],
       })).rejects.toThrow("Malformed response");
     });

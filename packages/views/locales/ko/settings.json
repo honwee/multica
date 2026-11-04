@@ -1378,7 +1378,10 @@
       "user": "개인",
       "workspace_member_yes": "워크스페이스 구성원",
       "workspace_member_no": "워크스페이스 미참여(초대 필요)",
-      "department_includes_children": "해당 부서와 그 아래 모든 하위 부서에 적용됩니다."
+      "department_includes_children": "해당 부서와 그 아래 모든 하위 부서에 적용됩니다.",
+      "auto_sync": "자동 동기화",
+      "auto_sync_hint": "매시간, 그리고 Feishu 연락처가 변경될 때 자동으로 적용합니다. 소유자 관련 변경은 건너뛰며 소유자가 여기에서 직접 적용해야 합니다.",
+      "history_mode_auto": "자동"
     },
     "bound_label": "연결 등록됨",
     "inbound_pending": "등록됨 · 메시지 확인 대기",

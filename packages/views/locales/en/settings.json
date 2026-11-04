@@ -1114,7 +1114,10 @@
       "user": "Individual",
       "workspace_member_yes": "In workspace",
       "workspace_member_no": "Not in workspace — invite required",
-      "department_includes_children": "Covers the department and every sub-department beneath it."
+      "department_includes_children": "Covers the department and every sub-department beneath it.",
+      "auto_sync": "Automatic sync",
+      "auto_sync_hint": "Applies hourly and when Feishu reports a change. Owner changes are skipped until an owner applies them here.",
+      "history_mode_auto": "Automatic"
     },
     "bound_label": "Bound",
     "inbound_pending": "Bound — awaiting message verification",

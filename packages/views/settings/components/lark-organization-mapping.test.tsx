@@ -199,6 +199,7 @@ describe("LarkOrganizationMapping", () => {
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
       installation_id: installation.id,
       enabled: true,
+      auto_sync: false,
       mappings: [{
         kind: "department",
         external_id: "dep-2",
@@ -268,6 +269,7 @@ describe("LarkOrganizationMapping", () => {
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
       installation_id: installation.id,
       enabled: true,
+      auto_sync: false,
       mappings: [
         {
           kind: "department",
@@ -283,6 +285,18 @@ describe("LarkOrganizationMapping", () => {
         },
       ],
     });
+  }, 30000);
+
+  it("saves the automatic sync switch with the configuration", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockResolvedValue({ ...baseOrganization(), config: { ...baseOrganization().config, auto_sync: true } });
+    renderUI();
+    const autoSync = screen.getByRole("switch", { name: enSettings.lark.organization.auto_sync });
+    expect(autoSync).toHaveAttribute("aria-checked", "false");
+    await user.click(autoSync);
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockUpdate).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ enabled: true, auto_sync: true }));
   }, 30000);
 
   it("filters catalog sources before adding a rule", async () => {

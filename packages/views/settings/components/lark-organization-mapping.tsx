@@ -78,6 +78,7 @@ export function LarkOrganizationMapping({
   );
   const [installationId, setInstallationId] = useState("");
   const [enabled, setEnabled] = useState(false);
+  const [autoSync, setAutoSync] = useState(false);
   const [mappings, setMappings] = useState<LarkOrganizationMappingValue[]>([]);
   const [run, setRun] = useState<LarkOrganizationSyncRun | null>(null);
   const [pending, setPending] = useState<OrganizationPendingAction>(null);
@@ -98,6 +99,7 @@ export function LarkOrganizationMapping({
         : activeInstallations[0]?.id ?? "",
     );
     setEnabled(config?.enabled ?? false);
+    setAutoSync(config?.auto_sync ?? false);
     setMappings(
       (data?.mappings ?? []).map((mapping) => ({ ...mapping })),
     );
@@ -127,11 +129,12 @@ export function LarkOrganizationMapping({
   const displayedRun = run ?? latestStoredRun;
   const config = data?.config ?? null;
   const catalog = data?.catalog ?? null;
-  const draftSignature = JSON.stringify({ installation_id: installationId, enabled, mappings });
+  const draftSignature = JSON.stringify({ installation_id: installationId, enabled, auto_sync: autoSync, mappings });
   const savedSignature = config
     ? JSON.stringify({
         installation_id: config.installation_id,
         enabled: config.enabled,
+        auto_sync: config.auto_sync ?? false,
         mappings: data?.mappings ?? [],
       })
     : null;
@@ -167,6 +170,7 @@ export function LarkOrganizationMapping({
       await api.updateLarkOrganization(wsId, {
         installation_id: installationId,
         enabled,
+        auto_sync: autoSync,
         mappings: nextMappings,
       });
       setMappings(nextMappings);
@@ -323,6 +327,12 @@ export function LarkOrganizationMapping({
                     <div className="flex items-center gap-2 pb-2">
                       <Label htmlFor={`${id}-enabled`}>{t(($) => $.lark.organization.enabled)}</Label>
                       <Switch id={`${id}-enabled`} checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} disabled={pending !== null} />
+                    </div>
+                  )}
+                  {canManage && (
+                    <div className="flex items-center gap-2 pb-2" title={t(($) => $.lark.organization.auto_sync_hint)}>
+                      <Label htmlFor={`${id}-auto-sync`}>{t(($) => $.lark.organization.auto_sync)}</Label>
+                      <Switch id={`${id}-auto-sync`} checked={autoSync} onCheckedChange={(checked) => setAutoSync(checked === true)} disabled={pending !== null || !enabled} />
                     </div>
                   )}
                 </div>
@@ -607,6 +617,7 @@ function HistoryMode({ run }: { run: LarkOrganizationSyncRun }) {
   switch (run.mode) {
     case "preview": return <>{t(($) => $.lark.organization.history_mode_preview)}</>;
     case "replay": return <>{t(($) => $.lark.organization.history_mode_replay)}</>;
+    case "auto": return <>{t(($) => $.lark.organization.history_mode_auto)}</>;
     case "apply": return <>{t(($) => $.lark.organization.history_mode_apply)}</>;
     default: return <>{run.mode}</>;
   }

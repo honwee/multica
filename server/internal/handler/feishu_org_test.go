@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/feishuorg"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -1000,5 +1001,85 @@ func TestFeishuOrgApplyRequiresFetchedDirectory(t *testing.T) {
 	}
 	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusConflict {
 		t.Fatalf("apply without directory status = %d, want 409; body=%s", applied.Code, applied.Body.String())
+	}
+}
+
+// TestFeishuOrgAutoSyncAppliesAndSkipsOwnerChanges drives the scheduler
+// entry point: it refreshes the shared directory, applies the plan for a
+// workspace with automatic sync on, records an "auto" run, and leaves owner
+// access alone even when a rule would change it.
+func TestFeishuOrgAutoSyncAppliesAndSkipsOwnerChanges(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	mappings := []LarkOrganizationMappingResponse{
+		{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")},
+		{Kind: "department", ExternalID: "d2", ExternalName: "Leadership", MemberRole: feishuOrgRole("owner")},
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
+		InstallationID: fixture.installationID, Enabled: true, AutoSync: true, Mappings: mappings,
+	})
+	w := httptest.NewRecorder()
+	testHandler.UpdateLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var saved LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil || saved.Config == nil || !saved.Config.AutoSync {
+		t.Fatalf("saved config = %+v err=%v, want auto_sync on", saved.Config, err)
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}, {ID: "d2", Name: "Leadership", ParentID: "0"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_member", Email: fixture.memberEmail, Name: "Member", DepartmentIDs: []string{"d1"}, Active: true},
+			{OpenID: "ou_admin", Email: "feishu-org-admin-" + strings.TrimPrefix(fixture.memberEmail, "feishu-org-member-"), Name: "Admin", DepartmentIDs: []string{"d2"}, Active: true},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+
+	applied, err := testHandler.SyncFeishuOrganizations(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFeishuOrganizations: %v", err)
+	}
+	if applied < 1 || client.calls != 1 {
+		t.Fatalf("applied = %d calls = %d, want this workspace applied from one fetch", applied, client.calls)
+	}
+	var memberRole, adminRole string
+	if err := testPool.QueryRow(context.Background(), `SELECT role FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, fixture.memberID).Scan(&memberRole); err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `SELECT role FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, fixture.adminID).Scan(&adminRole); err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	if memberRole != "admin" {
+		t.Fatalf("member role after auto sync = %q, want admin", memberRole)
+	}
+	if adminRole != "admin" {
+		t.Fatalf("admin role after auto sync = %q, want unchanged admin (owner grant must be skipped)", adminRole)
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID); count != 1 {
+		t.Fatalf("directory rows = %d, want 1", count)
+	}
+	runs, err := testHandler.Queries.ListFeishuOrgSyncRuns(context.Background(), parseUUID(fixture.workspaceID))
+	if err != nil || len(runs) != 1 || runs[0].Mode != "auto" || runs[0].Status != "completed" {
+		t.Fatalf("runs = %+v err=%v, want one completed auto run", runs, err)
+	}
+	var plan feishuorg.Plan
+	if err := json.Unmarshal(runs[0].Plan, &plan); err != nil {
+		t.Fatalf("decode plan: %v", err)
+	}
+	skipped := 0
+	for _, change := range plan.Changes {
+		if change.Action == "skipped" && strings.Contains(change.Reason, "owner access") {
+			skipped++
+		}
+	}
+	if skipped == 0 {
+		t.Fatalf("auto run must record the skipped owner change: %+v", plan.Changes)
+	}
+	for _, assignment := range plan.RoleAssignments {
+		if assignment.Role == "owner" {
+			t.Fatalf("auto run must not assign owner: %+v", plan.RoleAssignments)
+		}
 	}
 }

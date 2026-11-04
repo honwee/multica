@@ -1108,7 +1108,10 @@
       "user": "指定成员",
       "workspace_member_yes": "已加入工作区",
       "workspace_member_no": "未加入工作区，需先邀请",
-      "department_includes_children": "规则覆盖该部门及其所有子部门。"
+      "department_includes_children": "规则覆盖该部门及其所有子部门。",
+      "auto_sync": "自动同步",
+      "auto_sync_hint": "每小时以及飞书通讯录变动时自动应用。涉及所有者的变更会跳过，需由所有者在此手动应用。",
+      "history_mode_auto": "自动"
     },
     "bound_label": "已绑定",
     "inbound_pending": "已绑定，等待消息验证",

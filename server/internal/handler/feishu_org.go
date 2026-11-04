@@ -27,8 +27,11 @@ var feishuOrgRequirements = []string{
 type LarkOrganizationConfigResponse struct {
 	InstallationID string `json:"installation_id"`
 	Enabled        bool   `json:"enabled"`
-	Revision       int64  `json:"revision"`
-	UpdatedAt      string `json:"updated_at"`
+	// AutoSync applies the plan on a schedule and whenever the directory
+	// changes, without a manual preview and apply.
+	AutoSync  bool   `json:"auto_sync"`
+	Revision  int64  `json:"revision"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // LarkOrganizationMappingResponse is one organization rule. Agent access is
@@ -67,6 +70,7 @@ type LarkOrganizationResponse struct {
 type UpdateLarkOrganizationRequest struct {
 	InstallationID string                            `json:"installation_id"`
 	Enabled        bool                              `json:"enabled"`
+	AutoSync       bool                              `json:"auto_sync"`
 	Mappings       []LarkOrganizationMappingResponse `json:"mappings"`
 }
 
@@ -128,6 +132,7 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		response.Config = &LarkOrganizationConfigResponse{
 			InstallationID: uuidToString(config.InstallationID),
 			Enabled:        config.Enabled,
+			AutoSync:       config.AutoSync,
 			Revision:       config.Revision,
 			UpdatedAt:      timestampToString(config.UpdatedAt),
 		}
@@ -333,6 +338,7 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 	}
 	if _, err := qtx.UpsertFeishuOrgConfig(r.Context(), db.UpsertFeishuOrgConfigParams{
 		WorkspaceID: actor.workspaceID, InstallationID: installationID, Enabled: request.Enabled,
+		AutoSync: request.AutoSync, UpdatedBy: actor.userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 		return
@@ -517,156 +523,23 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	plan := emptyFeishuOrgPlan()
-	var tx pgx.Tx
-	fail := func(cause error) {
-		if tx != nil {
-			_ = tx.Rollback(r.Context())
-		}
-		_, _ = h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "apply", "failed", config.Revision, plan, cause.Error(), source.ID)
-		writeError(w, http.StatusInternalServerError, "failed to apply organization sync")
-	}
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		fail(err)
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-	if err := qtx.LockFeishuOrgPermissionWrites(r.Context(), uuidToString(actor.workspaceID)); err != nil {
-		fail(err)
-		return
-	}
-	currentMember, err := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{UserID: actor.userID, WorkspaceID: actor.workspaceID})
-	if err != nil || !roleAllowed(currentMember.Role, "owner", "admin") {
-		_ = tx.Rollback(r.Context())
+	run, err := h.applyFeishuOrgSync(r.Context(), actor, config, snapshot, feishuOrgApplyOptions{mode: "apply", source: &source})
+	switch {
+	case errors.Is(err, errFeishuOrgInsufficientRole):
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
-	}
-	actor.member = currentMember
-	currentConfig, err := qtx.GetFeishuOrgConfig(r.Context(), actor.workspaceID)
-	if err != nil || currentConfig.Revision != source.Revision {
-		_ = tx.Rollback(r.Context())
+	case errors.Is(err, errFeishuOrgOwnerRequired):
+		writeError(w, http.StatusForbidden, "only a workspace owner can change owner access")
+		return
+	case errors.Is(err, errFeishuOrgRevisionChanged):
 		writeError(w, http.StatusConflict, "organization sync configuration changed since preview")
 		return
-	}
-	if !currentConfig.Enabled {
-		_ = tx.Rollback(r.Context())
+	case errors.Is(err, errFeishuOrgSyncDisabled):
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
-	}
-	plan, err = h.buildFeishuOrgPlan(r.Context(), qtx, actor.workspaceID, snapshot)
-	if err != nil {
-		fail(err)
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "failed to apply organization sync")
 		return
-	}
-	if actor.member.Role != "owner" {
-		requiresOwner, err := h.feishuOrgPlanRequiresOwner(r.Context(), qtx, actor.workspaceID, plan)
-		if err != nil {
-			fail(err)
-			return
-		}
-		if requiresOwner {
-			_ = tx.Rollback(r.Context())
-			writeError(w, http.StatusForbidden, "only a workspace owner can change owner access")
-			return
-		}
-	}
-	invalidateUsers := make(map[string]struct{})
-	type disconnectSignal struct {
-		userID   string
-		memberID string
-	}
-	disconnects := make([]disconnectSignal, 0)
-	for _, change := range plan.Changes {
-		if change.Action == "skipped" {
-			continue
-		}
-		userID := parseUUID(change.UserID)
-		switch change.Action {
-		case "member_disabled":
-			member, err := qtx.DisableFeishuOrgMember(r.Context(), db.DisableFeishuOrgMemberParams{WorkspaceID: actor.workspaceID, UserID: userID})
-			if err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-			disconnects = append(disconnects, disconnectSignal{userID: change.UserID, memberID: uuidToString(member.ID)})
-		case "member_restored":
-			member, err := qtx.RestoreFeishuOrgMember(r.Context(), db.RestoreFeishuOrgMemberParams{WorkspaceID: actor.workspaceID, UserID: userID})
-			if err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-			disconnects = append(disconnects, disconnectSignal{userID: change.UserID, memberID: uuidToString(member.ID)})
-		case "role_changed":
-			if _, err := qtx.UpdateFeishuOrgMemberRole(r.Context(), db.UpdateFeishuOrgMemberRoleParams{WorkspaceID: actor.workspaceID, UserID: userID, Role: change.After}); err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-		case "group_joined", "group_left":
-			if _, err := qtx.UpsertFeishuOrgMembership(r.Context(), db.UpsertFeishuOrgMembershipParams{
-				WorkspaceID: actor.workspaceID, GroupID: parseUUID(change.GroupID), UserID: userID, Active: change.Action == "group_joined",
-			}); err != nil {
-				fail(err)
-				return
-			}
-		default:
-			fail(fmt.Errorf("unknown organization sync action %q", change.Action))
-			return
-		}
-	}
-	for _, assignment := range plan.RoleAssignments {
-		if !roleAllowed(assignment.Role, "owner", "admin", "member") {
-			fail(fmt.Errorf("invalid managed role %q", assignment.Role))
-			return
-		}
-		if _, err := qtx.UpdateFeishuOrgMemberRole(r.Context(), db.UpdateFeishuOrgMemberRoleParams{
-			WorkspaceID: actor.workspaceID, UserID: parseUUID(assignment.UserID), Role: assignment.Role,
-		}); err != nil {
-			fail(err)
-			return
-		}
-		invalidateUsers[assignment.UserID] = struct{}{}
-	}
-	// Agent changes are cleanup only: a team grant whose group left the
-	// rules no longer admits anyone, so removing it does not need the agent
-	// owner. Grants themselves are made from the agent access picker.
-	for _, change := range plan.AgentChanges {
-		switch change.Action {
-		case "agent_revoked":
-			if err := qtx.DeleteAgentInvocationTarget(r.Context(), db.DeleteAgentInvocationTargetParams{
-				AgentID: parseUUID(change.AgentID), TargetType: invocationTargetTeam, TargetID: parseUUID(change.GroupID),
-			}); err != nil {
-				fail(err)
-				return
-			}
-		default:
-			fail(fmt.Errorf("unknown organization agent action %q", change.Action))
-			return
-		}
-	}
-	if err := qtx.ApplyFeishuOrgGroupStates(r.Context(), actor.workspaceID); err != nil {
-		fail(err)
-		return
-	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), qtx, actor, "apply", "completed", config.Revision, plan, "", source.ID)
-	if err != nil {
-		fail(err)
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		fail(err)
-		return
-	}
-	workspaceID := uuidToString(actor.workspaceID)
-	for userID := range invalidateUsers {
-		h.MembershipCache.Invalidate(r.Context(), userID, workspaceID)
-	}
-	for _, signal := range disconnects {
-		h.Hub.DisconnectMember(workspaceID, signal.userID, signal.memberID)
 	}
 	response, err := larkOrganizationSyncRunResponse(run)
 	if err != nil {

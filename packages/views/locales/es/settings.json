@@ -1096,7 +1096,10 @@
       "user": "Persona",
       "workspace_member_yes": "En el espacio de trabajo",
       "workspace_member_no": "Fuera del espacio de trabajo: requiere invitación",
-      "department_includes_children": "Cubre el departamento y todos sus subdepartamentos."
+      "department_includes_children": "Cubre el departamento y todos sus subdepartamentos.",
+      "auto_sync": "Sincronización automática",
+      "auto_sync_hint": "Se aplica cada hora y cuando Feishu informa un cambio. Los cambios de propietario se omiten hasta que un propietario los aplique aquí.",
+      "history_mode_auto": "Automática"
     },
     "bound_label": "Vinculado",
     "inbound_pending": "Vinculado: pendiente de verificar la recepción de mensajes",

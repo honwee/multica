@@ -724,6 +724,8 @@ type FeishuOrgConfig struct {
 	Revision       int64              `json:"revision"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	AutoSync       bool               `json:"auto_sync"`
+	UpdatedBy      pgtype.UUID        `json:"updated_by"`
 }
 
 type FeishuOrgDirectory struct {

@@ -96,6 +96,9 @@ export interface RedeemLarkBindingTokenResponse {
 export interface LarkOrganizationConfig {
   installation_id: string;
   enabled: boolean;
+  /** Apply the plan hourly and on Feishu contact events without a manual
+   * review. Optional so older servers still parse. */
+  auto_sync?: boolean;
   revision: number;
   updated_at: string;
 }
@@ -213,6 +216,7 @@ export interface LarkOrganizationResponse {
 export interface UpdateLarkOrganizationRequest {
   installation_id: string;
   enabled: boolean;
+  auto_sync: boolean;
   mappings: LarkOrganizationMapping[];
 }
 
