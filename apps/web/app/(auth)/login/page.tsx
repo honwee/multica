@@ -28,7 +28,8 @@ import { Loader2 } from "@multica/ui/icons";
 import { CliCallbackError } from "@/features/auth/cli-callback-error";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
-import { LoginPage, validateCliCallback } from "@multica/views/auth";
+import Image from "next/image";
+import { LoginPage, LumistBrand, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
 
 /**
@@ -62,6 +63,7 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const feishuAppId = useConfigStore((state) => state.feishuAppId);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -167,6 +169,10 @@ function LoginPageContent() {
     .filter(Boolean)
     .join(",") || undefined;
 
+  // Same opaque state, plus a provider marker so the shared /auth/callback
+  // page knows to exchange the code with Feishu instead of Google.
+  const feishuState = ["provider:feishu", googleState].filter(Boolean).join(",");
+
   if (invalidCliCallback) return <CliCallbackError />;
 
   // While the desktop handoff is in progress (or has produced a token/error),
@@ -221,6 +227,23 @@ function LoginPageContent() {
 
   return (
     <LoginPage
+      className="landing-light bg-background px-6 py-12"
+      cardClassName="max-w-[360px] gap-6 rounded-none border-0 bg-transparent py-0 shadow-none"
+      footerClassName="border-0 bg-transparent px-0 pb-0 pt-1"
+      logo={
+        <LumistBrand
+          logo={
+            <Image
+              src="/branding/lumist-logo.png"
+              alt="路觅教育"
+              width={320}
+              height={92}
+              priority
+              className="h-12 w-auto sm:h-14"
+            />
+          }
+        />
+      }
       onSuccess={handleSuccess}
       google={
         googleClientId
@@ -231,6 +254,15 @@ function LoginPageContent() {
             }
           : undefined
       }
+      feishu={
+        feishuAppId
+          ? {
+              appId: feishuAppId,
+              redirectUri: `${window.location.origin}/auth/callback`,
+              state: feishuState,
+            }
+          : undefined
+      }
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }
@@ -238,15 +270,24 @@ function LoginPageContent() {
       }
       onTokenObtained={setLoggedInCookie}
       extra={
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.web.prefer_desktop)}{" "}
-          <Link
-            href="/download"
-            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+        <nav
+          aria-label={t(($) => $.web.download_clients)}
+          className="flex items-center justify-center gap-3 text-caption"
+        >
+          <a
+            href="https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.0/multica-desktop-0.8.0-mac-arm64.dmg"
+            className="inline-flex min-h-11 items-center rounded px-1 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {t(($) => $.web.download)}
+            {t(($) => $.web.download_macos)}
+          </a>
+          <span aria-hidden="true" className="text-border">·</span>
+          <Link
+            href="/install/ios/"
+            className="inline-flex min-h-11 items-center rounded px-1 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t(($) => $.web.get_ios_beta)}
           </Link>
-        </span>
+        </nav>
       }
     />
   );

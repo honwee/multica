@@ -6,6 +6,17 @@ WHERE id = $1;
 SELECT * FROM "user"
 WHERE email = $1;
 
+-- name: GetUserByFeishuOpenID :one
+SELECT * FROM "user"
+WHERE feishu_open_id = $1;
+
+-- name: SetUserFeishuOpenID :one
+UPDATE "user" SET
+    feishu_open_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: GetUsersByIDs :many
 -- Batch lookup from the GLOBAL user table (not gated on membership, so departed
 -- members still render). Used to enrich attribution initiator / originator refs on

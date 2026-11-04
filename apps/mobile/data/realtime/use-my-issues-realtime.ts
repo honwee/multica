@@ -34,8 +34,11 @@ export function useMyIssuesRealtime() {
 
   useWSSubscriptions(
     (ws, wsId) => {
-      const invalidateMyAll = () =>
-        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      const invalidateMyAll = async () => {
+        const queryKey = issueKeys.myAll(wsId);
+        await qc.cancelQueries({ queryKey });
+        await qc.invalidateQueries({ queryKey });
+      };
 
       return [
         // Server is the authority on which scopes/filters a new issue lands

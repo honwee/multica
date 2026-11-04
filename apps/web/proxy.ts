@@ -48,6 +48,17 @@ function nextWithLocale(req: NextRequest): NextResponse {
 // edge.
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const oauthState = req.nextUrl.searchParams.get("state")?.split(",") ?? [];
+  if (
+    pathname === "/auth/callback" &&
+    oauthState.includes("provider:feishu") &&
+    oauthState.includes("platform:mobile")
+  ) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/auth/native";
+    return NextResponse.rewrite(url);
+  }
+
   const runtimeDestination = runtimeRewriteDestination(pathname, process.env);
   if (runtimeDestination) {
     const url = new URL(runtimeDestination);

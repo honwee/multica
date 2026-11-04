@@ -10,7 +10,7 @@ Multica isn't on the App Store yet — until that changes, anyone who wants it o
 pnpm ios:mobile:device:prod:release
 ```
 
-This connects to the same backend as `multica.ai`, so your existing account just works. To use a private backend or your own bundle ID, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy — it overrides the committed `.env.production` key by key and is gitignored, so personal values stay local.
+The app starts with the build's default backend (`https://fde.lumistedu.com` when no override is configured). Use **Server settings** on the sign-in screen to select another self-hosted deployment without rebuilding. To change the build default or use your own bundle ID, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy — it overrides the committed `.env.production` key by key and is gitignored, so personal values stay local.
 
 **Prerequisites**: Mac with Xcode, a free Apple ID added under Xcode → Settings → Accounts, iPhone connected via USB with [Developer Mode enabled](https://docs.expo.dev/guides/ios-developer-mode/). Walk through Expo's [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/) (pick **Development build → iOS Device**) if any of that is missing.
 
@@ -126,10 +126,10 @@ Produces a **Debug build** with `expo-dev-launcher` embedded. Every launch the a
 ### Standalone / "just use it" (walk away from the Mac)
 
 ```bash
-pnpm ios:mobile:device:staging:release
+pnpm ios:mobile:device:prod:release
 ```
 
-Produces a **Release build**. No `expo-dev-launcher`, no Metro probe, no "Downloading…" screen. Splash → app, exactly like an App Store install. Trade-off: every JS change requires re-running this command.
+Produces a **Release build**. No `expo-dev-launcher`, no Metro probe, no "Downloading…" screen. Splash → app, exactly like an App Store install. Trade-off: every JS change requires re-running this command. Changing the server inside the installed app does not require a rebuild.
 
 Both paths share the same prerequisites: Mac with Xcode, free Apple ID added under Xcode → Settings → Accounts, iPhone connected via USB with Developer Mode enabled. Follow Expo's [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/) — pick **Development build → iOS Device** — if any of that is missing.
 
@@ -149,9 +149,12 @@ A free Apple ID signs builds for **7 days only**, Debug and Release both. After 
 
 ## Pointing at a different backend
 
-Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` (whichever variant you're running). Then:
+On a fresh install, open **Server settings** on the sign-in screen. After signing in, the same form is under **Settings → Server**. Enter the API and Web origins, test the API connection, then save. For a single-origin self-hosted deployment both values are the same, for example `https://fde.lumistedu.com`.
 
-- For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new value.
-- For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
+Origins must use HTTP(S) and cannot contain a path, query, fragment, username, or password. Use HTTPS on an iPhone; plain HTTP is intended for local development and may be blocked by iOS App Transport Security. For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
 
-For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+The selection persists across cold starts. Saving a different server signs out the current session and clears workspace caches so a token is never sent to another deployment. Leaving the default unchanged preserves the existing Keychain session. Connection tests call only the public `/api/config` endpoint without credentials.
+
+The Feishu developer console must allow `<Web URL>/auth/callback` as a redirect URL. Mobile sends that exact URI during authorization, the existing Web/server exchange keeps the Feishu App Secret on the server, and the server returns through `multica://auth/callback`. The form displays both callback values for the entered configuration.
+
+`EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_WEB_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` now define the **build default** rather than a fixed backend. If Web is unset, it defaults to the API origin; if no saved override exists, the current default remains `https://fde.lumistedu.com`. Restart Metro after changing a Debug build's default, or rebuild Release after changing its bundled defaults. Runtime changes made in Server settings take effect without either step.

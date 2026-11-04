@@ -40,6 +40,7 @@
     "saving": "保存中...",
     "sending": "发送中...",
     "offline": "离线",
+    "offline_read_only": "离线中 · 缓存内容仅供查看",
     "empty": "暂无内容",
     "error": "出现错误"
   },

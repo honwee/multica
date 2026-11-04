@@ -103,6 +103,7 @@ export interface Invitation {
   workspace_id: string;
   inviter_id: string;
   invitee_email: string;
+  invitee_name?: string;
   invitee_user_id: string | null;
   role: MemberRole;
   status: "pending" | "accepted" | "declined" | "expired";

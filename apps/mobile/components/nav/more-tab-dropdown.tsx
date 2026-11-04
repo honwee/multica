@@ -55,6 +55,7 @@ import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useT } from "@/lib/i18n";
+import { MORE_NAV_ITEMS, moreNavItemHref } from "@/lib/more-navigation";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -65,20 +66,6 @@ import { cn } from "@/lib/utils";
 // @react-navigation/bottom-tabs (`styles.tab` has no explicit height;
 // the container settles at 49 from the inner padding + icon size).
 const TAB_BAR_HEIGHT = 49;
-
-interface NavItem {
-  labelKey: "more_menu.pinned" | "more_menu.issues" | "more_menu.projects";
-  /** SF Symbol name, rendered via expo-image `source: "sf:<name>"`. */
-  icon: string;
-  /** Path under /:slug/ — final href is `/${slug}${path}`. */
-  path: string;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { labelKey: "more_menu.pinned", icon: "pin", path: "/more/pins" },
-  { labelKey: "more_menu.issues", icon: "list.bullet", path: "/more/issues" },
-  { labelKey: "more_menu.projects", icon: "square.stack", path: "/more/projects" },
-];
 
 export function MoreTabDropdownAnchor({
   triggerRef,
@@ -96,7 +83,7 @@ export function MoreTabDropdownAnchor({
 
   const isActive = (path: string) => {
     if (!slug) return false;
-    const target = `/${slug}${path}`;
+    const target = moreNavItemHref(slug, path);
     return pathname === target || pathname.startsWith(target + "/");
   };
 
@@ -150,10 +137,12 @@ export function MoreTabDropdownAnchor({
 
           <DropdownMenuSeparator />
 
-          {NAV_ITEMS.map((item) => (
+          {MORE_NAV_ITEMS.map((item) => (
             <DropdownMenuItem
               key={item.path}
-              onPress={() => slug && router.push(`/${slug}${item.path}`)}
+              onPress={() =>
+                slug && router.push(moreNavItemHref(slug, item.path))
+              }
               accessibilityLabel={t(item.labelKey)}
               className={cn(
                 "h-9 gap-3",

@@ -21,6 +21,7 @@ import type {
   Comment,
   InboxItem,
   InboxWorkspaceUnread,
+  Invitation,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -520,6 +521,21 @@ export const EMPTY_USER: User = {
   updated_at: "",
 };
 
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
+export const LoginResponseSchema: z.ZodType<LoginResponse> = z.object({
+  token: z.string(),
+  user: UserSchema,
+}).loose();
+
+export const EMPTY_LOGIN_RESPONSE: LoginResponse = {
+  token: "",
+  user: EMPTY_USER,
+};
+
 export const WorkspaceSchema: z.ZodType<Workspace> = z.object({
   id: z.string(),
   name: z.string().default(""),
@@ -622,6 +638,48 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
 
 export const MemberListSchema = z.array(MemberWithUserSchema).default([]);
 export const EMPTY_MEMBER_LIST: MemberWithUser[] = [];
+export const EMPTY_MEMBER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "member",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
+
+export const InvitationSchema: z.ZodType<Invitation> = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  inviter_id: z.string().default(""),
+  invitee_email: z.string().default(""),
+  invitee_name: z.string().optional(),
+  invitee_user_id: z.string().nullable().default(null),
+  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  status: z.enum(["pending", "accepted", "declined", "expired"]).catch("pending"),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  expires_at: z.string().default(""),
+  inviter_name: z.string().optional(),
+  inviter_email: z.string().optional(),
+  workspace_name: z.string().optional(),
+}).loose();
+
+export const InvitationListSchema = z.array(InvitationSchema).default([]);
+export const EMPTY_INVITATION_LIST: Invitation[] = [];
+export const EMPTY_INVITATION: Invitation = {
+  id: "",
+  workspace_id: "",
+  inviter_id: "",
+  invitee_email: "",
+  invitee_user_id: null,
+  role: "member",
+  status: "pending",
+  created_at: "",
+  updated_at: "",
+  expires_at: "",
+};
 
 const AgentInvocationTargetSchema: z.ZodType<AgentInvocationTarget> = z
   .object({
@@ -636,9 +694,9 @@ const AgentInvocationTargetSchema: z.ZodType<AgentInvocationTarget> = z
   .loose();
 
 // Agent schema is loose on every enum / structural field — the agent table is
-// where new modes/visibilities/statuses get added most often. We need only id,
-// name, avatar_url, and a couple of flags for the assignee picker + chat
-// header; everything else is informational and safe to default.
+// where new modes/visibilities/statuses get added most often. Mobile keeps a
+// display-safe subset for the agent directory, assignee picker, and chat, with
+// compatibility defaults for permission, runtime, and presentation fields.
 export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -690,6 +748,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
 
 export const AgentListSchema = z.array(AgentSchema).default([]);
 export const EMPTY_AGENT_LIST: Agent[] = [];
+export const EMPTY_AGENT: Agent = AgentSchema.parse({ id: "" });
 
 // Runtime device — the daemon (local or cloud) an agent binds to. Mobile reads
 // it for the presence dot: `status` + `last_seen_at` drive the three-state

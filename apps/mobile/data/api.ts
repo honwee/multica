@@ -21,14 +21,18 @@ import type {
   ChatPendingTask,
   ChatSession,
   Comment,
+  CreateAgentRequest,
   CreateIssueRequest,
+  CreateMemberRequest,
   CreateLabelRequest,
   CreateProjectRequest,
   CreateProjectResourceRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  Invitation,
   Issue,
   IssueLabelsResponse,
+  LarkOrganizationResponse,
   Label,
   IssueReaction,
   ListIssuesParams,
@@ -44,6 +48,7 @@ import type {
   Reaction,
   ReorderPinsRequest,
   RuntimeDevice,
+  RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ListIssueStatusesResponse,
@@ -53,17 +58,22 @@ import type {
   NotificationPreferences,
   TaskMessagePayload,
   TimelineEntry,
+  UpdateAgentRequest,
   UpdateIssueRequest,
   UpdateMeRequest,
+  UpdateMemberRequest,
   UpdateProjectRequest,
   User,
   Workspace,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 import {
+  AgentTaskPageSchema,
   AppConfigSchema,
   EMPTY_APP_CONFIG,
   EMPTY_REFRESH_SESSION_RESPONSE,
+  MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeModelListRequestSchema,
   RefreshSessionResponseSchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -73,6 +83,8 @@ import {
   ListIssueStatusesResponseSchema,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
+  EMPTY_LARK_ORGANIZATION_RESPONSE,
+  LarkOrganizationResponseSchema,
 } from "@multica/core/api/schemas";
 import type {
   AppConfigResponse,
@@ -80,8 +92,10 @@ import type {
 } from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
+  AgentSchema,
   AgentListSchema,
   AgentTaskListSchema,
+  AgentTaskSchema,
   AttachmentListSchema,
   AttachmentSchema,
   ChatMessageListSchema,
@@ -90,6 +104,7 @@ import {
   ChatSessionListSchema,
   ChatSessionSchema,
   EMPTY_ACTIVE_TASKS_RESPONSE,
+  EMPTY_AGENT,
   EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
   EMPTY_ATTACHMENT_LIST,
@@ -100,9 +115,13 @@ import {
   EMPTY_INBOX_LIST,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_ISSUE_FALLBACK,
+  EMPTY_INVITATION,
+  EMPTY_INVITATION_LIST,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_LOGIN_RESPONSE,
+  EMPTY_MEMBER,
   EMPTY_MEMBER_LIST,
   EMPTY_NOTIFICATION_PREFERENCES,
   EMPTY_PIN_LIST,
@@ -115,11 +134,15 @@ import {
   EMPTY_WORKSPACE_LIST,
   InboxListSchema,
   InboxUnreadSummarySchema,
+  InvitationListSchema,
+  InvitationSchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
   ListProjectsResponseSchema,
+  LoginResponseSchema,
   MemberListSchema,
+  MemberWithUserSchema,
   PinListSchema,
   PinnedItemSchema,
   ProjectSchema,
@@ -133,24 +156,19 @@ import {
   UserSchema,
   WorkspaceListSchema,
 } from "./schemas";
+import type { LoginResponse } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
+import { useServerStore } from "./server-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
+import { onlineManager } from "@tanstack/react-query";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+export type { LoginResponse } from "./schemas";
 
-if (!API_URL) {
-  throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
-      "the variant you are running (see apps/mobile/README.md).",
-  );
-}
-
-export interface LoginResponse {
-  token: string;
-  user: User;
+function getApiUrl(): string {
+  return useServerStore.getState().apiUrl;
 }
 
 /** Mobile file payload for `uploadFile`. RN doesn't have a browser `File`
@@ -187,6 +205,13 @@ export class ApiError extends Error {
   }
 }
 
+export class OfflineError extends Error {
+  constructor() {
+    super("Device is offline. Reconnect and try again.");
+    this.name = "OfflineError";
+  }
+}
+
 export interface ApiClientOptions {
   /** Called once when the server returns 401. The platform layer wires this
    *  to clear the token + navigate to /login so a stale token doesn't keep
@@ -196,10 +221,12 @@ export interface ApiClientOptions {
 
 class ApiClient {
   private token: string | null = null;
+  private tokenApiUrl: string | null = null;
   private options: ApiClientOptions = {};
 
   setToken(token: string | null) {
     this.token = token;
+    this.tokenApiUrl = token ? getApiUrl() : null;
   }
 
   /** The bearer token in use, or null when signed out. Session renewal reads
@@ -216,20 +243,24 @@ class ApiClient {
   private async fetch<T>(
     path: string,
     init: RequestInit & { signal?: AbortSignal } = {},
+    responseOut?: { response?: Response },
   ): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init.method ?? "GET";
+    if (method.toUpperCase() !== "GET" && !onlineManager.isOnline()) {
+      throw new OfflineError();
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Client-Platform": "mobile",
       "X-Client-OS": "ios",
-      "X-Client-Version": "0.1.0",
+      "X-Client-Version": "0.2.0",
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
     };
-    if (this.token) {
+    if (this.token && this.tokenApiUrl === getApiUrl()) {
       headers["Authorization"] = `Bearer ${this.token}`;
     }
     // Backend middleware (server/internal/middleware/workspace.go) resolves
@@ -265,7 +296,7 @@ class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${API_URL}${path}`, {
+      res = await fetch(`${getApiUrl()}${path}`, {
         ...init,
         signal: controller.signal,
         headers,
@@ -295,6 +326,7 @@ class ApiClient {
     clearTimeout(timeoutId);
     callerSignal?.removeEventListener("abort", onCallerAbort);
     const duration = Date.now() - start;
+    if (responseOut) responseOut.response = res;
 
     if (!res.ok) {
       // 401 sign-out hook: invoke once, let the platform layer (auth-store)
@@ -394,10 +426,16 @@ class ApiClient {
   }
 
   async verifyCode(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch<LoginResponse>("/auth/verify-code", {
-      method: "POST",
-      body: JSON.stringify({ email, code }),
-    });
+    return this.fetchValidatedWith<LoginResponse>(
+      "/auth/verify-code",
+      LoginResponseSchema,
+      EMPTY_LOGIN_RESPONSE,
+      {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      },
+      { endpoint: "verifyCode" },
+    );
   }
 
   /**
@@ -565,7 +603,7 @@ class ApiClient {
     });
   }
 
-  // --- Members & Agents (for actor name/avatar lookup) ---
+  // --- Members & Agents (actor lookup and workspace directories) ---
   async listMembers(
     workspaceId: string,
     opts?: { signal?: AbortSignal },
@@ -579,8 +617,80 @@ class ApiClient {
     });
   }
 
-  async listAgents(opts?: { signal?: AbortSignal }): Promise<Agent[]> {
-    const raw = await this.fetch<unknown>("/api/agents", {
+  async createMember(
+    workspaceId: string,
+    body: CreateMemberRequest,
+  ): Promise<Invitation> {
+    return this.fetchValidatedWith(
+      `/api/workspaces/${workspaceId}/members`,
+      InvitationSchema,
+      EMPTY_INVITATION,
+      { method: "POST", body: JSON.stringify(body) },
+      { endpoint: "createMember" },
+    );
+  }
+
+  async updateMember(
+    workspaceId: string,
+    memberId: string,
+    body: UpdateMemberRequest,
+  ): Promise<MemberWithUser> {
+    return this.fetchValidatedWith(
+      `/api/workspaces/${workspaceId}/members/${memberId}`,
+      MemberWithUserSchema,
+      EMPTY_MEMBER,
+      { method: "PATCH", body: JSON.stringify(body) },
+      { endpoint: "updateMember" },
+    );
+  }
+
+  async deleteMember(workspaceId: string, memberId: string): Promise<void> {
+    await this.fetch<void>(
+      `/api/workspaces/${workspaceId}/members/${memberId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listInvitations(
+    workspaceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Invitation[]> {
+    return this.fetchValidated(
+      `/api/workspaces/${workspaceId}/invitations`,
+      InvitationListSchema,
+      EMPTY_INVITATION_LIST,
+      { ...opts, endpoint: "listInvitations" },
+    );
+  }
+
+  async revokeInvitation(
+    workspaceId: string,
+    invitationId: string,
+  ): Promise<void> {
+    await this.fetch<void>(
+      `/api/workspaces/${workspaceId}/invitations/${invitationId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async getLarkOrganization(
+    workspaceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<LarkOrganizationResponse> {
+    return this.fetchValidated(
+      `/api/workspaces/${workspaceId}/lark/organization`,
+      LarkOrganizationResponseSchema,
+      EMPTY_LARK_ORGANIZATION_RESPONSE,
+      { ...opts, endpoint: "getLarkOrganization" },
+    );
+  }
+
+  async listAgents(opts?: {
+    signal?: AbortSignal;
+    includeArchived?: boolean;
+  }): Promise<Agent[]> {
+    const query = opts?.includeArchived ? "?include_archived=true" : "";
+    const raw = await this.fetch<unknown>(`/api/agents${query}`, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
@@ -588,16 +698,139 @@ class ApiClient {
     });
   }
 
+  async getAgent(id: string, opts?: { signal?: AbortSignal }): Promise<Agent> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "getAgent",
+    });
+  }
+
+  async createAgent(data: CreateAgentRequest): Promise<Agent> {
+    const raw = await this.fetch<unknown>("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "createAgent",
+    });
+  }
+
+  async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "updateAgent",
+    });
+  }
+
+  async archiveAgent(id: string): Promise<Agent> {
+    return this.fetchValidatedWith<Agent>(
+      `/api/agents/${id}/archive`,
+      AgentSchema,
+      EMPTY_AGENT,
+      { method: "POST" },
+      { endpoint: "archiveAgent" },
+    );
+  }
+
+  async restoreAgent(id: string): Promise<Agent> {
+    return this.fetchValidatedWith<Agent>(
+      `/api/agents/${id}/restore`,
+      AgentSchema,
+      EMPTY_AGENT,
+      { method: "POST" },
+      { endpoint: "restoreAgent" },
+    );
+  }
+
+  async listAgentTasksPage(
+    agentId: string,
+    options: { limit?: number; before?: string; signal?: AbortSignal } = {},
+  ): Promise<{ tasks: AgentTask[]; nextCursor: string | null }> {
+    const search = new URLSearchParams({
+      limit: String(options.limit ?? 50),
+      include_usage: "true",
+    });
+    if (options.before) search.set("before", options.before);
+    const responseOut: { response?: Response } = {};
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${agentId}/tasks?${search}`,
+      { signal: options.signal },
+      responseOut,
+    );
+    return parseWithFallback(
+      {
+        tasks: raw,
+        nextCursor: responseOut.response?.headers.get(
+          "X-Agent-Tasks-Next-Cursor",
+        ),
+      },
+      AgentTaskPageSchema,
+      { tasks: [], nextCursor: null },
+      { endpoint: "GET /api/agents/:id/tasks" },
+    );
+  }
+
+  async rerunIssue(issueId: string, taskId: string): Promise<AgentTask> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({ task_id: taskId }),
+    });
+    const task = parseWithFallback<AgentTask | null>(
+      raw,
+      AgentTaskSchema,
+      null,
+      { endpoint: "POST /api/issues/:id/rerun" },
+    );
+    if (!task) throw new Error("Invalid run retry response");
+    return task;
+  }
+
   // Workspace runtimes — feeds the presence dot's availability dimension
   // (runtime.status + last_seen_at). Backend route registered in
   // server/cmd/server/router.go:514 (GET /api/runtimes).
   async listRuntimes(opts?: { signal?: AbortSignal }): Promise<RuntimeDevice[]> {
-    const raw = await this.fetch<unknown>("/api/runtimes", {
+    const raw = await this.fetch<unknown>(`/api/runtimes`, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, RuntimeListSchema, EMPTY_RUNTIME_LIST, {
       endpoint: "listRuntimes",
     });
+  }
+
+  async initiateListModels(
+    runtimeId: string,
+    options: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<RuntimeModelListRequest> {
+    const query = options.force ? "?force=true" : "";
+    return this.fetchValidatedWith<RuntimeModelListRequest>(
+      `/api/runtimes/${runtimeId}/models${query}`,
+      RuntimeModelListRequestSchema,
+      { ...MALFORMED_RUNTIME_MODEL_LIST_REQUEST, runtime_id: runtimeId },
+      { method: "POST" },
+      { signal: options.signal, endpoint: "POST /api/runtimes/:id/models" },
+    );
+  }
+
+  async getListModelsResult(
+    runtimeId: string,
+    requestId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RuntimeModelListRequest> {
+    return this.fetchValidated<RuntimeModelListRequest>(
+      `/api/runtimes/${runtimeId}/models/${requestId}`,
+      RuntimeModelListRequestSchema,
+      {
+        ...MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+        id: requestId,
+        runtime_id: runtimeId,
+      },
+      { ...opts, endpoint: "GET /api/runtimes/:id/models/:requestId" },
+    );
   }
 
   // Workspace-wide active agent tasks + each agent's most recent terminal —
@@ -1309,6 +1542,7 @@ class ApiClient {
     asset: FileAsset,
     opts?: { issueId?: string; commentId?: string },
   ): Promise<Attachment> {
+    if (!onlineManager.isOnline()) throw new OfflineError();
     const rid = createRequestId();
     const start = Date.now();
     const path = "/api/upload-file";
@@ -1317,10 +1551,10 @@ class ApiClient {
       // No Content-Type — let fetch set the multipart boundary.
       "X-Client-Platform": "mobile",
       "X-Client-OS": "ios",
-      "X-Client-Version": "0.1.0",
+      "X-Client-Version": "0.2.0",
       "X-Request-ID": rid,
     };
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    if (this.token && this.tokenApiUrl === getApiUrl()) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
     if (slug) headers["X-Workspace-Slug"] = slug;
 
@@ -1336,11 +1570,17 @@ class ApiClient {
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
 
-    const res = await fetch(`${API_URL}${path}`, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(new Error("upload timed out")),
+      FETCH_TIMEOUT_MS,
+    );
+    const res = await fetch(`${getApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
     const duration = Date.now() - start;
 
     if (!res.ok) {

@@ -13,6 +13,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const env = process.env.APP_ENV ?? "development";
   const isProd = env === "production";
   const isStaging = env === "staging";
+  const bundleIdentifier = isProd
+    ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "com.lumistedu.multica")
+    : isStaging
+      ? (process.env.EXPO_BUNDLE_IDENTIFIER_STAGING ?? "ai.multica.mobile.staging")
+      : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev");
 
   return {
     ...config,
@@ -22,7 +27,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ? "Multica (Staging)"
         : "Multica (Dev)",
     slug: "multica-mobile",
-    version: "0.1.0",
+    version: "0.2.0",
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
@@ -56,17 +61,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // `EXPO_BUNDLE_IDENTIFIER` would leak across variants (Expo CLI
       // auto-loads `.env.<mode>.local` regardless of APP_ENV) and collapse
       // dev / staging / prod onto a single id.
-      bundleIdentifier: isProd
-        ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "ai.multica.mobile")
-        : isStaging
-          ? (process.env.EXPO_BUNDLE_IDENTIFIER_STAGING ?? "ai.multica.mobile.staging")
-          : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
+      bundleIdentifier,
+      // SecureStore requires an explicit Keychain access group on current iOS
+      // simulator runtimes. Keep it aligned with per-variant bundle overrides.
+      entitlements: {
+        "keychain-access-groups": [`$(AppIdentifierPrefix)${bundleIdentifier}`],
+      },
     },
     plugins: [
       "expo-router",
       "expo-image",
       "expo-localization",
       "expo-secure-store",
+      "expo-web-browser",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
       [

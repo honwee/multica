@@ -241,10 +241,25 @@ export type {
 } from "./vcs";
 export type {
   LarkInstallation,
+  LarkInstallationBotInfo,
   ListLarkInstallationsResponse,
+  ConnectLarkWorkspaceRequest,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  LarkOrganizationConfig,
+  LarkOrganizationMemberRole,
+  LarkOrganizationMapping,
+  LarkOrganizationSyncChange,
+  LarkOrganizationAgentChange,
+  LarkOrganizationSyncRun,
+  LarkOrganizationCatalog,
+  LarkOrganizationUser,
+  LarkOrganizationDepartment,
+  LarkOrganizationJobTitle,
+  LarkOrganizationWorkspaceMember,
+  LarkOrganizationResponse,
+  UpdateLarkOrganizationRequest,
 } from "./lark";
 export type {
   ComposioToolkit,

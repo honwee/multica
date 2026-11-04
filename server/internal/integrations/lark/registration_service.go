@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -746,7 +747,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		// workspace — instead of leaking the raw Postgres error.
 		msg := err.Error()
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation) {
 			msg = s.liveOwnerConflictMessage(ctx, sess.workspaceID, res.ClientID)
 		}
 		s.markError(sess, RegistrationReasonInstallationConflict, msg)
@@ -793,6 +794,10 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 func (s *RegistrationService) liveOwnerConflictMessage(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) string {
 	owner, err := s.queries.InstallationOwnerByAppID(ctx, appID)
 	if err != nil {
+		installation, lookupErr := s.queries.GetLarkInstallationByAppID(ctx, appID)
+		if lookupErr == nil && installation.WorkspaceID != requestingWorkspaceID {
+			return "This Feishu app is already connected to a different Multica workspace. Disconnect it there before connecting it here."
+		}
 		return "This Feishu app is already connected to another agent. Disconnect it there first, then connect it here."
 	}
 	switch {

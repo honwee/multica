@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS feishu_org_sync_run_workspace_created_idx;

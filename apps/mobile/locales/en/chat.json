@@ -13,6 +13,7 @@
     "mention": "Mention someone or an issue",
     "upload_image": "Upload image",
     "upload_file": "Upload file",
+    "upload_failed_retry": "Upload failed. Tap the file to retry, or remove it before sending.",
     "send": "Send",
     "default_placeholder": "Type a message…",
     "unavailable": "Chat unavailable",
@@ -43,7 +44,7 @@
     "no_agent": "No agents available",
     "runtime_required": "This agent needs a runtime before it can run.",
     "offline": "{{name}} is offline. Messages will wait until its runtime is back.",
-    "no_agent_action": "Add or enable an agent in More → Agents to start chatting.",
+    "no_agent_action": "Review More → Agents; add agents or bind runtimes on web or desktop.",
     "offline_unstable": "{{name}} may have just disconnected — your message will queue.",
     "runtime_required_name": "{{name}} needs a runtime before it can run. Bind one on web or desktop."
   },

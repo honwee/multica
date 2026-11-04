@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS feishu_org_group_workspace_kind_external_uidx;

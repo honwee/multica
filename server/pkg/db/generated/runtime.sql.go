@@ -1500,6 +1500,7 @@ func (q *Queries) LockRuntimeShareMemberRemoval(ctx context.Context, arg LockRun
 const lockRuntimeShareMembers = `-- name: LockRuntimeShareMembers :many
 SELECT user_id FROM member
 WHERE workspace_id = $1 AND user_id = ANY($2::uuid[])
+  AND disabled_at IS NULL
 ORDER BY user_id
 FOR KEY SHARE NOWAIT
 `

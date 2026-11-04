@@ -13,6 +13,7 @@
     "mention": "提及成員或任務",
     "upload_image": "上傳圖片",
     "upload_file": "上傳檔案",
+    "upload_failed_retry": "上傳失敗。點按檔案重試，或移除後再傳送。",
     "send": "傳送",
     "default_placeholder": "輸入訊息...",
     "unavailable": "聊天不可用",

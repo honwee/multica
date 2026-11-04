@@ -315,6 +315,11 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to seed issue statuses")
 		return
 	}
+	if err := inheritFeishuOrganization(r.Context(), qtx, parseUUID(userID), ws.ID); err != nil {
+		slog.Warn("inherit organization configuration failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to inherit organization configuration")
+		return
+	}
 
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
@@ -561,8 +566,9 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateMemberRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email         string `json:"email,omitempty"`
+	Role          string `json:"role"`
+	FeishuUnionID string `json:"feishu_union_id,omitempty"`
 }
 
 func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
@@ -648,8 +654,9 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
+		ID:              target.ID,
+		Role:            role,
+		RequesterUserID: parseUUID(requestUserID(r)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update member")

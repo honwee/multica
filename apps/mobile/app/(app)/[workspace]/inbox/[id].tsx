@@ -15,6 +15,7 @@ import {
   workspaceSubscriptionSummaryOptions,
 } from "@/data/queries/billing";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { getCurrentServerConfig } from "@/data/server-store";
 import { useT } from "@/lib/i18n";
 import {
   getAutopilotQuotaBody,
@@ -98,7 +99,7 @@ export default function InboxNoticeDetail() {
         !summaryQuery.data?.availableActions &&
         summaryQuery.isFetching),
   });
-  const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
+  const webUrl = getCurrentServerConfig().webUrl;
   const billingUrl =
     webUrl && wsSlug ? `${webUrl}/${wsSlug}/settings?tab=billing` : null;
   const body = item ? getAutopilotQuotaBody(item) : null;

@@ -30,6 +30,7 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithFeishu = useAuthStore((s) => s.loginWithFeishu);
   const [error, setError] = useState<CallbackError | null>(null);
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -54,6 +55,11 @@ function CallbackContent() {
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
+    // The login page marks Feishu-initiated flows in the opaque state; the
+    // code is then exchanged with Feishu instead of Google.
+    const isFeishu = stateParts.includes("provider:feishu");
+    const exchangeLogin = isFeishu ? api.feishuLogin.bind(api) : api.googleLogin.bind(api);
+    const loginWithProvider = isFeishu ? loginWithFeishu : loginWithGoogle;
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
     // Strip "next:" prefix, then drop anything that isn't a safe relative path
     // so an attacker-controlled `state=next:https://evil` cannot redirect here.
@@ -85,32 +91,30 @@ function CallbackContent() {
     const redirectUri = `${window.location.origin}/auth/callback`;
 
     if (cliCallback) {
-      // CLI login flow: exchange the Google code for a JWT, then redirect the
+      // CLI login flow: exchange the OAuth code for a JWT, then redirect the
       // token back to the CLI's local HTTP listener (e.g. WSL2 host).
-      api
-        .googleLogin(code, redirectUri)
+      exchangeLogin(code, redirectUri)
         .then(({ token }) => {
           redirectToCliCallback(cliCallback, token, cliState);
         })
         .catch((err) => {
-          authLogger.error("CLI Google OAuth callback failed", err);
+          authLogger.error("CLI OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     } else if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
-      api
-        .googleLogin(code, redirectUri)
+      exchangeLogin(code, redirectUri)
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
-          authLogger.error("Desktop Google OAuth callback failed", err);
+          authLogger.error("Desktop OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     } else {
       // Normal web flow
-      loginWithGoogle(code, redirectUri)
+      loginWithProvider(code, redirectUri)
         .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
@@ -160,7 +164,7 @@ function CallbackContent() {
           setError(callbackErrorFrom(err));
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithFeishu, router, qc]);
 
   const errorDescription = (() => {
     if (!error) return null;
@@ -183,6 +187,8 @@ function CallbackContent() {
         return t(($) => $.web.callback.email_not_allowed);
       case "google_account_no_email":
         return t(($) => $.web.callback.google_account_no_email);
+      case "feishu_account_no_email":
+        return t(($) => $.web.callback.feishu_account_no_email);
       case "oauth_code_invalid":
         return t(($) => $.web.callback.oauth_code_invalid);
     }

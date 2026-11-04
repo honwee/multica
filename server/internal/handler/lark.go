@@ -22,7 +22,7 @@ import (
 type LarkInstallationResponse struct {
 	ID                     string     `json:"id"`
 	WorkspaceID            string     `json:"workspace_id"`
-	AgentID                string     `json:"agent_id"`
+	AgentID                *string    `json:"agent_id"`
 	AppID                  string     `json:"app_id"`
 	TenantKey              *string    `json:"tenant_key,omitempty"`
 	BotOpenID              string     `json:"bot_open_id"`
@@ -43,7 +43,6 @@ func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse 
 		FirstMessageReceivedAt: row.FirstMessageReceivedAt,
 		ID:                     uuidToString(row.ID),
 		WorkspaceID:            uuidToString(row.WorkspaceID),
-		AgentID:                uuidToString(row.AgentID),
 		AppID:                  row.AppID,
 		BotOpenID:              row.BotOpenID,
 		InstallerUserID:        uuidToString(row.InstallerUserID),
@@ -52,6 +51,10 @@ func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse 
 		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
 		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+	}
+	if row.AgentID.Valid {
+		agentID := uuidToString(row.AgentID)
+		resp.AgentID = &agentID
 	}
 	if row.TenantKey.Valid {
 		tk := row.TenantKey.String
@@ -108,6 +111,119 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type ConnectLarkWorkspaceConnectionRequest struct {
+	AppID     string `json:"app_id"`
+	AppSecret string `json:"app_secret"`
+	TenantKey string `json:"tenant_key"`
+	Region    string `json:"region"`
+}
+
+// ConnectLarkWorkspaceConnection stores application credentials for organization
+// data without selecting an agent. Organization preview validates live access.
+func (h *Handler) ConnectLarkWorkspaceConnection(w http.ResponseWriter, r *http.Request) {
+	if h.LarkInstallations == nil {
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+		return
+	}
+	actor, ok := h.feishuOrgMutationActor(w, r)
+	if !ok {
+		return
+	}
+	var request ConnectLarkWorkspaceConnectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	request.AppID = strings.TrimSpace(request.AppID)
+	request.TenantKey = strings.TrimSpace(request.TenantKey)
+	request.Region = strings.ToLower(strings.TrimSpace(request.Region))
+	if request.AppID == "" || strings.TrimSpace(request.AppSecret) == "" {
+		writeError(w, http.StatusBadRequest, "app_id and app_secret are required")
+		return
+	}
+	switch request.Region {
+	case "", "feishu", "lark":
+	default:
+		writeError(w, http.StatusBadRequest, "region must be 'feishu' or 'lark'")
+		return
+	}
+	installation, err := h.LarkInstallations.UpsertWorkspaceConnection(r.Context(), lark.WorkspaceConnectionParams{
+		WorkspaceID: actor.workspaceID, AppID: request.AppID, AppSecret: request.AppSecret,
+		TenantKey: request.TenantKey, InstallerUserID: actor.userID, Region: lark.Region(request.Region),
+	})
+	if errors.Is(err, lark.ErrWorkspaceConnectionConflict) {
+		writeError(w, http.StatusConflict, "lark app is connected to another workspace")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save lark app connection")
+		return
+	}
+	writeJSON(w, http.StatusOK, larkInstallationToResponse(installation))
+}
+
+type LarkInstallationBotInfoResponse struct {
+	InstallationID string `json:"installation_id"`
+	AppID          string `json:"app_id"`
+	AppName        string `json:"app_name"`
+	AvatarURL      string `json:"avatar_url,omitempty"`
+	BotOpenID      string `json:"bot_open_id"`
+	Region         string `json:"region"`
+}
+
+// GetLarkInstallationBotInfo returns live, non-secret Feishu app metadata for
+// the connection-details surface. The plaintext credential never leaves the
+// server, and the endpoint is restricted to workspace owners/admins.
+func (h *Handler) GetLarkInstallationBotInfo(w http.ResponseWriter, r *http.Request) {
+	if h.LarkInstallations == nil || h.LarkAPIClient == nil || !h.LarkAPIClient.IsConfigured() {
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, uuidToString(workspaceID))
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+	installationID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	installation, err := h.LarkInstallations.GetInWorkspace(r.Context(), installationID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "lark installation not found")
+		return
+	}
+	secret, err := h.LarkInstallations.DecryptAppSecret(installation)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read lark installation credentials")
+		return
+	}
+	credentials := lark.InstallationCredentials{
+		AppID: installation.AppID, AppSecret: secret, TenantKey: installation.TenantKey.String,
+		Region: lark.RegionOrDefault(installation.Region),
+	}
+	info, err := h.LarkAPIClient.GetBotInfo(r.Context(), credentials)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to load Feishu bot info")
+		return
+	}
+	appName := info.AppName
+	if appName == "" {
+		appName = installation.AppID
+	}
+	writeJSON(w, http.StatusOK, LarkInstallationBotInfoResponse{
+		InstallationID: uuidToString(installation.ID), AppID: installation.AppID, AppName: appName,
+		AvatarURL: info.AvatarURL, BotOpenID: string(info.OpenID), Region: string(lark.RegionOrDefault(installation.Region)),
+	})
+}
+
 // RevokeLarkInstallation (DELETE /api/workspaces/{id}/lark/installations/{installationId})
 // flips status to 'revoked' so the WS hub drops the connection on its
 // next sweep. The row itself is preserved for audit; a re-install via
@@ -150,23 +266,25 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to load installation")
 		return
 	}
-	// Authorize against the bound agent. Normally its owner or a workspace
-	// owner/admin may revoke (canManageAgent writes the 403/404 itself).
-	// If the agent has been hard-deleted the installation is an orphan, so
-	// fall back to workspace owner/admin-only cleanup instead of 404-ing
-	// the disconnect entry point (see ListByWorkspace vs the orphan-
-	// filtered active list). No FK/cascade: the missing agent is handled
-	// in the application layer.
-	agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          inst.AgentID,
-		WorkspaceID: wsUUID,
-	})
-	if agentErr != nil {
+	// Agent-less application connections are revoked by workspace owner/admin.
+	// Bot connections keep the existing agent-owner authorization and the orphan
+	// cleanup path for hard-deleted agents.
+	if !inst.AgentID.Valid {
 		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(wsUUID), "lark installation not found", "owner", "admin"); !ok {
 			return
 		}
-	} else if !h.canManageAgent(w, r, agent) {
-		return
+	} else {
+		agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          inst.AgentID,
+			WorkspaceID: wsUUID,
+		})
+		if agentErr != nil {
+			if _, ok := h.requireWorkspaceRole(w, r, uuidToString(wsUUID), "lark installation not found", "owner", "admin"); !ok {
+				return
+			}
+		} else if !h.canManageAgent(w, r, agent) {
+			return
+		}
 	}
 	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")

@@ -1,0 +1,92 @@
+export const MULTICA_AUTH_CALLBACK_URL = "multica://auth/callback";
+
+const FEISHU_AUTHORIZE_URL =
+  "https://accounts.feishu.cn/open-apis/authen/v1/authorize";
+// The existing Web callback uses this marker for its native bearer-token handoff.
+const FEISHU_NATIVE_HANDOFF_STATE = "provider:feishu,platform:mobile";
+
+export class FeishuCallbackError extends Error {
+  constructor() {
+    super("Invalid Feishu callback");
+    this.name = "FeishuCallbackError";
+  }
+}
+
+export function resolveFeishuWebUrl(
+  webUrl?: string,
+  apiUrl?: string,
+): string | null {
+  const candidate = webUrl?.trim() || apiUrl?.trim();
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username ||
+      url.password
+    ) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function getFeishuWebCallbackUrl(webUrl: string): string {
+  const webOrigin = resolveFeishuWebUrl(webUrl);
+  if (!webOrigin) throw new Error("Feishu login is not configured");
+  return new URL("/auth/callback", webOrigin).toString();
+}
+
+export function buildFeishuAuthorizationUrl({
+  appId,
+  webUrl,
+}: {
+  appId: string;
+  webUrl: string;
+}): string {
+  const clientId = appId.trim();
+  if (!clientId) throw new Error("Feishu login is not configured");
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: getFeishuWebCallbackUrl(webUrl),
+    response_type: "code",
+    state: FEISHU_NATIVE_HANDOFF_STATE,
+  });
+  return `${FEISHU_AUTHORIZE_URL}?${params.toString()}`;
+}
+
+export function getFeishuTokenFromAuthSession(result: {
+  type: string;
+  url?: string;
+}): string | null {
+  if (result.type === "cancel" || result.type === "dismiss") return null;
+  if (result.type !== "success") {
+    throw new Error("Feishu authorization did not complete");
+  }
+  if (!result.url) throw new FeishuCallbackError();
+  return parseFeishuCallbackUrl(result.url);
+}
+
+export function parseFeishuCallbackUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    if (
+      url.protocol !== "multica:" ||
+      url.hostname !== "auth" ||
+      url.pathname !== "/callback"
+    ) {
+      throw new FeishuCallbackError();
+    }
+
+    const token = url.searchParams.get("token")?.trim();
+    if (!token) throw new FeishuCallbackError();
+    return token;
+  } catch (error) {
+    if (error instanceof FeishuCallbackError) throw error;
+    throw new FeishuCallbackError();
+  }
+}

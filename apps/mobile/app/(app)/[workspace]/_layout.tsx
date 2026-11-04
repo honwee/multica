@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ComponentProps } from "react";
+import { View } from "react-native";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@/data/queries/workspaces";
@@ -14,9 +15,12 @@ import { usePinsRealtime } from "@/data/realtime/use-pins-realtime";
 import { usePresenceRealtime } from "@/data/realtime/use-presence-realtime";
 import { useWorkspacePresencePrefetch } from "@/lib/use-workspace-presence-prefetch";
 import { ModalCloseButton } from "@/components/ui/modal-close-button";
+import { DeviceOfflineBanner } from "@/components/workspace/device-offline-banner";
+import { RunCompletionNotice } from "@/components/agent/run-completion-notice";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
+import { useChatAgentPickerResetOnWorkspaceChange } from "@/data/stores/chat-agent-picker-store";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -51,6 +55,14 @@ const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
   sheetCornerRadius: 20,
   contentStyle: { flex: 1 },
   headerShown: false,
+};
+
+// iOS 26 renders these new agent catalog routes with zero-sized content in
+// formSheet. Use a full-screen modal so runtime/model selection stays usable.
+const AGENT_PICKER_SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
+  ...SHEET_OPTIONS,
+  presentation: "modal",
+  contentStyle: { height: "100%" },
 };
 
 /**
@@ -120,6 +132,7 @@ export default function WorkspaceLayout() {
   useNewIssueDraftResetOnWorkspaceChange(matched?.id ?? null);
   useNewProjectDraftResetOnWorkspaceChange(matched?.id ?? null);
   useChatSessionPickerResetOnWorkspaceChange(matched?.id ?? null);
+  useChatAgentPickerResetOnWorkspaceChange(matched?.id ?? null);
 
   // Wait for the workspaces list before deciding membership — otherwise a
   // valid deep link would briefly redirect away on cold start.
@@ -132,7 +145,9 @@ export default function WorkspaceLayout() {
   return (
     <RealtimeProvider>
       <RealtimeSubscriptions />
-      <Stack>
+      <View className="flex-1">
+        <DeviceOfflineBanner />
+        <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
           name="issue/[id]"
@@ -222,6 +237,11 @@ export default function WorkspaceLayout() {
           options={SHEET_OPTIONS}
         />
         <Stack.Screen name="issue/[id]/runs" options={SHEET_OPTIONS} />
+        <Stack.Screen name="agent/[id]/runs" />
+        <Stack.Screen name="agent/[id]/picker/runtime" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/[id]/picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/new-picker/runtime" options={AGENT_PICKER_SHEET_OPTIONS} />
+        <Stack.Screen name="agent/new-picker/model" options={AGENT_PICKER_SHEET_OPTIONS} />
         <Stack.Screen
           name="issue/[id]/run/[taskId]"
           options={{
@@ -351,6 +371,15 @@ export default function WorkspaceLayout() {
             }}
         />
         <Stack.Screen
+          name="more/settings/members"
+          options={{
+            title: t("workspace:members"),
+            headerBackTitle: t("navigation:routes.settings"),
+          }}
+        />
+        <Stack.Screen name="more/settings/invite" options={SHEET_OPTIONS} />
+        <Stack.Screen name="more/settings/server" options={SHEET_OPTIONS} />
+        <Stack.Screen
           name="new-issue"
           options={{
             title: t("navigation:routes.new_issue"),
@@ -366,7 +395,9 @@ export default function WorkspaceLayout() {
             headerLeft: () => <ModalCloseButton />,
           }}
         />
-      </Stack>
+        </Stack>
+        <RunCompletionNotice />
+      </View>
     </RealtimeProvider>
   );
 }

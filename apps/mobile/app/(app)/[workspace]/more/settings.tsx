@@ -9,6 +9,7 @@
  * Subscreens push under more/settings/:
  *   - more/settings/profile        — edit name + avatar
  *   - more/settings/notifications  — per-group inbox + system toggles
+ *   - more/settings/server         — self-hosted API/Web origins and OAuth callbacks
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
@@ -132,6 +133,20 @@ export default function SettingsPage() {
           chevronColor={mutedFg}
           title={t("notifications.title")}
           subtitle={t("account.notifications_subtitle")}
+        />
+        <Separator />
+        <NavRow
+          onPress={() => router.push(`/${currentSlug}/more/settings/server`)}
+          chevronColor={mutedFg}
+          title={t("server.title")}
+        />
+      </SectionGroup>
+
+      <SectionGroup title={t("account.workspace")}>
+        <NavRow
+          onPress={() => router.push(`/${currentSlug}/more/settings/members`)}
+          chevronColor={mutedFg}
+          title={t("members.title")}
         />
       </SectionGroup>
 

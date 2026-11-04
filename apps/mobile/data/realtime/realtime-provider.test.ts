@@ -28,6 +28,7 @@ vi.mock("@react-native-community/netinfo", () => ({
 }));
 vi.mock("@/data/auth-store", () => ({ useAuthStore: () => lifecycle.userId }));
 vi.mock("@/data/workspace-store", () => ({ useWorkspaceStore: () => lifecycle.wsSlug }));
+vi.mock("@/data/server-store", () => ({ useServerStore: () => "https://example.test" }));
 vi.mock("@/data/secure-storage", () => ({ getToken: async () => "token" }));
 vi.mock("@/data/api", () => ({ api: { getToken: () => "token" } }));
 

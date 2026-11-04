@@ -40,6 +40,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { getCurrentServerConfig } from "@/data/server-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
@@ -115,7 +116,7 @@ export default function IssueDetail() {
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const webUrl = getCurrentServerConfig().webUrl;
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;
@@ -204,7 +205,7 @@ export default function IssueDetail() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
         </View>
-      ) : detail.error || !issue ? (
+      ) : !issue ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
             {t("errors.load_failed", {
@@ -224,6 +225,11 @@ export default function IssueDetail() {
             issue={issue}
             entries={timeline.data}
             timelineLoading={timeline.isLoading}
+            timelineError={
+              timeline.error instanceof Error
+                ? t("errors.load_failed", { message: timeline.error.message })
+                : null
+            }
             refreshing={detail.isRefetching || timeline.isRefetching}
             onRefresh={onRefresh}
             highlightCommentId={highlight}

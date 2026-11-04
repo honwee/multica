@@ -28,12 +28,14 @@ const data = vi.hoisted(() => ({
   invitations: [] as Array<Record<string, unknown>>,
   shareLinks: [] as Array<Record<string, unknown>>,
   summary: null as Record<string, unknown> | null,
+  larkOrganization: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(opts: T) => opts,
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = JSON.stringify(opts.queryKey);
+    if (key.includes("lark")) return { data: data.larkOrganization };
     if (key.includes("invitations")) return { data: data.invitations };
     if (key.includes("share-links")) return { data: data.shareLinks };
     if (key.includes("members")) return { data: data.members };
@@ -124,6 +126,20 @@ beforeEach(() => {
   ];
   data.shareLinks = [];
   data.summary = null;
+  data.larkOrganization = {
+    catalog: {
+      users: [
+        {
+          union_id: "on_openid",
+          name: "陈弘唯",
+          job_title: "工程师",
+          departments: ["技术中心-AI"],
+          active: true,
+          workspace_member: false,
+        },
+      ],
+    },
+  };
   configStore.getState().setFeatureFlags({});
 });
 
@@ -164,6 +180,17 @@ describe("MembersTab", () => {
     expect(
       screen.getByRole("button", { name: "Revoke invitation for linus@acme.dev" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows the Feishu member name instead of the internal account alias", async () => {
+    data.invitations[0]!.invitee_email = "ou_internal@feishu.invalid";
+    data.invitations[0]!.invitee_name = "陈弘唯";
+    const user = userEvent.setup();
+    renderWithI18n(<MembersTab />);
+
+    await user.click(screen.getByRole("tab", { name: /Pending invitations\s*1/ }));
+    expect(screen.getByText("陈弘唯")).toBeInTheDocument();
+    expect(screen.queryByText(/ou_internal@feishu\.invalid/)).toBeNull();
   });
 
   it("keeps the open list in the URL and follows it while on the page", async () => {
@@ -213,6 +240,28 @@ describe("MembersTab", () => {
       }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("invites a Feishu member by name using the union ID", async () => {
+    mockCreateMember.mockResolvedValue({});
+    const user = userEvent.setup();
+    renderWithI18n(<MembersTab />);
+
+    await user.click(screen.getByRole("button", { name: "Invite member" }));
+    const dialog = await screen.findByRole("dialog", { name: "Invite member" });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Search names, job titles, or departments" }),
+      "陈弘",
+    );
+    await user.click(within(dialog).getByRole("option", { name: /陈弘唯/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mockCreateMember).toHaveBeenCalledWith("ws-1", {
+        feishu_union_id: "on_openid",
+        role: "member",
+      }),
+    );
   });
 
   it("keeps the invite dialog open when sending fails", async () => {

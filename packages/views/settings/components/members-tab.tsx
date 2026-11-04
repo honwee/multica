@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -22,6 +22,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
   Invitation,
+  LarkOrganizationUser,
   MemberRole,
   MemberWithUser,
   PurchaseWorkspaceSeatsRequest,
@@ -87,6 +88,7 @@ import {
   shareLinkListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
+import { larkOrganizationOptions } from "@multica/core/lark/queries";
 import { api, errorCode } from "@multica/core/api";
 import { useLocale, useT } from "../../i18n";
 import { ObjectSectionEmpty } from "../../layout/object-page";
@@ -115,6 +117,7 @@ type InviteSeatPurchase = {
   workspaceId: string;
   email: string;
   role: MemberRole;
+  feishuUnionID?: string;
   preview: WorkspaceSeatPurchasePreview;
   idempotencyKey: string;
   phase: "review" | "purchasing" | "waiting" | "inviting" | "error";
@@ -323,7 +326,12 @@ function InvitationRow({
         <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-body font-medium">{invitation.invitee_email}</div>
+        <div className="truncate text-body font-medium">
+          {invitation.invitee_name ||
+            (invitation.invitee_email.endsWith("@feishu.invalid")
+              ? t(($) => $.members.feishu_invitee_fallback)
+              : invitation.invitee_email)}
+        </div>
         <div className="truncate text-caption text-muted-foreground">
           {t(($) => $.members.invitation_meta, {
             sent: new Date(invitation.created_at).toLocaleDateString(locale),
@@ -421,6 +429,7 @@ export function MembersTab() {
   const navigation = useOptionalNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const { data: larkOrganization } = useQuery(larkOrganizationOptions(wsId));
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [shareLinkOpen, setShareLinkOpen] = useState(false);
@@ -448,6 +457,9 @@ export function MembersTab() {
   };
   const [memberQuery, setMemberQuery] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [feishuQuery, setFeishuQuery] = useState("");
+  const [showFeishuResults, setShowFeishuResults] = useState(false);
+  const [feishuInvitee, setFeishuInvitee] = useState<LarkOrganizationUser | null>(null);
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteSeatPurchase, setInviteSeatPurchase] =
@@ -510,11 +522,29 @@ export function MembersTab() {
       )
     : members;
 
+  const feishuCandidates = useMemo(() => {
+    const query = feishuQuery.trim().toLocaleLowerCase();
+    if (!query) return [];
+    return (larkOrganization?.catalog?.users ?? [])
+      .filter((candidate) =>
+        candidate.active &&
+        `${candidate.name} ${candidate.job_title} ${candidate.departments.join(" ")}`
+          .toLocaleLowerCase()
+          .includes(query),
+      )
+      .slice(0, 6);
+  }, [feishuQuery, larkOrganization]);
+
   const sendInvitation = useCallback(
-    async (email: string, role: MemberRole) => {
+    async (email: string, role: MemberRole, feishuUnionID?: string) => {
       if (!workspace) return;
-      await api.createMember(workspace.id, { email, role });
+      await api.createMember(workspace.id, {
+        ...(feishuUnionID ? { feishu_union_id: feishuUnionID } : { email }),
+        role,
+      });
       setInviteEmail("");
+      setFeishuQuery("");
+      setFeishuInvitee(null);
       setInviteRole("member");
       await qc.invalidateQueries({
         queryKey: workspaceKeys.invitations(wsId),
@@ -528,9 +558,10 @@ export function MembersTab() {
     if (!workspace) return;
     const email = inviteEmail.trim();
     const role = inviteRole;
+    const feishuUnionID = feishuInvitee?.union_id;
     setInviteLoading(true);
     try {
-      await sendInvitation(email, role);
+      await sendInvitation(email, role, feishuUnionID);
       setInviteOpen(false);
     } catch (e) {
       const code = errorCode(e);
@@ -587,6 +618,7 @@ export function MembersTab() {
             workspaceId: workspace.id,
             email,
             role,
+            feishuUnionID,
             preview,
             idempotencyKey: createSeatPurchaseKey(workspace.id),
             phase: "review",
@@ -714,7 +746,7 @@ export function MembersTab() {
 
     dispatchedInvitePurchaseKey.current = purchase.idempotencyKey;
     setInviteSeatPurchase({ ...purchase, phase: "inviting" });
-    void sendInvitation(purchase.email, purchase.role)
+    void sendInvitation(purchase.email, purchase.role, purchase.feishuUnionID)
       .then(() => setInviteSeatPurchase(null))
       .catch((error) => {
         const code = errorCode(error);
@@ -1046,9 +1078,52 @@ export function MembersTab() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (inviteEmail.trim()) void handleInviteMember();
+              if (inviteEmail.trim() || feishuInvitee) void handleInviteMember();
             }}
           >
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-feishu-search">{t(($) => $.lark.organization.catalog_search_user)}</Label>
+              <Input
+                id="invite-feishu-search"
+                value={feishuQuery}
+                onChange={(event) => {
+                  setFeishuQuery(event.target.value);
+                  setShowFeishuResults(true);
+                  setFeishuInvitee(null);
+                }}
+                placeholder={t(($) => $.lark.organization.catalog_search_user)}
+              />
+              {showFeishuResults && feishuQuery.trim() && (
+                <div role="listbox" aria-label={t(($) => $.lark.organization.catalog_search_user)} className="max-h-56 overflow-y-auto rounded-md border">
+                  {feishuCandidates.length === 0 ? (
+                    <p className="p-3 text-caption text-muted-foreground">{t(($) => $.lark.organization.catalog_empty)}</p>
+                  ) : feishuCandidates.map((candidate) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={feishuInvitee?.union_id === candidate.union_id}
+                      key={candidate.union_id}
+                      className="flex w-full flex-col border-b px-3 py-2 text-left last:border-0 hover:bg-muted/60 aria-selected:bg-muted"
+                      onClick={() => {
+                        setFeishuInvitee(candidate);
+                        setFeishuQuery(candidate.name);
+                        setShowFeishuResults(false);
+                      }}
+                    >
+                      <span className="text-body">{candidate.name}</span>
+                      {(candidate.job_title || candidate.departments.length > 0) && (
+                        <span className="text-caption text-muted-foreground">
+                          {[candidate.job_title, ...candidate.departments].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {feishuInvitee && (
+                <p className="text-caption text-muted-foreground">{feishuInvitee.name}</p>
+              )}
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="invite-email">{t(($) => $.members.email_label)}</Label>
               <Input
@@ -1058,7 +1133,10 @@ export function MembersTab() {
                 autoComplete="email"
                 spellCheck={false}
                 value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
+                onChange={(event) => {
+                  setInviteEmail(event.target.value);
+                  setFeishuInvitee(null);
+                }}
                 placeholder={t(($) => $.members.invite_email_placeholder)}
                 autoFocus
               />
@@ -1098,7 +1176,7 @@ export function MembersTab() {
               </Button>
               <Button
                 type="submit"
-                disabled={inviteLoading || !inviteEmail.trim()}
+                disabled={inviteLoading || (!inviteEmail.trim() && !feishuInvitee)}
                 aria-busy={inviteLoading || undefined}
               >
                 {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}

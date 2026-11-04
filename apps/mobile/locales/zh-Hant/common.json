@@ -40,6 +40,7 @@
     "saving": "儲存中...",
     "sending": "傳送中...",
     "offline": "離線",
+    "offline_read_only": "離線中 · 快取內容僅供檢視",
     "empty": "暫無內容",
     "error": "出現錯誤"
   },

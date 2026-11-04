@@ -1,0 +1,2 @@
+COMMENT ON TABLE agent_invocation_target IS
+    'Allow-list of who may invoke a public_to agent. Targets stack with OR semantics. workspace rows store the agent workspace_id; member rows store the user id; team rows reference an active Feishu organization group and admit its active workspace members. Rows only matter when agent.permission_mode = public_to. Relationships are maintained in the application layer without foreign keys.';

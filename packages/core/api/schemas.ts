@@ -52,6 +52,7 @@ import type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
+  LarkOrganizationResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -906,6 +907,7 @@ export interface AppConfigResponse {
   cdn_signed?: boolean;
   allow_signup: boolean;
   google_client_id?: string;
+  feishu_app_id?: string;
   posthog_key?: string;
   posthog_host?: string;
   analytics_environment?: string;
@@ -1184,6 +1186,7 @@ export const AppConfigSchema = z.object({
   cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
+  feishu_app_id: OptionalStringSchema,
   posthog_key: OptionalStringSchema,
   posthog_host: OptionalStringSchema,
   analytics_environment: OptionalStringSchema,
@@ -1206,6 +1209,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
+  feishu_app_id: "",
   daemon_server_url: "",
   daemon_app_url: "",
   daemon_setup_target: "unknown",
@@ -3422,6 +3426,169 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   updated_at: "",
 };
 
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  // Null for organization-data connections that are not bound to an agent.
+  agent_id: z.string().nullable().catch(null).default(null),
+  app_id: z.string().default(""),
+  tenant_key: z.string().nullable().optional(),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  region: z.string().default("feishu"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  // Receipt evidence is optional across mixed server/desktop versions. A
+  // malformed timestamp must never render the binding as verified.
+  first_message_received_at: z.iso.datetime({ offset: true }).nullable().optional().catch(undefined),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
+  installations: [],
+  configured: false,
+  install_supported: false,
+};
+
+export const LarkInstallationBotInfoSchema = z.object({
+  installation_id: z.string(),
+  app_id: z.string(),
+  app_name: z.string(),
+  avatar_url: z.string().optional(),
+  bot_open_id: z.string(),
+  region: z.string().default("feishu"),
+}).loose();
+
+export const LarkOrganizationConfigSchema = z.object({
+  installation_id: z.string(),
+  enabled: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const LarkOrganizationMappingSchema = z.object({
+  kind: z.string(),
+  external_id: z.string(),
+  external_name: z.string().default(""),
+  member_role: z.enum(["owner", "admin", "member"]).nullable().catch(null),
+  agent_ids: z.array(z.string()).catch([]).default([]),
+}).loose();
+
+export const LarkOrganizationSyncChangeSchema = z.object({
+  user_id: z.string(),
+  user_name: z.string(),
+  action: z.string(),
+  group_id: z.string().optional(),
+  group_name: z.string().optional(),
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  reason: z.string().optional(),
+}).loose();
+
+export const LarkOrganizationAgentChangeSchema = z.object({
+  agent_id: z.string(),
+  group_id: z.string(),
+  group_name: z.string().default(""),
+  action: z.string(),
+}).loose();
+
+export const LarkOrganizationSyncRunSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  mode: z.string(),
+  status: z.string(),
+  revision: z.number().int().nonnegative(),
+  plan: z.object({
+    changes: z.array(LarkOrganizationSyncChangeSchema),
+    agent_changes: z.array(LarkOrganizationAgentChangeSchema).default([]),
+    warnings: z.array(z.string()).default([]),
+  }).loose(),
+  error: z.string().default(""),
+  requested_by: z.string().default(""),
+  replayed_from_id: z.string().nullable().optional(),
+  created_at: z.string(),
+  completed_at: z.string().nullable().optional(),
+}).loose();
+
+export const LarkOrganizationDepartmentSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  direct_member_count: z.number().int().nonnegative().default(0),
+  active_direct_member_count: z.number().int().nonnegative().default(0),
+}).loose();
+
+export const LarkOrganizationJobTitleSchema = z.object({
+  name: z.string(),
+  member_count: z.number().int().nonnegative().default(0),
+  active_member_count: z.number().int().nonnegative().default(0),
+}).loose();
+
+export const LarkOrganizationWorkspaceMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string().default(""),
+  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  managed_role: z.string().default(""),
+  disabled: z.boolean().default(false),
+  linked: z.boolean().default(false),
+  identity_conflict: z.boolean().default(false),
+  job_title: z.string().default(""),
+  departments: z.array(z.string()).catch([]).default([]),
+  feishu_active: z.boolean().nullable().optional(),
+}).loose();
+
+export const LarkOrganizationUserSchema = z.object({
+  union_id: z.string(),
+  name: z.string().default(""),
+  job_title: z.string().default(""),
+  departments: z.array(z.string()).catch([]).default([]),
+  active: z.boolean().default(false),
+  workspace_member: z.boolean().default(false),
+}).loose();
+
+export const LarkOrganizationCatalogSchema = z.object({
+  snapshot_at: z.string().default(""),
+  departments: z.array(LarkOrganizationDepartmentSchema).catch([]).default([]),
+  job_titles: z.array(LarkOrganizationJobTitleSchema).catch([]).default([]),
+  users: z.array(LarkOrganizationUserSchema).catch([]).default([]),
+  total_users: z.number().int().nonnegative().default(0),
+  active_users: z.number().int().nonnegative().default(0),
+  job_title_users: z.number().int().nonnegative().default(0),
+  workspace_members: z.array(LarkOrganizationWorkspaceMemberSchema).catch([]).default([]),
+}).loose();
+
+export const LarkOrganizationResponseSchema = z.object({
+  config: LarkOrganizationConfigSchema.nullable().default(null),
+  mappings: z.array(LarkOrganizationMappingSchema).catch([]).default([]),
+  required_scopes: z.array(z.string()).catch([]).default([]),
+  requirements: z.array(z.string()).catch([]).default([]),
+  sync_runs: z.array(LarkOrganizationSyncRunSchema).catch([]).default([]),
+  catalog: LarkOrganizationCatalogSchema.nullable().catch(null).default(null),
+}).loose();
+
+export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchema.extend({
+  config: LarkOrganizationConfigSchema,
+  mappings: z.array(LarkOrganizationMappingSchema),
+  required_scopes: z.array(z.string()),
+  requirements: z.array(z.string()),
+  sync_runs: z.array(LarkOrganizationSyncRunSchema),
+});
+
+export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
+  config: null,
+  mappings: [],
+  required_scopes: [],
+  requirements: [],
+  sync_runs: [],
+  catalog: null,
+};
+
 export const DingTalkInstallationSchema = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -3999,32 +4166,3 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
-
-// Receipt evidence is optional across mixed server/desktop versions. A malformed
-// timestamp must never render the binding as verified.
-export const LarkInstallationSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string().default(""),
-  agent_id: z.string().default(""),
-  app_id: z.string().default(""),
-  bot_open_id: z.string().default(""),
-  installer_user_id: z.string().default(""),
-  tenant_key: z.string().nullable().optional(),
-  status: z.string().default("revoked"),
-  region: z.string().optional(),
-  installed_at: z.string().default(""),
-  created_at: z.string().default(""),
-  updated_at: z.string().default(""),
-  first_message_received_at: z.iso.datetime({ offset: true }).nullable().optional().catch(undefined),
-}).loose();
-
-export const ListLarkInstallationsResponseSchema = z.object({
-  installations: z.array(LarkInstallationSchema).default([]),
-  configured: z.boolean().default(false),
-  install_supported: z.boolean().optional(),
-}).loose();
-
-export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
-  installations: [],
-  configured: false,
-};

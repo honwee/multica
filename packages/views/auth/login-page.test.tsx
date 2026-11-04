@@ -411,6 +411,67 @@ describe("LoginPage", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Feishu OAuth
+  // -------------------------------------------------------------------------
+
+  it("renders Feishu OAuth button when feishu prop provided", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        feishu={{ appId: "cli_123", redirectUri: "http://localhost/cb" }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides Feishu OAuth button when feishu prop omitted", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("button", { name: /continue with feishu/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("redirects to the Feishu authorize URL with app id, redirect and state", async () => {
+    const user = userEvent.setup();
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        feishu={{
+          appId: "cli_123",
+          redirectUri: "http://localhost/cb",
+          state: "provider:feishu",
+        }}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    );
+    const dest = new URL(window.location.href);
+    expect(dest.origin + dest.pathname).toBe(
+      "https://accounts.feishu.cn/open-apis/authen/v1/authorize",
+    );
+    expect(dest.searchParams.get("client_id")).toBe("cli_123");
+    expect(dest.searchParams.get("redirect_uri")).toBe("http://localhost/cb");
+    expect(dest.searchParams.get("response_type")).toBe("code");
+    expect(dest.searchParams.get("state")).toBe("provider:feishu");
+  });
+
+  it("uses an external Feishu handler instead of navigating internally", async () => {
+    const onFeishuLogin = vi.fn();
+    const user = userEvent.setup();
+    renderWithI18n(
+      <LoginPage onSuccess={onSuccess} onFeishuLogin={onFeishuLogin} />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    );
+    expect(onFeishuLogin).toHaveBeenCalledTimes(1);
+    expect(window.location.href).toBe("http://localhost:3000");
+  });
+
+  // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------
 

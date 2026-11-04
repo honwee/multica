@@ -1713,4 +1713,186 @@ describe("workspace subscription contract", () => {
       }),
     );
   });
+
+  describe("Lark organization", () => {
+    const validRun = {
+      id: "run-1",
+      workspace_id: "ws-1",
+      mode: "preview",
+      status: "preview",
+      revision: 3,
+      plan: {
+        changes: [
+          {
+            user_id: "user-1",
+            user_name: "Ada",
+            action: "grant",
+            before: null,
+            after: "admin",
+          },
+        ],
+        warnings: ["Review this change"],
+      },
+      error: "",
+      requested_by: "user-2",
+      created_at: "2026-10-27T00:00:00Z",
+      completed_at: null,
+    };
+
+    it("falls back safely when the configuration response is malformed", async () => {
+      stubFetchJson({ config: {}, mappings: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getLarkOrganization("ws-1")).resolves.toEqual({
+        config: null,
+        mappings: [],
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+        catalog: null,
+      });
+    });
+
+    it("parses the organization catalog and defaults it for older backends", async () => {
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },
+        mappings: [],
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+        catalog: {
+          snapshot_at: "2026-10-28T00:00:00Z",
+          departments: [{ id: "dep-1", name: "Engineering", direct_member_count: 2, active_direct_member_count: 1 }],
+          job_titles: [{ name: "Engineer", member_count: 1, active_member_count: 1 }],
+          users: [{ union_id: "union-ada", name: "Ada", job_title: "Engineer", departments: ["Engineering"], active: true, workspace_member: true }],
+          total_users: 2,
+          active_users: 1,
+          job_title_users: 1,
+          workspace_members: [{
+            user_id: "user-1", name: "Ada", role: "owner", managed_role: "",
+            disabled: false, linked: true, identity_conflict: false,
+            job_title: "Engineer", departments: ["Engineering"], feishu_active: true,
+          }],
+        },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getLarkOrganization("ws-1");
+      expect(response.catalog?.departments[0]?.name).toBe("Engineering");
+      expect(response.catalog?.workspace_members[0]?.linked).toBe(true);
+      expect(response.catalog?.total_users).toBe(2);
+      expect(response.catalog?.users[0]?.union_id).toBe("union-ada");
+      expect(response.catalog?.users[0]?.workspace_member).toBe(true);
+
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },
+        mappings: [], required_scopes: [], requirements: [], sync_runs: [],
+      });
+      const legacy = await client.getLarkOrganization("ws-1");
+      expect(legacy.catalog).toBeNull();
+    });
+
+    it("parses a preview plan without narrowing future mode or status values", async () => {
+      stubFetchJson({ ...validRun, mode: "future_mode", status: "future_status" });
+      const client = new ApiClient("https://api.example.test");
+
+      const run = await client.previewLarkOrganization("ws-1");
+      expect(run.mode).toBe("future_mode");
+      expect(run.status).toBe("future_status");
+      expect(run.plan.changes[0]?.user_name).toBe("Ada");
+    });
+
+    it("rejects a malformed save response instead of reporting a successful write", async () => {
+      stubFetchJson({});
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.updateLarkOrganization("ws-1", {
+        installation_id: "installation-1",
+        enabled: true,
+        mappings: [],
+      })).rejects.toThrow("Malformed response");
+
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 1, updated_at: "" },
+        mappings: "not-an-array",
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+      });
+      await expect(client.updateLarkOrganization("ws-1", {
+        installation_id: "installation-1",
+        enabled: true,
+        mappings: [],
+      })).rejects.toThrow("Malformed response");
+    });
+
+    it("rejects malformed agent changes instead of hiding them from the review", async () => {
+      stubFetchJson({
+        ...validRun,
+        plan: { changes: [], agent_changes: "not-an-array", warnings: [] },
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.previewLarkOrganization("ws-1")).rejects.toThrow("Malformed response");
+    });
+
+    it("rejects malformed preview, apply, and replay responses instead of inventing an empty plan", async () => {
+      const client = new ApiClient("https://api.example.test");
+      const calls = [
+        () => client.previewLarkOrganization("ws-1"),
+        () => client.applyLarkOrganizationSync("ws-1", "run-1"),
+        () => client.replayLarkOrganizationSync("ws-1", "run-1"),
+      ];
+
+      for (const call of calls) {
+        stubFetchJson({ ...validRun, plan: { changes: "not-an-array", warnings: [] } });
+        await expect(call()).rejects.toThrow("Malformed response");
+      }
+    });
+
+    it("parses agent-less app connections and creates them without an agent", async () => {
+      const installation = {
+        id: "inst-workspace",
+        workspace_id: "ws-1",
+        agent_id: null,
+        app_id: "cli_workspace",
+        bot_open_id: "",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-10-28T00:00:00Z",
+        created_at: "2026-10-28T00:00:00Z",
+        updated_at: "2026-10-28T00:00:00Z",
+      };
+      stubFetchJson({ installations: [installation], configured: true, install_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      const listed = await client.listLarkInstallations("ws-1");
+      expect(listed.installations[0]?.agent_id).toBeNull();
+
+      stubFetchJson(installation);
+      const created = await client.connectLarkWorkspace("ws-1", { app_id: "cli_workspace", app_secret: "secret", region: "feishu" });
+      expect(created.agent_id).toBeNull();
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/lark/connections",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ app_id: "cli_workspace", app_secret: "secret", region: "feishu" }) }),
+      );
+    });
+
+    it("loads Feishu app connection details without credentials", async () => {
+      stubFetchJson({
+        installation_id: "inst-1",
+        app_id: "cli_app",
+        app_name: "Lumist",
+        avatar_url: "https://example.com/avatar.png",
+        bot_open_id: "ou_bot",
+        region: "feishu",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const info = await client.getLarkInstallationBotInfo("ws-1", "inst-1");
+      expect(info.app_name).toBe("Lumist");
+      expect(info).not.toHaveProperty("app_secret");
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/lark/installations/inst-1/bot-info",
+        expect.any(Object),
+      );
+    });
+  });
 });

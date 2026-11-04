@@ -90,7 +90,7 @@ WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
 ),
 active_member AS (
     SELECT m.user_id FROM member m
-    WHERE m.user_id = $2 AND m.workspace_id = $4
+    WHERE m.user_id = $2 AND m.workspace_id = $4 AND m.disabled_at IS NULL
     FOR SHARE
 )
 INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason)
@@ -122,7 +122,7 @@ WHERE issue_subscriber.unsubscribed_at IS NULL
 -- behind it — leaving an opt-out that outlives the membership and is inherited
 -- if the person is ever re-invited.
 SELECT id FROM member
-WHERE user_id = $1 AND workspace_id = $2
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NULL
 FOR SHARE;
 
 -- name: DeleteSubscriptionsByMember :exec

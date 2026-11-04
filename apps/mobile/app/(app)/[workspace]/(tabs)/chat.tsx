@@ -10,14 +10,14 @@
  *                                ─ OfflineBanner
  *                                ─ ChatComposer
  *
- * Session switching, agent selection, and session deletion all happen
- * inside this screen via Modal sheets — there is no `/chat/[id]` sub-route.
+ * Session switching and deletion use Modal sheets; the agents page can also
+ * request a new chat with a preselected agent. There is no `/chat/[id]` route.
  *
- * State (all local, none in Zustand):
+ * Session and agent selection stay local; one-shot cross-route requests arrive
+ * through small Zustand picker stores:
  *   - activeSessionId   — which session is being viewed (null = new chat blank)
  *   - selectedAgentId   — overrides currentSession.agent_id when set (used
  *                         when starting a new chat with a freshly-picked agent)
- *   - sessionSheetOpen  — bottom modal visibility
  *   - agentPickerOpen   — bottom modal visibility
  *
  * Side effects:
@@ -68,10 +68,12 @@ import {
   useMarkChatSessionRead,
 } from "@/data/mutations/chat";
 import {
+  chatDraftKey,
   DRAFT_NEW_SESSION,
   useChatDraftsStore,
 } from "@/data/stores/chat-drafts-store";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
+import { useChatAgentPickerStore } from "@/data/stores/chat-agent-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
   invalidatePendingTask,
@@ -94,6 +96,7 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { useIsOffline } from "@/lib/use-device-online";
 
 export default function ChatTab() {
   const qc = useQueryClient();
@@ -115,6 +118,7 @@ export default function ChatTab() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
+  const offline = useIsOffline();
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -135,19 +139,60 @@ export default function ChatTab() {
 
   // ── Server state ───────────────────────────────────────────────────────
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isFetched: agentsFetched } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], isFetched: membersFetched } = useQuery(
+    memberListOptions(wsId),
+  );
+  const agentSelectRequest = useChatAgentPickerStore((s) => s.selectRequest);
+  const consumeAgentSelect = useChatAgentPickerStore((s) => s.consumeSelect);
 
   // ── Auto-hydrate active session on first Chat tab entry ────────────────
   // Mobile-only deviation from web: web's chat-window opens to an empty
   // state when no `activeSessionId` is persisted; on a phone, picking
   // a session is 4 taps, so jump straight to the most recent session.
-  // Hydration is one-shot per workspace.
+  // A pending agent selection takes precedence over recent-session hydration.
   const [hydratedWs, setHydratedWs] = useState<string | null>(null);
-  if (wsId && hydratedWs !== wsId) {
+  const [appliedAgentSelect, setAppliedAgentSelect] = useState<
+    typeof agentSelectRequest
+  >(null);
+  const pendingAgentSelect =
+    agentSelectRequest && agentSelectRequest !== appliedAgentSelect
+      ? agentSelectRequest
+      : null;
+
+  if (pendingAgentSelect && agentsFetched && membersFetched) {
+    const requestedAgent = agents.find(
+      (agent) => agent.id === pendingAgentSelect.id,
+    );
+    const role =
+      members.find((member) => member.user_id === userId)?.role ?? null;
+    const canOpen =
+      requestedAgent &&
+      !requestedAgent.archived_at &&
+      canAssignAgentToIssue(requestedAgent, {
+        userId: userId ?? null,
+        role,
+      }).allowed;
+
+    setAppliedAgentSelect(pendingAgentSelect);
+    if (canOpen) {
+      setSelectedAgentId(requestedAgent.id);
+      setActiveSessionId(null);
+      if (wsId && hydratedWs !== wsId) setHydratedWs(wsId);
+    }
+  }
+
+  if (wsId && hydratedWs !== wsId && !pendingAgentSelect) {
     setHydratedWs(wsId);
     if (sessions.length > 0) setActiveSessionId(sessions[0].id);
   }
+  useEffect(() => {
+    if (agentSelectRequest && agentSelectRequest === appliedAgentSelect) {
+      consumeAgentSelect();
+    }
+  }, [agentSelectRequest, appliedAgentSelect, consumeAgentSelect]);
   const { data: messages = [], isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId),
   );
@@ -227,11 +272,13 @@ export default function ChatTab() {
   const sending = !!pendingTask?.task_id;
 
   // ── Drafts ─────────────────────────────────────────────────────────────
-  const draftKey = activeSessionId ?? DRAFT_NEW_SESSION;
+  const draftKey = chatDraftKey(
+    wsId ?? "",
+    activeSessionId ?? DRAFT_NEW_SESSION,
+  );
   const draft = useChatDraftsStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useChatDraftsStore((s) => s.setDraft);
-  const clearDraft = useChatDraftsStore((s) => s.clearDraft);
-  const promoteNewDraft = useChatDraftsStore((s) => s.promoteNewDraft);
+  const promoteDraft = useChatDraftsStore((s) => s.promoteDraft);
 
   // ── Realtime ───────────────────────────────────────────────────────────
   useChatSessionRealtime(activeSessionId, () => {
@@ -287,11 +334,7 @@ export default function ChatTab() {
   );
 
   const handleSend = useCallback(
-    async (
-      content: string,
-      attachmentIds: string[] = [],
-      options: { clearDraft?: boolean } = {},
-    ) => {
+    async (content: string, attachmentIds: string[] = []) => {
       if (!currentAgent) return;
       // Invoke permission was revoked while this session was open — the server
       // would refuse before persisting anything. The composer is disabled in
@@ -352,8 +395,11 @@ export default function ChatTab() {
             Boolean(old?.task_id),
           ),
       );
-      if (isNewSession) {
-        promoteNewDraft(sessionId);
+      if (isNewSession && wsId) {
+        promoteDraft(
+          chatDraftKey(wsId, DRAFT_NEW_SESSION),
+          chatDraftKey(wsId, sessionId),
+        );
         setActiveSessionId(sessionId);
       }
 
@@ -387,9 +433,6 @@ export default function ChatTab() {
           queued: result.queued,
         });
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        if (options.clearDraft !== false) {
-          clearDraft(sessionId);
-        }
       } catch (err) {
         qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
           old ? old.filter((m) => m.id !== optimistic.id) : old,
@@ -414,14 +457,14 @@ export default function ChatTab() {
       qc,
       sendFailureMessage,
       t,
-      promoteNewDraft,
-      clearDraft,
+      wsId,
+      promoteDraft,
     ],
   );
 
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
-    if (!pendingTask?.task_id || !activeSessionId) return;
+    if (offline || !pendingTask?.task_id || !activeSessionId) return;
     if (pendingTask.status === "queued") return;
     const taskId = pendingTask.task_id;
     const sessionId = activeSessionId;
@@ -433,7 +476,7 @@ export default function ChatTab() {
         // Silent — task may have already terminated server-side.
       })
       .finally(() => invalidatePendingTask(qc, sessionId));
-  }, [pendingTask, activeSessionId, qc]);
+  }, [offline, pendingTask, activeSessionId, qc]);
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
@@ -485,22 +528,25 @@ export default function ChatTab() {
 
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
+    offline ||
     !currentAgent ||
     accessRevoked ||
     availability === "none" ||
     isArchived === true ||
     !runtimeBound;
-  const disabledReason = !currentAgent
-    ? t("composer.no_agent")
-    : accessRevoked
-      ? t("composer.revoked")
-      : availability === "none"
-        ? t("composer.no_agents")
-        : isArchived
-          ? t("composer.archived")
-          : !runtimeBound
-            ? t("composer.runtime_required")
-          : undefined;
+  const disabledReason = offline
+    ? t("common:states.offline_read_only")
+    : !currentAgent
+      ? t("composer.no_agent")
+      : accessRevoked
+        ? t("composer.revoked")
+        : availability === "none"
+          ? t("composer.no_agents")
+          : isArchived
+            ? t("composer.archived")
+            : !runtimeBound
+              ? t("composer.runtime_required")
+              : undefined;
 
   return (
     <View className="flex-1 bg-background">
@@ -537,9 +583,7 @@ export default function ChatTab() {
           hasSessions={sessions.length > 0}
           agent={currentAgent}
           onPickPrompt={(text) => setDraft(draftKey, text)}
-          onQuickAction={(action) =>
-            handleSend(action.prompt, [], { clearDraft: false })
-          }
+          onQuickAction={(action) => handleSend(action.prompt)}
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}

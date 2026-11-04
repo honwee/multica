@@ -484,6 +484,7 @@ function CommentBody({
       content: failed.content,
       parentId: failed.parentId,
       attachmentIds: failed.attachmentIds,
+      submissionId: failed.submissionId,
     });
   }, [failed, qc, wsId, issueId, entry.id, createComment]);
 

@@ -48,6 +48,11 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
   },
+  experimental: {
+    // Organization previews can traverse many departments and exceed Next's
+    // default 30s proxy timeout. Keep the upstream request bounded at 2 minutes.
+    proxyTimeout: 120_000,
+  },
   async rewrites() {
     return {
       // Run before file-system routes so /docs isn't shadowed by the

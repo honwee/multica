@@ -262,6 +262,10 @@ describe("runtimeRewriteDestination", () => {
   });
 
   it("does not rewrite frontend auth callback pages", () => {
+    expect(runtimeRewriteDestination("/auth/native", {})).toBeUndefined();
+    expect(runtimeRewriteDestination("/auth/native", {
+      REMOTE_API_URL: "http://backend:8080",
+    })).toBeUndefined();
     expect(runtimeRewriteDestination("/auth/callback", {})).toBeUndefined();
     expect(
       runtimeRewriteDestination("/auth/hg-sso/callback", {}),

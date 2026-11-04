@@ -672,8 +672,10 @@ export interface UpdateMeRequest {
 }
 
 export interface CreateMemberRequest {
-  email: string;
+  email?: string;
   role?: MemberRole;
+  /** Invite a member from the workspace's Feishu organization snapshot. */
+  feishu_union_id?: string;
 }
 
 export interface UpdateMemberRequest {

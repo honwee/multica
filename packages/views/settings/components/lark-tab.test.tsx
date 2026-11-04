@@ -28,7 +28,18 @@ const ApiError = vi.hoisted(() => {
 const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
+const mockConnectWorkspace = vi.hoisted(() => vi.fn());
+const mockGetBotInfo = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
+const mockOrganizationMapping = vi.hoisted(() => vi.fn());
+const botInfoRef = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("./lark-organization-mapping", () => ({
+  LarkOrganizationMapping: (props: unknown) => {
+    mockOrganizationMapping(props);
+    return <div data-testid="lark-organization-mapping" />;
+  },
+}));
 
 type MemberRole = "owner" | "admin" | "member" | "guest";
 
@@ -44,9 +55,13 @@ const installationsRef = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
+  useQuery: (opts: { queryKey: unknown[]; enabled?: boolean; queryFn?: () => unknown }) => {
     if (opts.enabled === false) return { data: undefined, isLoading: false };
     const key = JSON.stringify(opts.queryKey);
+    if (key.includes("bot-info")) {
+      void opts.queryFn?.();
+      return { data: botInfoRef.current, isLoading: false, isError: false };
+    }
     if (key.includes("members")) return { data: membersRef.current, isLoading: false };
     if (key.includes("installations")) {
       return { data: installationsRef.current, isLoading: false };
@@ -101,6 +116,11 @@ vi.mock("@multica/core/lark", () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
   }),
+  larkBotInfoOptions: (wsId: string, installationId: string, enabled: boolean) => ({
+    queryKey: ["lark", "bot-info", wsId, installationId],
+    queryFn: () => mockGetBotInfo(wsId, installationId),
+    enabled,
+  }),
   larkKeys: { installations: (wsId: string) => ["lark", "installations", wsId] },
 }));
 
@@ -109,6 +129,8 @@ vi.mock("@multica/core/api", () => ({
     beginLarkInstall: mockBeginInstall,
     getLarkInstallStatus: mockGetStatus,
     deleteLarkInstallation: mockDeleteInstallation,
+    connectLarkWorkspace: mockConnectWorkspace,
+    getLarkInstallationBotInfo: mockGetBotInfo,
   },
   ApiError,
 }));
@@ -182,6 +204,7 @@ function resetFixtures() {
     install_supported: true,
   };
   agentNameByIdRef.current = new Map();
+  botInfoRef.current = null;
 }
 
 describe("LarkAgentBindButton (CTA gate)", () => {
@@ -789,6 +812,126 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText(/Unknown Agent/)).toBeTruthy();
     // Disconnect stays reachable so the orphan row can be cleaned up.
     expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+  });
+
+  it.each(["owner", "admin"] as const)("%s can view organization permissions", (role) => {
+    membersRef.current = [{ user_id: "user-1", role }];
+    render(<LarkTab />, { wrapper: I18nWrapper });
+    expect(screen.getByTestId("lark-organization-mapping")).toBeTruthy();
+    expect(mockOrganizationMapping).toHaveBeenCalled();
+  });
+
+  it("keeps connected bots visible but does not mount organization permissions for a plain member", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    agentNameByIdRef.current = new Map([["agent-1", "Bohan's Helper"]]);
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_aa941499d4f95cd9",
+        bot_open_id: "ou_abc123",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Bohan's Helper")).toBeTruthy();
+    expect(screen.queryByTestId("lark-organization-mapping")).toBeNull();
+    expect(mockOrganizationMapping).not.toHaveBeenCalled();
+  });
+
+  it("loads Feishu app details only after expanding the connection", async () => {
+    const user = userEvent.setup();
+    agentNameByIdRef.current = new Map([["agent-1", "Bohan's Helper"]]);
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_aa941499d4f95cd9",
+        bot_open_id: "ou_abc123",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+    botInfoRef.current = {
+      installation_id: "inst-1",
+      app_id: "cli_aa941499d4f95cd9",
+      app_name: "Lumist",
+      avatar_url: "",
+      bot_open_id: "ou_abc123",
+      region: "feishu",
+    };
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+    expect(screen.queryByText("cli_aa941499d4f95cd9")).toBeNull();
+    expect(mockGetBotInfo).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.bot_details }));
+
+    expect(await screen.findByText("Lumist")).toBeTruthy();
+    expect(screen.getByText("cli_aa941499d4f95cd9")).toBeTruthy();
+    expect(screen.getByText("ou_abc123")).toBeTruthy();
+    expect(mockGetBotInfo).toHaveBeenCalledWith("workspace-1", "inst-1");
+  });
+
+  it("connects an app for organization data without selecting an agent", async () => {
+    const user = userEvent.setup();
+    mockConnectWorkspace.mockResolvedValue({ id: "inst-workspace", agent_id: null });
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.workspace_connect_button }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    await user.type(screen.getByLabelText(enSettings.lark.workspace_app_id_label), "cli_workspace");
+    await user.type(screen.getByLabelText(enSettings.lark.workspace_app_secret_label), "workspace-secret");
+    await user.click(screen.getByRole("button", { name: enSettings.lark.workspace_connect_submit }));
+
+    await waitFor(() => expect(mockConnectWorkspace).toHaveBeenCalledWith("workspace-1", {
+      app_id: "cli_workspace",
+      app_secret: "workspace-secret",
+      tenant_key: "",
+      region: "feishu",
+    }));
+    expect(JSON.stringify(mockConnectWorkspace.mock.calls[0]?.[1])).not.toContain("agent_id");
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["lark", "installations", "workspace-1"] });
+  });
+
+  it("renders an agent-less app connection without Unknown Agent", async () => {
+    const user = userEvent.setup();
+    installationsRef.current.installations = [{
+      id: "inst-workspace",
+      workspace_id: "ws-1",
+      agent_id: null,
+      app_id: "cli_workspace",
+      bot_open_id: "",
+      installer_user_id: "user-1",
+      status: "active",
+      installed_at: "2026-10-28T00:00:00Z",
+      created_at: "2026-10-28T00:00:00Z",
+      updated_at: "2026-10-28T00:00:00Z",
+    }];
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getAllByText("cli_workspace").length).toBeGreaterThan(0);
+    expect(screen.getByText(enSettings.lark.workspace_app_badge)).toBeTruthy();
+    expect(screen.queryByText(/Unknown Agent/)).toBeNull();
+    expect(screen.queryByTestId("actor-avatar")).toBeNull();
+    // Organization-data connections never receive messages, so the bot
+    // receipt guidance must not ask the admin to verify inbound delivery.
+    expect(screen.queryByText(enSettings.lark.inbound_pending)).toBeNull();
+    expect(screen.queryByText(enSettings.lark.inbound_pending_hint)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: enSettings.lark.bot_details }));
+    expect(await screen.findByText(enSettings.lark.workspace_unbound)).toBeTruthy();
   });
 });
 

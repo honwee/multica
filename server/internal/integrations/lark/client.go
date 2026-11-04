@@ -251,14 +251,14 @@ type LarkMessageMention struct {
 //     against `union_id` so the right bot's supervisor handles the
 //     event when several bots are bound to the same group.
 //
-// Everything else /bot/v3/info returns (display name, avatar,
-// activate_status, ip_white_list) is intentionally dropped — those
-// can be re-fetched downstream from the bot_open_id if a UI needs
-// them, and freezing them in our schema would create a drift surface
-// every time the operator edits the Bot on Lark's side.
+// AppName and AvatarURL are returned for on-demand connection details and
+// are not persisted by this method. Other fields (activate_status,
+// ip_white_list) are intentionally dropped to avoid unnecessary exposure.
 type BotInfo struct {
-	OpenID  OpenID
-	UnionID string
+	OpenID    OpenID
+	UnionID   string
+	AppName   string
+	AvatarURL string
 }
 
 // SendCardParams is the input shape for posting a fresh card.

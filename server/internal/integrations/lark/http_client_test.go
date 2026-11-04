@@ -1319,8 +1319,8 @@ func TestHTTPClient_BindingPromptValidation(t *testing.T) {
 // {open_id}?user_id_type=open_id. Both identifiers are persisted on
 // the installation row; the union_id is what the WS decoder uses to
 // route inbound @-mentions in multi-bot group chats (MUL-2671). The
-// other fields on the bot/v3/info response (display name, avatar,
-// IP whitelist) are deliberately dropped on the floor.
+// display metadata is returned for on-demand connection details without
+// being persisted. IP whitelist is intentionally not exposed.
 func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_bi", 7200)
@@ -1372,6 +1372,12 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 	}
 	if info.UnionID != "on_bot_42_stable" {
 		t.Errorf("UnionID: got %q want on_bot_42_stable", info.UnionID)
+	}
+	if info.AppName != "PersonalAgent" {
+		t.Errorf("AppName: got %q want PersonalAgent", info.AppName)
+	}
+	if info.AvatarURL != "https://example/avatar.png" {
+		t.Errorf("AvatarURL: got %q want avatar URL", info.AvatarURL)
 	}
 }
 

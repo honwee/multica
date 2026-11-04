@@ -115,9 +115,13 @@ func (h *Handler) dingtalkAgentVisibility(
 	if !loaded {
 		return nil, nil, false
 	}
+	teamIDs, loaded := h.feishuOrgTeamIDs(ctx, uuidToString(workspaceID), userID)
+	if !loaded {
+		return nil, nil, false
+	}
 	for _, agent := range agents {
 		agentID := uuidToString(agent.ID)
-		if memberAllowedToViewAgent(agent, targetsByAgent[agentID], userID, member.Role) {
+		if memberAllowedToViewAgent(agent, targetsByAgent[agentID], userID, member.Role, teamIDs) {
 			visible[agentID] = struct{}{}
 		}
 	}

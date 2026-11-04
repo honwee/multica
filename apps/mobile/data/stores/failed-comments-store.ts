@@ -8,21 +8,24 @@
  * snatch it away) — this store carries the metadata needed to re-fire the
  * same submission on Retry, plus an error string for the user.
  *
- * Keyed by the optimistic entry's id (`optimistic-{timestamp}`), which is
- * generated in the mutation's onMutate and threaded back via context. The
- * entry itself plus this store are the two halves of the failed-comment
- * representation — losing either leaves a half-rendered ghost.
+ * Keyed by the optimistic entry's id (`optimistic-{submissionId}`, or a
+ * timestamp when no submission id is supplied), which is generated in the
+ * mutation's onMutate and threaded back via context. The entry itself plus
+ * this store are the two halves of the failed-comment representation —
+ * losing either leaves a half-rendered ghost.
  *
  * Session-only — a refresh / pull-to-refresh clears both the optimistic
  * entry (server refetch doesn't include it) and this store entry (timeline
- * remount). Persisting across refresh would require AsyncStorage and
- * server-side draft endpoints, neither in scope for v1.
+ * remount). Only server-accepted timeline rows enter the persistent query
+ * cache; failed submissions are not restored as if they were server data.
  */
 import { create } from "zustand";
 
 export interface FailedCommentPayload {
   /** Markdown body the user typed. Re-used as the content of the retry. */
   content: string;
+  /** Client-only correlation id reused when retrying this submission. */
+  submissionId?: string;
   /** Thread parent id for reply-mode submissions. */
   parentId?: string;
   /** Attachment ids the user uploaded and referenced in `content`. */
@@ -38,7 +41,7 @@ interface FailedCommentsState {
   markFailed: (optimisticId: string, payload: FailedCommentPayload) => void;
   /** Remove an entry from the store. Caller is responsible for separately
    *  clearing the matching optimistic <TimelineEntry> from the query cache
-   *  (or letting a successful retry's invalidate do it). */
+   *  (or letting a successful mutation reconcile it). */
   clear: (optimisticId: string) => void;
 }
 

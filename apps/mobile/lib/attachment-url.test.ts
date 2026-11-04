@@ -1,9 +1,6 @@
 /**
- * Pure-function tests for the mobile attachment URL resolver. We exercise
- * the with-base form because `resolveAttachmentUrl` itself is bound at
- * module load to `process.env.EXPO_PUBLIC_API_URL`, which is what we
- * intentionally don't want to mutate in tests — the with-base helper is
- * the same code path with the API base passed in explicitly.
+ * Pure-function tests for the mobile attachment URL resolver. The with-base
+ * form covers URL joining directly; the bound form covers active-server reads.
  *
  * Coverage target: every branch the call sites in the app rely on —
  *   - `comment-attachment-list.tsx`         → file chip Linking.openURL
@@ -12,6 +9,7 @@
  *                                             tap → Linking.openURL
  */
 import { describe, expect, it } from "vitest";
+import { useServerStore } from "@/data/server-store";
 import {
   resolveAttachmentUrl,
   resolveAttachmentUrlWithBase,
@@ -109,10 +107,20 @@ describe("composer file chip — completed non-image attachment", () => {
   });
 });
 
-describe("resolveAttachmentUrl (env-bound)", () => {
-  it("matches the with-base form for an absolute URL regardless of EXPO_PUBLIC_API_URL", () => {
-    // The bound form is module-evaluation-time, but for absolute URLs the
-    // base is irrelevant — guarantees pass-through stays stable.
+describe("resolveAttachmentUrl (active server)", () => {
+  it("reads the current server on every call", () => {
+    useServerStore.setState({ apiUrl: "https://api.example.test" });
+    expect(resolveAttachmentUrl("/api/attachments/one")).toBe(
+      "https://api.example.test/api/attachments/one",
+    );
+
+    useServerStore.setState({ apiUrl: "https://self-hosted.example.test" });
+    expect(resolveAttachmentUrl("/api/attachments/two")).toBe(
+      "https://self-hosted.example.test/api/attachments/two",
+    );
+  });
+
+  it("passes an absolute URL through regardless of the active server", () => {
     const absolute = "https://cdn.example.test/file.pdf?Signature=s";
     expect(resolveAttachmentUrl(absolute)).toBe(absolute);
   });

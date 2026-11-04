@@ -99,6 +99,41 @@ describe("LoginPage", () => {
     mockListMyInvitations.mockResolvedValue([]);
   });
 
+  it("keeps the light login palette readable when the device prefers dark mode", () => {
+    const { container } = render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(container.querySelector(".landing-light")).toHaveClass("bg-background");
+  });
+
+  it("renders the Lumist co-brand alongside the Multica product name", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      screen.getByRole("img", { name: "路觅教育" }).getAttribute("src"),
+    ).toContain("lumist-logo.png");
+    expect(
+      screen.getByText("Sign in to Multica", { exact: true }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps download destinations available as secondary links", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      screen.getByRole("navigation", { name: "Download apps" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Download for macOS" }),
+    ).toHaveAttribute(
+      "href",
+      "https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.0/multica-desktop-0.8.0-mac-arm64.dmg",
+    );
+    expect(screen.getByRole("link", { name: "Get iOS Beta" })).toHaveAttribute(
+      "href",
+      "/install/ios",
+    );
+  });
+
   it.each([null, { id: "u1", email: "test@multica.ai" }])(
     "blocks invalid CLI callbacks even with an existing session: %j",
     (user) => {

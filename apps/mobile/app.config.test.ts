@@ -30,7 +30,7 @@ describe("iOS scene lifecycle configuration", () => {
     [undefined, "Multica (Dev)", "ai.multica.mobile.dev"],
     ["development", "Multica (Dev)", "ai.multica.mobile.dev"],
     ["staging", "Multica (Staging)", "ai.multica.mobile.staging"],
-    ["production", "Multica", "ai.multica.mobile"],
+    ["production", "Multica", "com.lumistedu.multica"],
   ])("enables scene support for %s without changing app identity", (env, name, bundleIdentifier) => {
     vi.stubEnv("APP_ENV", env);
     vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_DEV", undefined);
@@ -40,7 +40,11 @@ describe("iOS scene lifecycle configuration", () => {
 
     expect(config.name).toBe(name);
     expect(config.ios?.bundleIdentifier).toBe(bundleIdentifier);
+    expect(config.ios?.entitlements).toEqual({
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${bundleIdentifier}`],
+    });
     expect(config.scheme).toBe("multica");
+    expect(config.plugins).toContain("expo-web-browser");
     expect(config.plugins).toContainEqual([
       "expo-build-properties",
       { ios: { buildReactNativeFromSource: true, enableSceneSupport: true } },

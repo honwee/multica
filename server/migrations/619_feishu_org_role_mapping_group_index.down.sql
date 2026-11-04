@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS feishu_org_role_mapping_group_uidx;

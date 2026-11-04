@@ -6,6 +6,7 @@ import { issueKeys } from "@/data/queries/issue-keys";
 import {
   addCommentReaction,
   addIssueReaction,
+  appendTimelineEntry,
   commentToTimelineEntry,
   onIssueAuxiliaryRevision,
   invalidateIssueAfterReconnect,
@@ -17,21 +18,31 @@ import {
 } from "./issue-ws-updaters";
 
 describe("invalidateIssueAfterReconnect", () => {
-  it("invalidates attachments together with the issue and task caches", () => {
+  it("cancels stale requests before refreshing every issue projection", async () => {
     const qc = new QueryClient();
+    const cancel = vi.spyOn(qc, "cancelQueries");
     const invalidate = vi.spyOn(qc, "invalidateQueries");
     const wsId = "workspace-1";
     const issueId = "issue-1";
 
-    invalidateIssueAfterReconnect(qc, wsId, issueId);
+    await invalidateIssueAfterReconnect(qc, wsId, issueId);
 
-    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+    const expectedKeys = [
       issueKeys.detail(wsId, issueId),
       issueKeys.timeline(wsId, issueId),
       issueKeys.attachments(wsId, issueId),
       issueKeys.activeTasks(wsId, issueId),
       issueKeys.tasks(wsId, issueId),
-    ]);
+    ];
+    expect(cancel.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(
+      expectedKeys,
+    );
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(
+      expectedKeys,
+    );
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+      invalidate.mock.invocationCallOrder[0]!,
+    );
   });
 });
 
@@ -342,5 +353,76 @@ describe("commentToTimelineEntry", () => {
     });
 
     expect(entry.deleted_at).toBe("2026-09-11T08:00:00Z");
+  });
+});
+
+describe("appendTimelineEntry", () => {
+  const wsId = "workspace-1";
+  const issueId = "issue-1";
+
+  function timelineComment(id: string, createdAt: string): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      content: "same content",
+      parent_id: null,
+      created_at: createdAt,
+    };
+  }
+
+  it("still appends ordinary entries in chronological order", () => {
+    const qc = new QueryClient();
+    const key = issueKeys.timeline(wsId, issueId);
+    qc.setQueryData<TimelineEntry[]>(key, [
+      timelineComment("comment-2", "2026-01-02T00:00:00Z"),
+    ]);
+
+    appendTimelineEntry(
+      qc,
+      wsId,
+      issueId,
+      timelineComment("comment-1", "2026-01-01T00:00:00Z"),
+    );
+
+    expect(qc.getQueryData<TimelineEntry[]>(key)?.map((e) => e.id)).toEqual([
+      "comment-1",
+      "comment-2",
+    ]);
+  });
+
+  it("reconciles identical optimistic comments one-to-one, oldest first", () => {
+    const qc = new QueryClient();
+    const key = issueKeys.timeline(wsId, issueId);
+    qc.setQueryData<TimelineEntry[]>(key, [
+      timelineComment("optimistic-newer", "2026-01-02T00:00:00Z"),
+      timelineComment("optimistic-older", "2026-01-01T00:00:00Z"),
+    ]);
+    const first = timelineComment("comment-1", "2026-01-03T00:00:00Z");
+
+    appendTimelineEntry(qc, wsId, issueId, first);
+
+    let timeline = qc.getQueryData<TimelineEntry[]>(key);
+    expect(timeline).toHaveLength(2);
+    expect(timeline?.some((e) => e.id === "comment-1")).toBe(true);
+    expect(timeline?.some((e) => e.id === "optimistic-older")).toBe(false);
+    expect(timeline?.some((e) => e.id === "optimistic-newer")).toBe(true);
+
+    appendTimelineEntry(qc, wsId, issueId, first);
+    timeline = qc.getQueryData<TimelineEntry[]>(key);
+    expect(timeline).toHaveLength(2);
+    expect(timeline?.some((e) => e.id === "optimistic-newer")).toBe(true);
+
+    appendTimelineEntry(
+      qc,
+      wsId,
+      issueId,
+      timelineComment("comment-2", "2026-01-04T00:00:00Z"),
+    );
+    expect(qc.getQueryData<TimelineEntry[]>(key)?.map((e) => e.id)).toEqual([
+      "comment-1",
+      "comment-2",
+    ]);
   });
 });

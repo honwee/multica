@@ -472,4 +472,16 @@ describe("electron-builder.yml packaging config", () => {
     expect(entries.length).toBeGreaterThan(0);
     expect(entries).toContain("!dist/**");
   });
+
+  it("checks for updates on the Lumist OSS feed instead of upstream GitHub releases", () => {
+    // Upstream's signed releases cannot install over this fork's Developer ID
+    // build, so the update feed must stay on the fork's own storage.
+    const raw = readFileSync(configPath, "utf-8");
+    const publish = raw.slice(raw.search(/^publish:\s*$/m)).split(/\n(?=\S)/)[0];
+    expect(publish).toMatch(/^\s+provider:\s*generic\s*$/m);
+    expect(publish).toMatch(
+      /^\s+url:\s*https:\/\/lumist-fde-report\.oss-cn-shanghai\.aliyuncs\.com\/downloads\/desktop\s*$/m,
+    );
+    expect(publish).not.toMatch(/multica-ai/);
+  });
 });

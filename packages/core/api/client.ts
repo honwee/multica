@@ -192,9 +192,15 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
+  LarkInstallation,
+  ConnectLarkWorkspaceRequest,
+  LarkInstallationBotInfo,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  LarkOrganizationResponse,
+  LarkOrganizationSyncRun,
+  UpdateLarkOrganizationRequest,
   ComposioToolkit,
   ComposioConnection,
   ComposioConnectInitResponse,
@@ -394,8 +400,6 @@ import {
   MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
-  ListLarkInstallationsResponseSchema,
-  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
@@ -403,6 +407,14 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  LarkOrganizationResponseSchema,
+  LarkOrganizationWriteResponseSchema,
+  LarkOrganizationSyncRunSchema,
+  LarkInstallationSchema,
+  ListLarkInstallationsResponseSchema,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
+  LarkInstallationBotInfoSchema,
+  EMPTY_LARK_ORGANIZATION_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -1023,6 +1035,13 @@ export class ApiClient {
 
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
+  async feishuLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/feishu", {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
@@ -5213,13 +5232,31 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    const endpoint = `/api/workspaces/${workspaceId}/lark/installations`;
-    return parseWithFallback(
-      await this.fetch(endpoint),
-      ListLarkInstallationsResponseSchema,
-      EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
-      { endpoint },
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/installations`);
+    return parseWithFallback(raw, ListLarkInstallationsResponseSchema, EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/lark/installations",
+    });
+  }
+
+  async connectLarkWorkspace(workspaceId: string, body: ConnectLarkWorkspaceRequest): Promise<LarkInstallation> {
+    const endpoint = "POST /api/workspaces/:id/lark/connections";
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/connections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const installation = parseWithFallback<LarkInstallation | null>(raw, LarkInstallationSchema, null, { endpoint });
+    if (!installation) throw new Error(`Malformed response from ${endpoint}`);
+    return installation;
+  }
+
+  async getLarkInstallationBotInfo(workspaceId: string, installationId: string): Promise<LarkInstallationBotInfo> {
+    const endpoint = "GET /api/workspaces/:id/lark/installations/:installationId/bot-info";
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/lark/installations/${encodeURIComponent(installationId)}/bot-info`,
     );
+    const info = parseWithFallback<LarkInstallationBotInfo | null>(raw, LarkInstallationBotInfoSchema, null, { endpoint });
+    if (!info) throw new Error(`Malformed response from ${endpoint}`);
+    return info;
   }
 
   async beginLarkInstall(
@@ -5256,6 +5293,88 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ token }),
     });
+  }
+
+  async getLarkOrganization(workspaceId: string): Promise<LarkOrganizationResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/organization`);
+    return parseWithFallback(
+      raw,
+      LarkOrganizationResponseSchema,
+      EMPTY_LARK_ORGANIZATION_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/lark/organization" },
+    );
+  }
+
+  async updateLarkOrganization(
+    workspaceId: string,
+    body: UpdateLarkOrganizationRequest,
+  ): Promise<LarkOrganizationResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/organization`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    const endpoint = "PUT /api/workspaces/:id/lark/organization";
+    const response = parseWithFallback<LarkOrganizationResponse | null>(
+      raw,
+      LarkOrganizationWriteResponseSchema,
+      null,
+      { endpoint },
+    );
+    if (!response?.config) throw new Error(`Malformed response from ${endpoint}`);
+    return response;
+  }
+
+  async previewLarkOrganization(workspaceId: string): Promise<LarkOrganizationSyncRun> {
+    const endpoint = "POST /api/workspaces/:id/lark/organization/preview";
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/organization/preview`, {
+      method: "POST",
+    });
+    const run = parseWithFallback<LarkOrganizationSyncRun | null>(
+      raw,
+      LarkOrganizationSyncRunSchema,
+      null,
+      { endpoint },
+    );
+    if (!run) throw new Error(`Malformed response from ${endpoint}`);
+    return run;
+  }
+
+  async applyLarkOrganizationSync(
+    workspaceId: string,
+    runId: string,
+  ): Promise<LarkOrganizationSyncRun> {
+    const endpoint = "POST /api/workspaces/:id/lark/organization/sync/:runId/apply";
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/lark/organization/sync/${encodeURIComponent(runId)}/apply`,
+      { method: "POST" },
+    );
+    const run = parseWithFallback<LarkOrganizationSyncRun | null>(
+      raw,
+      LarkOrganizationSyncRunSchema,
+      null,
+      { endpoint },
+    );
+    if (!run) throw new Error(`Malformed response from ${endpoint}`);
+    return run;
+  }
+
+  async replayLarkOrganizationSync(
+    workspaceId: string,
+    runId: string,
+  ): Promise<LarkOrganizationSyncRun> {
+    const endpoint = "POST /api/workspaces/:id/lark/organization/sync/:runId/replay";
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/lark/organization/sync/${encodeURIComponent(runId)}/replay`,
+      { method: "POST" },
+    );
+    const run = parseWithFallback<LarkOrganizationSyncRun | null>(
+      raw,
+      LarkOrganizationSyncRunSchema,
+      null,
+      { endpoint },
+    );
+    if (!run) throw new Error(`Malformed response from ${endpoint}`);
+    return run;
   }
 
   // Composio integration (MUL-3720). All routes are user-scoped (a connection

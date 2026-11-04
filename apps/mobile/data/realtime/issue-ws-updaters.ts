@@ -199,16 +199,22 @@ export function clearIssueDetail(
   qc.removeQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
 }
 
-export function invalidateIssueAfterReconnect(
+export async function invalidateIssueAfterReconnect(
   qc: QueryClient,
   wsId: string,
   issueId: string,
 ) {
-  qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.attachments(wsId, issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+  const keys = [
+    issueKeys.detail(wsId, issueId),
+    issueKeys.timeline(wsId, issueId),
+    issueKeys.attachments(wsId, issueId),
+    issueKeys.activeTasks(wsId, issueId),
+    issueKeys.tasks(wsId, issueId),
+  ];
+  await Promise.all(keys.map((queryKey) => qc.cancelQueries({ queryKey })));
+  await Promise.all(
+    keys.map((queryKey) => qc.invalidateQueries({ queryKey })),
+  );
 }
 
 // Issue timeline (flat TimelineEntry[], ASC oldest-first)
@@ -228,7 +234,34 @@ export function appendTimelineEntry(
       if (old.some((e) => e.id === entry.id && e.type === entry.type)) {
         return old;
       }
-      const next = [...old, entry];
+
+      let optimisticIndex = -1;
+      let oldestCreatedAt = "";
+      if (entry.type === "comment" && !entry.id.startsWith("optimistic-")) {
+        for (const [index, candidate] of old.entries()) {
+          if (
+            candidate.type !== "comment" ||
+            !candidate.id.startsWith("optimistic-") ||
+            candidate.actor_type !== "member" ||
+            entry.actor_type !== "member" ||
+            candidate.actor_id !== entry.actor_id ||
+            candidate.content !== entry.content ||
+            (candidate.parent_id ?? null) !== (entry.parent_id ?? null)
+          ) {
+            continue;
+          }
+          if (optimisticIndex === -1 || candidate.created_at < oldestCreatedAt) {
+            optimisticIndex = index;
+            oldestCreatedAt = candidate.created_at;
+          }
+        }
+      }
+
+      const next = [...old];
+      // Each real comment consumes at most one optimistic submission. Repeated
+      // WS echoes return above instead of consuming another identical pending row.
+      if (optimisticIndex === -1) next.push(entry);
+      else next[optimisticIndex] = entry;
       next.sort((a, b) => {
         if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
         return a.id < b.id ? -1 : 1;
