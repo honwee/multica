@@ -244,3 +244,81 @@ deleted_groups AS (
     DELETE FROM feishu_org_group WHERE workspace_id = $1
 )
 DELETE FROM feishu_org_config WHERE feishu_org_config.workspace_id = $1;
+
+-- name: GetFeishuOrgBootstrapSource :one
+SELECT c.*
+FROM feishu_org_config c
+JOIN member m
+  ON m.workspace_id = c.workspace_id
+ AND m.user_id = @user_id
+ AND m.disabled_at IS NULL
+ AND m.role IN ('owner', 'admin')
+JOIN channel_installation ci
+  ON ci.id = c.installation_id
+ AND ci.workspace_id = c.workspace_id
+ AND ci.channel_type = 'feishu'
+ AND ci.status = 'active'
+WHERE c.enabled
+ORDER BY c.updated_at DESC, c.workspace_id DESC
+LIMIT 1;
+
+-- name: CloneFeishuOrgGroups :exec
+INSERT INTO feishu_org_group (workspace_id, kind, external_id, external_name, configured, active)
+SELECT @target_workspace_id, kind, external_id, external_name, configured, active
+FROM feishu_org_group source_rows
+WHERE source_rows.workspace_id = @source_workspace_id;
+
+-- name: CloneFeishuOrgRoleMappings :exec
+INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
+SELECT @target_workspace_id, target_group.id, mapping.role
+FROM feishu_org_role_mapping mapping
+JOIN feishu_org_group source_group
+  ON source_group.id = mapping.group_id
+ AND source_group.workspace_id = @source_workspace_id
+JOIN feishu_org_group target_group
+  ON target_group.workspace_id = @target_workspace_id
+ AND target_group.kind = source_group.kind
+ AND target_group.external_id = source_group.external_id;
+
+-- name: CloneFeishuOrgMemberships :exec
+INSERT INTO feishu_org_membership (workspace_id, group_id, user_id, active)
+SELECT @target_workspace_id, target_group.id, membership.user_id, membership.active
+FROM feishu_org_membership membership
+JOIN feishu_org_group source_group
+  ON source_group.id = membership.group_id
+ AND source_group.workspace_id = @source_workspace_id
+JOIN feishu_org_group target_group
+  ON target_group.workspace_id = @target_workspace_id
+ AND target_group.kind = source_group.kind
+ AND target_group.external_id = source_group.external_id;
+
+-- name: CloneLatestFeishuOrgSnapshot :exec
+INSERT INTO feishu_org_sync_run (workspace_id, mode, status, revision, snapshot, plan, requested_by)
+SELECT @target_workspace_id, 'preview', 'preview', @revision, snapshot, @plan, @requested_by
+FROM feishu_org_sync_run source_run
+WHERE source_run.workspace_id = @source_workspace_id
+  AND mode = 'preview'
+  AND status = 'preview'
+  AND snapshot->>'Complete' = 'true'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: GetFeishuOrgInstallationForWorkspace :one
+SELECT ci.*
+FROM channel_installation ci
+WHERE ci.id = @installation_id
+  AND ci.channel_type = 'feishu'
+  AND (
+    ci.workspace_id = @workspace_id
+    OR EXISTS (
+      SELECT 1
+      FROM feishu_org_config shared
+      JOIN feishu_org_config source
+        ON source.installation_id = shared.installation_id
+       AND source.workspace_id = ci.workspace_id
+       AND source.enabled
+      WHERE shared.workspace_id = @workspace_id
+        AND shared.installation_id = ci.id
+        AND shared.enabled
+    )
+  );

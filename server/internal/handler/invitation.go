@@ -26,6 +26,7 @@ type InvitationResponse struct {
 	WorkspaceID   string  `json:"workspace_id"`
 	InviterID     string  `json:"inviter_id"`
 	InviteeEmail  string  `json:"invitee_email"`
+	InviteeName   string  `json:"invitee_name,omitempty"`
 	InviteeUserID *string `json:"invitee_user_id"`
 	Role          string  `json:"role"`
 	Status        string  `json:"status"`
@@ -70,8 +71,16 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" && strings.TrimSpace(req.FeishuUnionID) != "" {
+		resolved, err := h.resolveFeishuInvitationEmail(r.Context(), requester.WorkspaceID, req.FeishuUnionID)
+		if err != nil {
+			writeFeishuInvitationResolveError(w, err)
+			return
+		}
+		email = resolved
+	}
 	if email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
+		writeError(w, http.StatusBadRequest, "email or feishu_union_id is required")
 		return
 	}
 
@@ -211,6 +220,9 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation created", append(logger.RequestAttrs(r), "invitation_id", uuidToString(inv.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 
 	resp := invitationToResponse(inv)
+	enriched := []InvitationResponse{resp}
+	h.addFeishuInvitationNames(r.Context(), requester.WorkspaceID, enriched)
+	resp = enriched[0]
 
 	// Notify the invitee in real time if they are a registered user.
 	userID := requestUserID(r)
@@ -279,6 +291,7 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 			InviterEmail:  row.InviterEmail,
 		}
 	}
+	h.addFeishuInvitationNames(r.Context(), workspaceUUID, resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }

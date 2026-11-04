@@ -157,6 +157,23 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 	return row, nil
 }
 
+// GetOrganizationInstallation resolves an installation owned by this workspace
+// or explicitly shared through an enabled organization configuration. The
+// source configuration must remain present and enabled for shared access.
+func (s *InstallationService) GetOrganizationInstallation(ctx context.Context, id, workspaceID pgtype.UUID) (Installation, error) {
+	row, err := s.queries.GetFeishuOrgInstallationForWorkspace(ctx, db.GetFeishuOrgInstallationForWorkspaceParams{
+		InstallationID: id,
+		WorkspaceID:    workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Installation{}, ErrInstallationNotFound
+		}
+		return Installation{}, err
+	}
+	return installationFromRow(row)
+}
+
 // ListByWorkspace returns every installation rooted at the workspace,
 // active and revoked, oldest first. The status column lets the UI
 // distinguish "wired up" from "torn down but kept for audit".

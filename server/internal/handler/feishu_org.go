@@ -251,7 +251,7 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	installation, err := h.LarkInstallations.GetInWorkspace(r.Context(), installationID, actor.workspaceID)
+	installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), installationID, actor.workspaceID)
 	if errors.Is(err, lark.ErrInstallationNotFound) {
 		writeError(w, http.StatusNotFound, "lark installation not found")
 		return
@@ -795,7 +795,7 @@ func (h *Handler) feishuOrgActiveInstallation(w http.ResponseWriter, r *http.Req
 		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
 		return lark.Installation{}, false
 	}
-	installation, err := h.LarkInstallations.GetInWorkspace(r.Context(), installationID, workspaceID)
+	installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), installationID, workspaceID)
 	if errors.Is(err, lark.ErrInstallationNotFound) {
 		writeError(w, http.StatusNotFound, "lark installation not found")
 		return lark.Installation{}, false

@@ -23,6 +23,100 @@ func (q *Queries) ApplyFeishuOrgGroupStates(ctx context.Context, workspaceID pgt
 	return err
 }
 
+const cloneFeishuOrgGroups = `-- name: CloneFeishuOrgGroups :exec
+INSERT INTO feishu_org_group (workspace_id, kind, external_id, external_name, configured, active)
+SELECT $1, kind, external_id, external_name, configured, active
+FROM feishu_org_group source_rows
+WHERE source_rows.workspace_id = $2
+`
+
+type CloneFeishuOrgGroupsParams struct {
+	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
+	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
+}
+
+func (q *Queries) CloneFeishuOrgGroups(ctx context.Context, arg CloneFeishuOrgGroupsParams) error {
+	_, err := q.db.Exec(ctx, cloneFeishuOrgGroups, arg.TargetWorkspaceID, arg.SourceWorkspaceID)
+	return err
+}
+
+const cloneFeishuOrgMemberships = `-- name: CloneFeishuOrgMemberships :exec
+INSERT INTO feishu_org_membership (workspace_id, group_id, user_id, active)
+SELECT $1, target_group.id, membership.user_id, membership.active
+FROM feishu_org_membership membership
+JOIN feishu_org_group source_group
+  ON source_group.id = membership.group_id
+ AND source_group.workspace_id = $2
+JOIN feishu_org_group target_group
+  ON target_group.workspace_id = $1
+ AND target_group.kind = source_group.kind
+ AND target_group.external_id = source_group.external_id
+`
+
+type CloneFeishuOrgMembershipsParams struct {
+	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
+	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
+}
+
+func (q *Queries) CloneFeishuOrgMemberships(ctx context.Context, arg CloneFeishuOrgMembershipsParams) error {
+	_, err := q.db.Exec(ctx, cloneFeishuOrgMemberships, arg.TargetWorkspaceID, arg.SourceWorkspaceID)
+	return err
+}
+
+const cloneFeishuOrgRoleMappings = `-- name: CloneFeishuOrgRoleMappings :exec
+INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
+SELECT $1, target_group.id, mapping.role
+FROM feishu_org_role_mapping mapping
+JOIN feishu_org_group source_group
+  ON source_group.id = mapping.group_id
+ AND source_group.workspace_id = $2
+JOIN feishu_org_group target_group
+  ON target_group.workspace_id = $1
+ AND target_group.kind = source_group.kind
+ AND target_group.external_id = source_group.external_id
+`
+
+type CloneFeishuOrgRoleMappingsParams struct {
+	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
+	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
+}
+
+func (q *Queries) CloneFeishuOrgRoleMappings(ctx context.Context, arg CloneFeishuOrgRoleMappingsParams) error {
+	_, err := q.db.Exec(ctx, cloneFeishuOrgRoleMappings, arg.TargetWorkspaceID, arg.SourceWorkspaceID)
+	return err
+}
+
+const cloneLatestFeishuOrgSnapshot = `-- name: CloneLatestFeishuOrgSnapshot :exec
+INSERT INTO feishu_org_sync_run (workspace_id, mode, status, revision, snapshot, plan, requested_by)
+SELECT $1, 'preview', 'preview', $2, snapshot, $3, $4
+FROM feishu_org_sync_run source_run
+WHERE source_run.workspace_id = $5
+  AND mode = 'preview'
+  AND status = 'preview'
+  AND snapshot->>'Complete' = 'true'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type CloneLatestFeishuOrgSnapshotParams struct {
+	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
+	Revision          int64       `json:"revision"`
+	Plan              []byte      `json:"plan"`
+	RequestedBy       pgtype.UUID `json:"requested_by"`
+	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
+}
+
+func (q *Queries) CloneLatestFeishuOrgSnapshot(ctx context.Context, arg CloneLatestFeishuOrgSnapshotParams) error {
+	_, err := q.db.Exec(ctx, cloneLatestFeishuOrgSnapshot,
+		arg.TargetWorkspaceID,
+		arg.Revision,
+		arg.Plan,
+		arg.RequestedBy,
+		arg.SourceWorkspaceID,
+	)
+	return err
+}
+
 const createFeishuOrgAgentMapping = `-- name: CreateFeishuOrgAgentMapping :one
 INSERT INTO feishu_org_agent_mapping (workspace_id, group_id, agent_id)
 VALUES ($1, $2, $3)
@@ -229,6 +323,38 @@ func (q *Queries) DisableFeishuOrgMember(ctx context.Context, arg DisableFeishuO
 	return i, err
 }
 
+const getFeishuOrgBootstrapSource = `-- name: GetFeishuOrgBootstrapSource :one
+SELECT c.workspace_id, c.installation_id, c.enabled, c.revision, c.created_at, c.updated_at
+FROM feishu_org_config c
+JOIN member m
+  ON m.workspace_id = c.workspace_id
+ AND m.user_id = $1
+ AND m.disabled_at IS NULL
+ AND m.role IN ('owner', 'admin')
+JOIN channel_installation ci
+  ON ci.id = c.installation_id
+ AND ci.workspace_id = c.workspace_id
+ AND ci.channel_type = 'feishu'
+ AND ci.status = 'active'
+WHERE c.enabled
+ORDER BY c.updated_at DESC, c.workspace_id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetFeishuOrgBootstrapSource(ctx context.Context, userID pgtype.UUID) (FeishuOrgConfig, error) {
+	row := q.db.QueryRow(ctx, getFeishuOrgBootstrapSource, userID)
+	var i FeishuOrgConfig
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.InstallationID,
+		&i.Enabled,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getFeishuOrgConfig = `-- name: GetFeishuOrgConfig :one
 SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at FROM feishu_org_config
 WHERE workspace_id = $1
@@ -242,6 +368,52 @@ func (q *Queries) GetFeishuOrgConfig(ctx context.Context, workspaceID pgtype.UUI
 		&i.InstallationID,
 		&i.Enabled,
 		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getFeishuOrgInstallationForWorkspace = `-- name: GetFeishuOrgInstallationForWorkspace :one
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at
+FROM channel_installation ci
+WHERE ci.id = $1
+  AND ci.channel_type = 'feishu'
+  AND (
+    ci.workspace_id = $2
+    OR EXISTS (
+      SELECT 1
+      FROM feishu_org_config shared
+      JOIN feishu_org_config source
+        ON source.installation_id = shared.installation_id
+       AND source.workspace_id = ci.workspace_id
+       AND source.enabled
+      WHERE shared.workspace_id = $2
+        AND shared.installation_id = ci.id
+        AND shared.enabled
+    )
+  )
+`
+
+type GetFeishuOrgInstallationForWorkspaceParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetFeishuOrgInstallationForWorkspace(ctx context.Context, arg GetFeishuOrgInstallationForWorkspaceParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, getFeishuOrgInstallationForWorkspace, arg.InstallationID, arg.WorkspaceID)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
