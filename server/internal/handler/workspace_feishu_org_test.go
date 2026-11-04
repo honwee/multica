@@ -21,6 +21,9 @@ func cleanupInheritedFeishuOrg(t *testing.T, workspaceID string) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_group WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_config WHERE workspace_id = $1`, workspaceID)
+		// The workspace itself came from CreateWorkspace, not a fixture, so
+		// nothing else removes it; members cascade with it.
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 	})
 }
 
