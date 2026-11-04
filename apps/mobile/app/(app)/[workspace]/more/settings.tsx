@@ -136,6 +136,14 @@ export default function SettingsPage() {
         />
       </SectionGroup>
 
+      <SectionGroup title={t("account.workspace")}>
+        <NavRow
+          onPress={() => router.push(`/${currentSlug}/more/settings/members`)}
+          chevronColor={mutedFg}
+          title={t("members.title")}
+        />
+      </SectionGroup>
+
       <SectionGroup title={t("account.workspaces")}>
         {isLoading ? (
           <View className="py-4 items-center">

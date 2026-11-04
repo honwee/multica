@@ -361,6 +361,14 @@ export default function WorkspaceLayout() {
               headerBackTitle: t("navigation:routes.settings"),
             }}
         />
+        <Stack.Screen
+          name="more/settings/members"
+          options={{
+            title: t("workspace:members"),
+            headerBackTitle: t("navigation:routes.settings"),
+          }}
+        />
+        <Stack.Screen name="more/settings/invite" options={SHEET_OPTIONS} />
         <Stack.Screen name="more/settings/server" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="new-issue"

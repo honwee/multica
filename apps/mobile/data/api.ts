@@ -23,13 +23,16 @@ import type {
   Comment,
   CreateAgentRequest,
   CreateIssueRequest,
+  CreateMemberRequest,
   CreateLabelRequest,
   CreateProjectRequest,
   CreateProjectResourceRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  Invitation,
   Issue,
   IssueLabelsResponse,
+  LarkOrganizationResponse,
   Label,
   IssueReaction,
   ListIssuesParams,
@@ -58,6 +61,7 @@ import type {
   UpdateAgentRequest,
   UpdateIssueRequest,
   UpdateMeRequest,
+  UpdateMemberRequest,
   UpdateProjectRequest,
   User,
   Workspace,
@@ -79,6 +83,8 @@ import {
   ListIssueStatusesResponseSchema,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
+  EMPTY_LARK_ORGANIZATION_RESPONSE,
+  LarkOrganizationResponseSchema,
 } from "@multica/core/api/schemas";
 import type {
   AppConfigResponse,
@@ -109,10 +115,13 @@ import {
   EMPTY_INBOX_LIST,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_ISSUE_FALLBACK,
+  EMPTY_INVITATION,
+  EMPTY_INVITATION_LIST,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
   EMPTY_LOGIN_RESPONSE,
+  EMPTY_MEMBER,
   EMPTY_MEMBER_LIST,
   EMPTY_NOTIFICATION_PREFERENCES,
   EMPTY_PIN_LIST,
@@ -125,12 +134,15 @@ import {
   EMPTY_WORKSPACE_LIST,
   InboxListSchema,
   InboxUnreadSummarySchema,
+  InvitationListSchema,
+  InvitationSchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
   ListProjectsResponseSchema,
   LoginResponseSchema,
   MemberListSchema,
+  MemberWithUserSchema,
   PinListSchema,
   PinnedItemSchema,
   ProjectSchema,
@@ -244,7 +256,7 @@ class ApiClient {
       "Content-Type": "application/json",
       "X-Client-Platform": "mobile",
       "X-Client-OS": "ios",
-      "X-Client-Version": "0.1.0",
+      "X-Client-Version": "0.2.0",
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
     };
@@ -603,6 +615,74 @@ class ApiClient {
     return parseWithFallback(raw, MemberListSchema, EMPTY_MEMBER_LIST, {
       endpoint: "listMembers",
     });
+  }
+
+  async createMember(
+    workspaceId: string,
+    body: CreateMemberRequest,
+  ): Promise<Invitation> {
+    return this.fetchValidatedWith(
+      `/api/workspaces/${workspaceId}/members`,
+      InvitationSchema,
+      EMPTY_INVITATION,
+      { method: "POST", body: JSON.stringify(body) },
+      { endpoint: "createMember" },
+    );
+  }
+
+  async updateMember(
+    workspaceId: string,
+    memberId: string,
+    body: UpdateMemberRequest,
+  ): Promise<MemberWithUser> {
+    return this.fetchValidatedWith(
+      `/api/workspaces/${workspaceId}/members/${memberId}`,
+      MemberWithUserSchema,
+      EMPTY_MEMBER,
+      { method: "PATCH", body: JSON.stringify(body) },
+      { endpoint: "updateMember" },
+    );
+  }
+
+  async deleteMember(workspaceId: string, memberId: string): Promise<void> {
+    await this.fetch<void>(
+      `/api/workspaces/${workspaceId}/members/${memberId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listInvitations(
+    workspaceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Invitation[]> {
+    return this.fetchValidated(
+      `/api/workspaces/${workspaceId}/invitations`,
+      InvitationListSchema,
+      EMPTY_INVITATION_LIST,
+      { ...opts, endpoint: "listInvitations" },
+    );
+  }
+
+  async revokeInvitation(
+    workspaceId: string,
+    invitationId: string,
+  ): Promise<void> {
+    await this.fetch<void>(
+      `/api/workspaces/${workspaceId}/invitations/${invitationId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async getLarkOrganization(
+    workspaceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<LarkOrganizationResponse> {
+    return this.fetchValidated(
+      `/api/workspaces/${workspaceId}/lark/organization`,
+      LarkOrganizationResponseSchema,
+      EMPTY_LARK_ORGANIZATION_RESPONSE,
+      { ...opts, endpoint: "getLarkOrganization" },
+    );
   }
 
   async listAgents(opts?: {
@@ -1471,7 +1551,7 @@ class ApiClient {
       // No Content-Type — let fetch set the multipart boundary.
       "X-Client-Platform": "mobile",
       "X-Client-OS": "ios",
-      "X-Client-Version": "0.1.0",
+      "X-Client-Version": "0.2.0",
       "X-Request-ID": rid,
     };
     if (this.token && this.tokenApiUrl === getApiUrl()) headers["Authorization"] = `Bearer ${this.token}`;
