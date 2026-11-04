@@ -25,9 +25,12 @@ var RequiredOrgScopes = []string{
 }
 
 // OrgDepartment is a department identified by its open_department_id.
+// ParentID is the department it was listed under; direct children of the
+// virtual root carry the root id "0".
 type OrgDepartment struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	ParentID string
 }
 
 // OrgUser is a user and every directly fetched department they belong to.
@@ -102,6 +105,7 @@ func (c *httpAPIClient) FetchOrganization(ctx context.Context, creds Installatio
 				continue
 			}
 			seenDepartments[department.ID] = struct{}{}
+			department.ParentID = departmentID
 			snapshot.Departments = append(snapshot.Departments, department)
 			pending = append(pending, department.ID)
 		}
@@ -301,4 +305,37 @@ func (u OrgUser) LoginEmail() string {
 		return email
 	}
 	return strings.ToLower(strings.TrimSpace(u.Email))
+}
+
+// DepartmentClosure maps every department to itself plus all of its
+// descendants, so a rule on a parent department also covers its sub-teams.
+func (s OrgSnapshot) DepartmentClosure() map[string]map[string]struct{} {
+	children := make(map[string][]string, len(s.Departments))
+	for _, department := range s.Departments {
+		if department.ID == "" || department.ParentID == "" || department.ParentID == department.ID {
+			continue
+		}
+		children[department.ParentID] = append(children[department.ParentID], department.ID)
+	}
+	closure := make(map[string]map[string]struct{}, len(s.Departments))
+	for _, department := range s.Departments {
+		if department.ID == "" {
+			continue
+		}
+		set := map[string]struct{}{department.ID: {}}
+		pending := []string{department.ID}
+		for len(pending) > 0 {
+			current := pending[0]
+			pending = pending[1:]
+			for _, child := range children[current] {
+				if _, seen := set[child]; seen {
+					continue
+				}
+				set[child] = struct{}{}
+				pending = append(pending, child)
+			}
+		}
+		closure[department.ID] = set
+	}
+	return closure
 }

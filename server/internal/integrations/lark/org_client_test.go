@@ -59,9 +59,9 @@ func TestOrgClientFetchOrganization(t *testing.T) {
 	}
 	want := OrgSnapshot{
 		Departments: []OrgDepartment{
-			{ID: "od_eng", Name: "Engineering"},
-			{ID: "od_design", Name: "Design"},
-			{ID: "od_platform", Name: "Platform"},
+			{ID: "od_eng", Name: "Engineering", ParentID: "0"},
+			{ID: "od_design", Name: "Design", ParentID: "0"},
+			{ID: "od_platform", Name: "Platform", ParentID: "od_eng"},
 		},
 		Users: []OrgUser{
 			{OpenID: "ou_alice", UnionID: "on_alice", Email: "alice@example.com", EnterpriseEmail: "alice@corp.example.com", Name: "Alice", JobTitle: "CEO", DepartmentIDs: []string{"0", "od_eng", "od_platform"}, Active: true},
@@ -292,5 +292,31 @@ func orgTestUser(openID, unionID, email, name, jobTitle string, resigned bool) m
 		"name":             name,
 		"job_title":        jobTitle,
 		"status":           map[string]any{"is_resigned": resigned},
+	}
+}
+
+func TestOrgSnapshotDepartmentClosure(t *testing.T) {
+	snapshot := OrgSnapshot{Departments: []OrgDepartment{
+		{ID: "od_eng", Name: "Engineering", ParentID: "0"},
+		{ID: "od_platform", Name: "Platform", ParentID: "od_eng"},
+		{ID: "od_infra", Name: "Infra", ParentID: "od_platform"},
+		{ID: "od_design", Name: "Design", ParentID: "0"},
+	}}
+	closure := snapshot.DepartmentClosure()
+	want := map[string][]string{
+		"od_eng":      {"od_eng", "od_platform", "od_infra"},
+		"od_platform": {"od_platform", "od_infra"},
+		"od_infra":    {"od_infra"},
+		"od_design":   {"od_design"},
+	}
+	for id, members := range want {
+		if len(closure[id]) != len(members) {
+			t.Fatalf("closure[%s] = %v, want %v", id, closure[id], members)
+		}
+		for _, member := range members {
+			if _, ok := closure[id][member]; !ok {
+				t.Fatalf("closure[%s] is missing %s", id, member)
+			}
+		}
 	}
 }

@@ -1107,7 +1107,8 @@
       "history_mode_apply": "套用",
       "user": "指定成員",
       "workspace_member_yes": "已加入工作區",
-      "workspace_member_no": "未加入工作區，需先邀請"
+      "workspace_member_no": "未加入工作區，需先邀請",
+      "department_includes_children": "規則涵蓋該部門及其所有子部門。"
     },
     "bound_label": "已綁定",
     "inbound_pending": "已綁定，等待訊息驗證",

@@ -1113,7 +1113,8 @@
       "history_mode_apply": "Apply",
       "user": "Individual",
       "workspace_member_yes": "In workspace",
-      "workspace_member_no": "Not in workspace — invite required"
+      "workspace_member_no": "Not in workspace — invite required",
+      "department_includes_children": "Covers the department and every sub-department beneath it."
     },
     "bound_label": "Bound",
     "inbound_pending": "Bound — awaiting message verification",

@@ -1377,7 +1377,8 @@
       "history_mode_apply": "적용",
       "user": "개인",
       "workspace_member_yes": "워크스페이스 구성원",
-      "workspace_member_no": "워크스페이스 미참여(초대 필요)"
+      "workspace_member_no": "워크스페이스 미참여(초대 필요)",
+      "department_includes_children": "해당 부서와 그 아래 모든 하위 부서에 적용됩니다."
     },
     "bound_label": "연결 등록됨",
     "inbound_pending": "등록됨 · 메시지 확인 대기",

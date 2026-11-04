@@ -150,8 +150,16 @@ export interface LarkOrganizationSyncRun {
 export interface LarkOrganizationDepartment {
   id: string;
   name: string;
+  /** Parent open_department_id; "0" for top-level departments. Optional
+   * so older servers that predate nesting still parse. */
+  parent_id?: string;
+  /** "Parent / Child" display path from the root. */
+  path?: string;
   direct_member_count: number;
   active_direct_member_count: number;
+  /** Members including every sub-department: what a department rule covers. */
+  member_count?: number;
+  active_member_count?: number;
 }
 
 export interface LarkOrganizationJobTitle {

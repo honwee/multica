@@ -3520,8 +3520,12 @@ export const LarkOrganizationSyncRunSchema = z.object({
 export const LarkOrganizationDepartmentSchema = z.object({
   id: z.string(),
   name: z.string().default(""),
+  parent_id: z.string().optional(),
+  path: z.string().optional(),
   direct_member_count: z.number().int().nonnegative().default(0),
   active_direct_member_count: z.number().int().nonnegative().default(0),
+  member_count: z.number().int().nonnegative().optional(),
+  active_member_count: z.number().int().nonnegative().optional(),
 }).loose();
 
 export const LarkOrganizationJobTitleSchema = z.object({

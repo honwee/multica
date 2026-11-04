@@ -1107,7 +1107,8 @@
       "history_mode_apply": "適用",
       "user": "個人",
       "workspace_member_yes": "ワークスペース参加中",
-      "workspace_member_no": "ワークスペース未参加（招待が必要）"
+      "workspace_member_no": "ワークスペース未参加（招待が必要）",
+      "department_includes_children": "この部署とその配下のすべてのサブ部署が対象になります。"
     },
     "bound_label": "連携済み",
     "inbound_pending": "連携済み・メッセージ確認待ち",

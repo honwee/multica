@@ -53,7 +53,7 @@ export function organizationSourceSummary(
     const duplicates = catalog?.departments.filter((item) => item.name === source?.name).length ?? 0;
     return {
       name: mapping.external_name || source?.name || mapping.external_id,
-      count: source?.direct_member_count ?? null,
+      count: source ? (source.member_count ?? source.direct_member_count) : null,
       duplicate: duplicates > 1,
       missing: !!catalog && !source,
     };

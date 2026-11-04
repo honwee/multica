@@ -1112,7 +1112,8 @@
       "history_mode_apply": "Application",
       "user": "Individu",
       "workspace_member_yes": "Dans l’espace",
-      "workspace_member_no": "Hors de l’espace — invitation requise"
+      "workspace_member_no": "Hors de l’espace — invitation requise",
+      "department_includes_children": "Couvre le service et tous ses sous-services."
     },
     "bound_label": "Associé",
     "inbound_pending": "Associé — en attente de vérification",

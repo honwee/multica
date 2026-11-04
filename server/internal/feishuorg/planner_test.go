@@ -539,3 +539,39 @@ func groupChange(userID, userName, action, groupID, groupName string) Change {
 	}
 	return change
 }
+
+func TestBuildPlanDepartmentRuleCoversSubDepartments(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete: true,
+		Departments: []lark.OrgDepartment{
+			{ID: "d_eng", Name: "Engineering", ParentID: "0"},
+			{ID: "d_platform", Name: "Platform", ParentID: "d_eng"},
+			{ID: "d_design", Name: "Design", ParentID: "0"},
+		},
+		Users: []lark.OrgUser{
+			{UnionID: "union-platform", Name: "Platform Person", DepartmentIDs: []string{"d_platform"}, Active: true},
+			{UnionID: "union-design", Name: "Design Person", DepartmentIDs: []string{"d_design"}, Active: true},
+		},
+	}
+	mapping := Mapping{GroupID: "g_eng", Kind: "department", ExternalID: "d_eng", ExternalName: "Engineering", MemberRole: "admin"}
+	members := []Member{
+		{UserID: "u1", Name: "Platform Person", Role: "member", UnionIDs: []string{"union-platform"}, Tracked: true},
+		{UserID: "u2", Name: "Design Person", Role: "member", UnionIDs: []string{"union-design"}, Tracked: true},
+	}
+	got, err := BuildPlan(snapshot, []Mapping{mapping}, members, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	joined := map[string]bool{}
+	for _, change := range got.Changes {
+		if change.Action == "group_joined" {
+			joined[change.UserID] = true
+		}
+	}
+	if !joined["u1"] || joined["u2"] {
+		t.Fatalf("sub-department member must join and a sibling must not: %+v", got.Changes)
+	}
+	if len(got.RoleAssignments) != 1 || got.RoleAssignments[0].UserID != "u1" || got.RoleAssignments[0].Role != "admin" {
+		t.Fatalf("role assignments = %+v, want u1 admin", got.RoleAssignments)
+	}
+}

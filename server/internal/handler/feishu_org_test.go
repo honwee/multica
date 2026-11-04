@@ -925,3 +925,56 @@ func TestListLarkOrganizationGroupsShowsAppliedGroupsToMembers(t *testing.T) {
 		t.Fatalf("groups after removing a rule = %+v, want only Engineering", got.Groups)
 	}
 }
+
+// TestFeishuOrgCatalogCountsSubDepartments verifies the catalog reports both
+// the department's own members and the whole subtree a rule covers, with a
+// root-to-leaf path so same-named teams can be told apart.
+func TestFeishuOrgCatalogCountsSubDepartments(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete: true,
+		Departments: []lark.OrgDepartment{
+			{ID: "d_eng", Name: "Engineering", ParentID: "0"},
+			{ID: "d_platform", Name: "Platform", ParentID: "d_eng"},
+			{ID: "d_infra", Name: "Infra", ParentID: "d_platform"},
+		},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_lead", UnionID: "on_lead", Name: "Lead", DepartmentIDs: []string{"d_eng"}, Active: true},
+			{OpenID: "ou_both", UnionID: "on_both", Name: "Both", DepartmentIDs: []string{"d_platform", "d_infra"}, Active: true},
+			{OpenID: "ou_gone", UnionID: "on_gone", Name: "Gone", DepartmentIDs: []string{"d_infra"}, Active: false},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkOrganization(w, req)
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Catalog == nil {
+		t.Fatal("catalog is missing")
+	}
+	byID := make(map[string]LarkOrganizationDepartmentResponse)
+	for _, department := range response.Catalog.Departments {
+		byID[department.ID] = department
+	}
+	eng := byID["d_eng"]
+	if eng.Path != "Engineering" || eng.ParentID != "0" || eng.DirectMemberCount != 1 || eng.MemberCount != 3 || eng.ActiveMemberCount != 2 {
+		t.Fatalf("engineering = %+v, want direct 1, subtree 3 (2 active)", eng)
+	}
+	infra := byID["d_infra"]
+	if infra.Path != "Engineering / Platform / Infra" || infra.DirectMemberCount != 2 || infra.MemberCount != 2 {
+		t.Fatalf("infra = %+v, want path and 2 members", infra)
+	}
+	if platform := byID["d_platform"]; platform.MemberCount != 2 || platform.DirectMemberCount != 1 {
+		t.Fatalf("platform = %+v, want direct 1, subtree 2 (shared member counted once)", platform)
+	}
+}

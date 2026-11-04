@@ -38,6 +38,8 @@ interface SourceOption {
   active?: boolean;
   jobTitle?: string;
   departments?: string[];
+  /** Ancestor chain for nested departments, e.g. "Engineering / Platform". */
+  path?: string;
 }
 
 export function LarkOrganizationRuleEditor({
@@ -77,8 +79,10 @@ export function LarkOrganizationRuleEditor({
       ? (catalog?.departments ?? []).map((item) => ({
           id: item.id,
           name: item.name,
-          count: item.direct_member_count,
+          // A department rule covers its sub-departments, so offer that count.
+          count: item.member_count ?? item.direct_member_count,
           duplicate: (catalog?.departments.filter((other) => other.name === item.name).length ?? 0) > 1,
+          path: item.path && item.path !== item.name ? item.path : undefined,
         }))
       : kind === "job_title"
         ? (catalog?.job_titles ?? []).map((item) => ({
@@ -181,6 +185,9 @@ export function LarkOrganizationRuleEditor({
                 <SelectItem value="user">{t(($) => $.lark.organization.user)}</SelectItem>
               </SelectContent>
             </Select>
+            {kind === "department" && (
+              <p className="text-caption text-muted-foreground">{t(($) => $.lark.organization.department_includes_children)}</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`${id}-role`}>{t(($) => $.lark.organization.member_role)}</Label>
@@ -230,6 +237,7 @@ export function LarkOrganizationRuleEditor({
               >
                 <span className="min-w-0">
                   <span className="block truncate text-body">{source.name}</span>
+                  {source.path && <span className="block text-caption text-muted-foreground">{source.path}</span>}
                   {source.jobTitle && <span className="block text-caption text-muted-foreground">{source.jobTitle}</span>}
                   {!!source.departments?.length && <span className="block text-micro text-muted-foreground">{source.departments.join("、")}</span>}
                   {kind === "user" && (

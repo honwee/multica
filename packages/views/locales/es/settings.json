@@ -1095,7 +1095,8 @@
       "history_mode_apply": "Aplicación",
       "user": "Persona",
       "workspace_member_yes": "En el espacio de trabajo",
-      "workspace_member_no": "Fuera del espacio de trabajo: requiere invitación"
+      "workspace_member_no": "Fuera del espacio de trabajo: requiere invitación",
+      "department_includes_children": "Cubre el departamento y todos sus subdepartamentos."
     },
     "bound_label": "Vinculado",
     "inbound_pending": "Vinculado: pendiente de verificar la recepción de mensajes",
