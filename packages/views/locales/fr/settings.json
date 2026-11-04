@@ -1563,6 +1563,7 @@
     "search_placeholder": "Rechercher un nom ou un e-mail",
     "no_results": "Aucun membre ne correspond à cette recherche.",
     "no_invitations": "Aucune invitation en attente.",
+    "feishu_invitee_fallback": "Membre Lark",
     "no_share_links": "Aucun lien de partage pour l'instant.",
     "email_label": "E-mail",
     "role_label": "Rôle",

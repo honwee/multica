@@ -1553,6 +1553,7 @@
     "search_placeholder": "名前またはメールで検索",
     "no_results": "一致するメンバーはいません。",
     "no_invitations": "承認待ちの招待はありません。",
+    "feishu_invitee_fallback": "Lark メンバー",
     "no_share_links": "共有リンクはまだありません。",
     "email_label": "メールアドレス",
     "role_label": "ロール",

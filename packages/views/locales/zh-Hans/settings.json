@@ -1553,6 +1553,7 @@
     "search_placeholder": "搜索姓名或邮箱",
     "no_results": "没有匹配的成员。",
     "no_invitations": "没有待接受的邀请。",
+    "feishu_invitee_fallback": "飞书成员",
     "no_share_links": "还没有分享链接。",
     "email_label": "邮箱",
     "role_label": "角色",

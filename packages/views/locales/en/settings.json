@@ -1564,6 +1564,7 @@
     "search_placeholder": "Search name or email",
     "no_results": "No members match this search.",
     "no_invitations": "No pending invitations.",
+    "feishu_invitee_fallback": "Feishu member",
     "no_share_links": "No share links yet.",
     "email_label": "Email",
     "role_label": "Role",
