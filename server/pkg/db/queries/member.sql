@@ -31,6 +31,19 @@ INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
 RETURNING *;
 
+-- name: GetDisabledMemberByUserAndWorkspace :one
+-- Organization sync disables members instead of deleting them so a returning
+-- person keeps their history. The row still holds the (workspace_id, user_id)
+-- slot, so joining again must reactivate it rather than insert.
+SELECT * FROM member
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NOT NULL;
+
+-- name: ReactivateMember :one
+UPDATE member
+SET disabled_at = NULL, role = @role, feishu_managed_role = NULL
+WHERE id = @id AND disabled_at IS NOT NULL
+RETURNING *;
+
 -- name: UpdateMemberRole :one
 WITH target AS MATERIALIZED (
     SELECT m.id, m.workspace_id, m.role,

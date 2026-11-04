@@ -858,3 +858,42 @@ func TestDeclineInvitation_AlreadyAcceptedIsNoOp(t *testing.T) {
 		t.Fatalf("member count = %d, want 1", members)
 	}
 }
+
+// A member that organization sync disabled still holds the (workspace, user)
+// row. Accepting a fresh invitation must reactivate that row with the invited
+// role instead of failing on the unique constraint.
+func TestAcceptInvitation_ReactivatesDisabledMember(t *testing.T) {
+	email := "reactivate-disabled-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Disabled Invitee", email)
+	memberID := dbfx.Member(t, testWorkspaceID, userID, "admin")
+	if _, err := testPool.Exec(context.Background(), `UPDATE member SET disabled_at = now(), feishu_managed_role = 'admin' WHERE id = $1`, parseUUID(memberID)); err != nil {
+		t.Fatalf("disable member: %v", err)
+	}
+	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
+		"workspace_id":  testWorkspaceID,
+		"inviter_id":    testUserID,
+		"invitee_email": email,
+		"role":          "member",
+		"status":        "pending",
+		"expires_at":    testutil.Raw("now() + interval '1 day'"),
+	})
+
+	req := newRequest("POST", "/api/invitations/"+invitationID+"/accept", nil)
+	req.Header.Set("X-User-ID", userID)
+	req = withURLParam(req, "id", invitationID)
+	var member MemberWithUserResponse
+	testutil.Call(t, testHandler.AcceptInvitation, req).Want(http.StatusOK).JSON(&member)
+	if member.ID != memberID || member.Role != "member" {
+		t.Fatalf("member = %+v, want reactivated %s with role member", member, memberID)
+	}
+	row, err := testHandler.Queries.GetMember(context.Background(), parseUUID(memberID))
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	if row.DisabledAt.Valid || row.FeishuManagedRole.Valid || row.Role != "member" {
+		t.Fatalf("member row = %+v, want active, unmanaged, role member", row)
+	}
+	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 1 {
+		t.Fatalf("member count = %d, want 1", members)
+	}
+}
