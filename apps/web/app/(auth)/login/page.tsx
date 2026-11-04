@@ -223,9 +223,9 @@ function LoginPageContent() {
 
   return (
     <LoginPage
-      className="bg-white px-6 py-12"
-      cardClassName="max-w-md gap-6 rounded-none border-0 bg-transparent py-0 shadow-none"
-      footerClassName="border-0 bg-transparent px-4 pb-0"
+      className="landing-light bg-background px-6 py-12"
+      cardClassName="max-w-[360px] gap-6 rounded-none border-0 bg-transparent py-0 shadow-none"
+      footerClassName="border-0 bg-transparent px-0 pb-0 pt-1"
       logo={
         <LumistBrand
           logo={
@@ -235,7 +235,7 @@ function LoginPageContent() {
               width={320}
               height={92}
               priority
-              className="h-14 w-auto sm:h-16"
+              className="h-12 w-auto sm:h-14"
             />
           }
         />
@@ -266,15 +266,24 @@ function LoginPageContent() {
       }
       onTokenObtained={setLoggedInCookie}
       extra={
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.web.prefer_desktop)}{" "}
-          <Link
-            href="/download"
-            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+        <nav
+          aria-label={t(($) => $.web.download_clients)}
+          className="flex items-center justify-center gap-3 text-caption"
+        >
+          <a
+            href="https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.7.1-rc.2/multica-desktop-0.7.1-rc.2-mac-arm64.dmg"
+            className="inline-flex min-h-11 items-center rounded px-1 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {t(($) => $.web.download)}
+            {t(($) => $.web.download_macos)}
+          </a>
+          <span aria-hidden="true" className="text-border">·</span>
+          <Link
+            href="/install/ios/"
+            className="inline-flex min-h-11 items-center rounded px-1 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t(($) => $.web.get_ios_beta)}
           </Link>
-        </span>
+        </nav>
       }
     />
   );
