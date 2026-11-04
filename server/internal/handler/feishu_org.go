@@ -22,6 +22,7 @@ import (
 var feishuOrgRequirements = []string{
 	"Grant the required scopes and publish a new app version.",
 	"Include every required department and user in the app's contact visibility scope.",
+	"Subscribe the app to contact.user and contact.department events so changes sync between hourly runs.",
 }
 
 type LarkOrganizationConfigResponse struct {

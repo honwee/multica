@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +65,13 @@ type WSConnectorConfig struct {
 	// InboundVerifier records receipt evidence independently of business routing.
 	// A failed write must not change dispatch or acknowledgement behavior.
 	InboundVerifier InboundVerifier
+
+	// ContactEvents receives every contact.* event (user or department
+	// changes) the app is subscribed to. The connector ACKs the frame as
+	// soon as the sink returns, so the sink must only record the change and
+	// never block on network or database work. Nil leaves contact events on
+	// the unhandled path.
+	ContactEvents ContactEventSink
 
 	// EnrichTimeout caps a single message's enrichment (at most two
 	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
@@ -391,7 +399,9 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			// produces no line here. Heartbeats peek as "" and stay
 			// silent.
 			if eventType := PeekEventType(payload); eventType != "" {
-				if _, reported := reportedDrops[eventType]; !reported {
+				if c.cfg.ContactEvents != nil && strings.HasPrefix(eventType, "contact.") {
+					c.cfg.ContactEvents.NotifyContactChange(ctx, inst, eventType)
+				} else if _, reported := reportedDrops[eventType]; !reported {
 					reportedDrops[eventType] = struct{}{}
 					log.Info("lark ws connector: dropping unhandled event type", "event_type", eventType)
 				}
@@ -573,6 +583,20 @@ type FrameDecoder interface {
 // connector needs for its EndpointFetcher call.
 type CredentialsProvider interface {
 	Credentials(ctx context.Context, inst Installation) (InstallationCredentials, error)
+}
+
+// ContactEventSink is told when Feishu reports an organization change for
+// an installation, so the organization directory can be refreshed without
+// waiting for the next scheduled sync.
+type ContactEventSink interface {
+	NotifyContactChange(ctx context.Context, inst Installation, eventType string)
+}
+
+// ContactEventSinkFunc adapts a function to ContactEventSink.
+type ContactEventSinkFunc func(ctx context.Context, inst Installation, eventType string)
+
+func (f ContactEventSinkFunc) NotifyContactChange(ctx context.Context, inst Installation, eventType string) {
+	f(ctx, inst, eventType)
 }
 
 // CredentialsProviderFunc adapts a free function.
