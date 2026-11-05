@@ -477,6 +477,46 @@ func TestLarkWorkspaceConnectionBotAdoptionPreservesID(t *testing.T) {
 	}
 }
 
+func TestLarkWorkspaceConnectionDoesNotReviveRevokedBot(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	appID := "cli_revived_" + uuid.NewString()
+	botAgentID := dbfx.Agent(t, "Feishu revoked bot agent", "", testutil.Cols{"workspace_id": fixture.workspaceID, "owner_id": fixture.ownerID})
+	bot, err := testHandler.LarkInstallations.Upsert(context.Background(), lark.InstallationParams{
+		WorkspaceID: parseUUID(fixture.workspaceID), AgentID: parseUUID(botAgentID), AppID: appID,
+		AppSecret: "bot-secret", BotOpenID: "ou_revoked_bot", InstallerUserID: parseUUID(fixture.ownerID), Region: lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("create Bot installation: %v", err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, uuidToString(bot.ID))
+	if err := testHandler.LarkInstallations.Revoke(context.Background(), bot.ID); err != nil {
+		t.Fatalf("revoke Bot installation: %v", err)
+	}
+
+	connection, err := testHandler.LarkInstallations.UpsertWorkspaceConnection(context.Background(), lark.WorkspaceConnectionParams{
+		WorkspaceID: parseUUID(fixture.workspaceID), AppID: appID, AppSecret: "workspace-secret", InstallerUserID: parseUUID(fixture.ownerID), Region: lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("connect revoked app for organization data: %v", err)
+	}
+	if connection.ID != bot.ID || connection.Status != "active" || connection.AgentID.Valid || connection.BotOpenID != "" {
+		t.Fatalf("reconnected app kept its revoked Bot route: %+v", connection)
+	}
+	secret, err := testHandler.LarkInstallations.DecryptAppSecret(connection)
+	if err != nil || secret != "workspace-secret" {
+		t.Fatalf("decrypt reconnected secret: %q, %v", secret, err)
+	}
+	active, err := lark.NewChannelStore(testHandler.Queries).ListActiveLarkInstallations(context.Background())
+	if err != nil {
+		t.Fatalf("list active installations: %v", err)
+	}
+	for _, candidate := range active {
+		if candidate.ID == connection.ID {
+			t.Fatal("organization connection must not restart the revoked Bot WebSocket")
+		}
+	}
+}
+
 func TestFeishuOrgSaveOwnerMappingRequiresOwner(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner")}
