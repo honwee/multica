@@ -126,7 +126,7 @@ describe("LoginPage", () => {
       screen.getByRole("link", { name: "Download for macOS" }),
     ).toHaveAttribute(
       "href",
-      "https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.0/multica-desktop-0.8.0-mac-arm64.dmg",
+      "https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.1/multica-desktop-0.8.1-mac-arm64.dmg",
     );
     expect(screen.getByRole("link", { name: "Get iOS Beta" })).toHaveAttribute(
       "href",
