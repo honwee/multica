@@ -53,6 +53,7 @@ import type {
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
   LarkOrganizationResponse,
+  ListLarkOrganizationGroupsResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -3469,6 +3470,7 @@ export const LarkInstallationBotInfoSchema = z.object({
 export const LarkOrganizationConfigSchema = z.object({
   installation_id: z.string(),
   enabled: z.boolean(),
+  auto_sync: z.boolean().optional(),
   revision: z.number().int().nonnegative(),
   updated_at: z.string().default(""),
 }).loose();
@@ -3478,7 +3480,6 @@ export const LarkOrganizationMappingSchema = z.object({
   external_id: z.string(),
   external_name: z.string().default(""),
   member_role: z.enum(["owner", "admin", "member"]).nullable().catch(null),
-  agent_ids: z.array(z.string()).catch([]).default([]),
 }).loose();
 
 export const LarkOrganizationSyncChangeSchema = z.object({
@@ -3513,6 +3514,7 @@ export const LarkOrganizationSyncRunSchema = z.object({
   error: z.string().default(""),
   requested_by: z.string().default(""),
   replayed_from_id: z.string().nullable().optional(),
+  directory_fetched_at: z.string().nullable().optional(),
   created_at: z.string(),
   completed_at: z.string().nullable().optional(),
 }).loose();
@@ -3520,8 +3522,12 @@ export const LarkOrganizationSyncRunSchema = z.object({
 export const LarkOrganizationDepartmentSchema = z.object({
   id: z.string(),
   name: z.string().default(""),
+  parent_id: z.string().optional(),
+  path: z.string().optional(),
   direct_member_count: z.number().int().nonnegative().default(0),
   active_direct_member_count: z.number().int().nonnegative().default(0),
+  member_count: z.number().int().nonnegative().optional(),
+  active_member_count: z.number().int().nonnegative().optional(),
 }).loose();
 
 export const LarkOrganizationJobTitleSchema = z.object({
@@ -3579,6 +3585,19 @@ export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchem
   requirements: z.array(z.string()),
   sync_runs: z.array(LarkOrganizationSyncRunSchema),
 });
+
+export const LarkOrganizationGroupSchema = z.object({
+  id: z.string(),
+  kind: z.string().default(""),
+  external_id: z.string().default(""),
+  external_name: z.string().default(""),
+}).loose();
+
+export const ListLarkOrganizationGroupsResponseSchema = z.object({
+  groups: z.array(LarkOrganizationGroupSchema).catch([]).default([]),
+}).loose();
+
+export const EMPTY_LARK_ORGANIZATION_GROUPS_RESPONSE: ListLarkOrganizationGroupsResponse = { groups: [] };
 
 export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
   config: null,

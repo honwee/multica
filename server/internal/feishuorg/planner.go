@@ -10,12 +10,11 @@ import (
 )
 
 type Mapping struct {
-	GroupID      string   `json:"group_id"`
-	Kind         string   `json:"kind"`
-	ExternalID   string   `json:"external_id"`
-	ExternalName string   `json:"external_name"`
-	MemberRole   string   `json:"member_role"`
-	AgentIDs     []string `json:"agent_ids"`
+	GroupID      string `json:"group_id"`
+	Kind         string `json:"kind"`
+	ExternalID   string `json:"external_id"`
+	ExternalName string `json:"external_name"`
+	MemberRole   string `json:"member_role"`
 }
 
 type Member struct {
@@ -92,6 +91,7 @@ func BuildPlan(snapshot lark.OrgSnapshot, mappings []Mapping, members []Member, 
 
 	warnings := make(map[string]struct{})
 	validMappings := validateMappings(snapshot, mappings, warnings)
+	departments := snapshot.DepartmentClosure()
 	matches, blocked := matchMembers(snapshot.Users, members, warnings)
 	currentGroups := activeGroups(members, memberships)
 	groupNames := groupNames(mappings)
@@ -104,7 +104,7 @@ func BuildPlan(snapshot lark.OrgSnapshot, mappings []Mapping, members []Member, 
 		if snapshotIndex, ok := matches[i]; ok {
 			if snapshot.Users[snapshotIndex].Active {
 				user := snapshot.Users[snapshotIndex]
-				groups, role := desiredAccess(user, validMappings)
+				groups, role := desiredAccess(user, validMappings, departments)
 				plans[i] = memberPlan{
 					kind:          "active",
 					user:          user,
@@ -289,7 +289,8 @@ func matchMembers(users []lark.OrgUser, members []Member, warnings map[string]st
 		addCandidates(candidates, index.union[user.UnionID])
 		addCandidates(candidates, index.feishu[user.OpenID])
 		addCandidates(candidates, index.channel[user.OpenID])
-		addCandidates(candidates, index.email[strings.ToLower(user.Email)])
+		addCandidates(candidates, index.email[strings.ToLower(strings.TrimSpace(user.EnterpriseEmail))])
+		addCandidates(candidates, index.email[strings.ToLower(strings.TrimSpace(user.Email))])
 		if len(candidates) > 1 {
 			addWarning(warnings, fmt.Sprintf("identity conflict for Feishu user %q; automatic changes skipped", orgUserIdentity(user)))
 			for memberIndex := range candidates {
@@ -333,7 +334,7 @@ func addCandidates(candidates map[int]struct{}, indexes []int) {
 }
 
 func orgUserIdentity(user lark.OrgUser) string {
-	for _, identity := range []string{user.UnionID, user.OpenID, strings.ToLower(user.Email), user.Name} {
+	for _, identity := range []string{user.UnionID, user.OpenID, user.LoginEmail(), user.Name} {
 		if identity != "" {
 			return identity
 		}
@@ -359,15 +360,19 @@ func activeGroups(members []Member, memberships []Membership) []map[string]struc
 	return groups
 }
 
-func desiredAccess(user lark.OrgUser, mappings []Mapping) (map[string]struct{}, string) {
+// desiredAccess resolves the groups and the highest role a directory user
+// gets from the rules. A department rule covers the department and every
+// sub-department beneath it.
+func desiredAccess(user lark.OrgUser, mappings []Mapping, departments map[string]map[string]struct{}) (map[string]struct{}, string) {
 	groups := make(map[string]struct{})
 	role := ""
 	for _, mapping := range mappings {
 		matched := false
 		switch mapping.Kind {
 		case "department":
+			covered := departments[mapping.ExternalID]
 			for _, departmentID := range user.DepartmentIDs {
-				if departmentID == mapping.ExternalID {
+				if _, ok := covered[departmentID]; ok {
 					matched = true
 					break
 				}
@@ -513,4 +518,44 @@ func sortedGroupIDs(groups map[string]struct{}) []string {
 
 func addWarning(warnings map[string]struct{}, warning string) {
 	warnings[warning] = struct{}{}
+}
+
+// Access is what the rules grant one directory user: the groups they belong
+// to and the highest mapped role, or "" when no rule names a role.
+type Access struct {
+	GroupIDs []string
+	Role     string
+}
+
+// Entitled reports whether at least one rule matched the user.
+func (a Access) Entitled() bool { return len(a.GroupIDs) > 0 || a.Role != "" }
+
+// ResolveAccess evaluates the rules for a single directory user, the same
+// way BuildPlan does for existing members. Invalid rules are ignored.
+func ResolveAccess(snapshot lark.OrgSnapshot, mappings []Mapping, user lark.OrgUser) Access {
+	valid := validateMappings(snapshot, mappings, make(map[string]struct{}))
+	groups, role := desiredAccess(user, valid, snapshot.DepartmentClosure())
+	return Access{GroupIDs: sortedGroupIDs(groups), Role: role}
+}
+
+// FindUser locates a directory user by union_id first, then by the login
+// email, and reports whether one was found.
+func FindUser(snapshot lark.OrgSnapshot, unionID, email string) (lark.OrgUser, bool) {
+	unionID = strings.TrimSpace(unionID)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if unionID != "" {
+		for _, user := range snapshot.Users {
+			if user.UnionID == unionID {
+				return user, true
+			}
+		}
+	}
+	if email != "" {
+		for _, user := range snapshot.Users {
+			if user.LoginEmail() == email {
+				return user, true
+			}
+		}
+	}
+	return lark.OrgUser{}, false
 }

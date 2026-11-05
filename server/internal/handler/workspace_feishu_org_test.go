@@ -18,10 +18,12 @@ func cleanupInheritedFeishuOrg(t *testing.T, workspaceID string) {
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_sync_run WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_membership WHERE workspace_id = $1`, workspaceID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_group WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_config WHERE workspace_id = $1`, workspaceID)
+		// The workspace itself came from CreateWorkspace, not a fixture, so
+		// nothing else removes it; members cascade with it.
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 	})
 }
 
@@ -29,7 +31,7 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{{
 		Kind: "department", ExternalID: "d1", ExternalName: "Engineering",
-		MemberRole: feishuOrgRole("member"), AgentIDs: []string{fixture.agentID},
+		MemberRole: feishuOrgRole("member"),
 	}}); w.Code != http.StatusOK {
 		t.Fatalf("save source config: status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -73,12 +75,10 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	if err != nil || len(roles) != 1 || roles[0].Role != "member" {
 		t.Fatalf("unexpected inherited role mappings: %+v err=%v", roles, err)
 	}
-	agents, err := testHandler.Queries.ListFeishuOrgAgentMappings(context.Background(), workspaceID)
-	if err != nil || len(agents) != 0 {
-		t.Fatalf("agent bindings must not be inherited: %+v err=%v", agents, err)
-	}
+	// Run history stays with the source; the directory is shared through
+	// the installation, so the catalog below still renders.
 	runs, err := testHandler.Queries.ListFeishuOrgSyncRuns(context.Background(), workspaceID)
-	if err != nil || len(runs) != 1 || runs[0].Mode != "preview" || runs[0].Status != "preview" {
+	if err != nil || len(runs) != 0 {
 		t.Fatalf("unexpected inherited sync runs: %+v err=%v", runs, err)
 	}
 
@@ -103,6 +103,14 @@ func TestCreateWorkspaceInheritsFeishuOrgFromAdminWorkspace(t *testing.T) {
 	}
 	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, true, nil); saved.Code != http.StatusOK {
 		t.Fatalf("save with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
+	}
+	// Turning sync off in the inherited workspace must not lock it out of the
+	// shared installation: the next save has to be able to turn it back on.
+	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, false, nil); saved.Code != http.StatusOK {
+		t.Fatalf("disable with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
+	}
+	if saved := saveFeishuOrgConfig(t, targetFixture, fixture.ownerID, true, nil); saved.Code != http.StatusOK {
+		t.Fatalf("re-enable with shared installation: status=%d body=%s", saved.Code, saved.Body.String())
 	}
 	if err := testHandler.Queries.DeleteFeishuOrgDataByWorkspace(context.Background(), parseUUID(fixture.workspaceID)); err != nil {
 		t.Fatalf("remove source organization config: %v", err)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/feishuorg"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -64,7 +65,6 @@ func newFeishuOrgHandlerFixture(t *testing.T) feishuOrgHandlerFixture {
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_sync_run WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_membership WHERE workspace_id = $1`, workspaceID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_group WHERE workspace_id = $1`, workspaceID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM feishu_org_config WHERE workspace_id = $1`, workspaceID)
@@ -86,6 +86,7 @@ func newFeishuOrgHandlerFixture(t *testing.T) feishuOrgHandlerFixture {
 		t.Fatalf("create Lark installation: %v", err)
 	}
 	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, uuidToString(installation.ID))
+	dbfx.Cleanup(t, `DELETE FROM feishu_org_directory WHERE installation_id = $1`, uuidToString(installation.ID))
 	previousInstallations := testHandler.LarkInstallations
 	testHandler.LarkInstallations = installations
 	t.Cleanup(func() { testHandler.LarkInstallations = previousInstallations })
@@ -278,7 +279,7 @@ func TestFeishuOrgSaveDoesNotApplyRolesOrAgentAccess(t *testing.T) {
 		t.Fatalf("load initial agent permission: %v", err)
 	}
 	mapping := LarkOrganizationMappingResponse{
-		Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin"), AgentIDs: []string{fixture.agentID},
+		Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin"),
 	}
 	w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping})
 	if w.Code != http.StatusOK {
@@ -291,7 +292,7 @@ func TestFeishuOrgSaveDoesNotApplyRolesOrAgentAccess(t *testing.T) {
 	if response.Config == nil || !response.Config.Enabled || response.Config.Revision != 1 || len(response.Mappings) != 1 {
 		t.Fatalf("unexpected save response: %+v", response)
 	}
-	if response.Mappings[0].MemberRole == nil || *response.Mappings[0].MemberRole != "admin" || len(response.Mappings[0].AgentIDs) != 1 {
+	if response.Mappings[0].MemberRole == nil || *response.Mappings[0].MemberRole != "admin" {
 		t.Fatalf("unexpected saved mapping: %+v", response.Mappings[0])
 	}
 	var role string
@@ -335,7 +336,7 @@ func TestFeishuOrgSaveUserMapping(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	mapping := LarkOrganizationMappingResponse{
 		Kind: "user", ExternalID: "on_member", ExternalName: "Member",
-		MemberRole: feishuOrgRole("admin"), AgentIDs: []string{fixture.agentID},
+		MemberRole: feishuOrgRole("admin"),
 	}
 	w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping})
 	if w.Code != http.StatusOK {
@@ -478,7 +479,7 @@ func TestLarkWorkspaceConnectionBotAdoptionPreservesID(t *testing.T) {
 
 func TestFeishuOrgSaveOwnerMappingRequiresOwner(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner"), AgentIDs: []string{}}
+	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner")}
 	w := saveFeishuOrgConfig(t, fixture, fixture.adminID, true, []LarkOrganizationMappingResponse{mapping})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin save with owner mapping status = %d, want 403; body=%s", w.Code, w.Body.String())
@@ -495,32 +496,15 @@ func TestFeishuOrgSaveOwnerMappingRequiresOwner(t *testing.T) {
 	}
 }
 
-func TestFeishuOrgAdminCannotMapAnotherOwnersAgent(t *testing.T) {
-	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", AgentIDs: []string{fixture.agentID}}
-	w := saveFeishuOrgConfig(t, fixture, fixture.adminID, true, []LarkOrganizationMappingResponse{mapping})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("admin save another owner's agent status = %d, want 403; body=%s", w.Code, w.Body.String())
-	}
-	var permissionMode string
-	if err := testPool.QueryRow(context.Background(), `SELECT permission_mode FROM agent WHERE id = $1`, fixture.agentID).Scan(&permissionMode); err != nil {
-		t.Fatalf("load agent: %v", err)
-	}
-	if permissionMode != "private" {
-		t.Fatalf("forbidden save changed agent permission_mode to %q", permissionMode)
-	}
-}
-
 func TestFeishuOrgSaveValidation(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	tests := []struct {
 		name    string
 		mapping LarkOrganizationMappingResponse
 	}{
-		{name: "kind", mapping: LarkOrganizationMappingResponse{Kind: "unknown", ExternalID: "d1", AgentIDs: []string{}}},
-		{name: "external id", mapping: LarkOrganizationMappingResponse{Kind: "department", ExternalID: " ", AgentIDs: []string{}}},
-		{name: "role", mapping: LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("superuser"), AgentIDs: []string{}}},
-		{name: "foreign agent", mapping: LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", AgentIDs: []string{uuid.NewString()}}},
+		{name: "kind", mapping: LarkOrganizationMappingResponse{Kind: "unknown", ExternalID: "d1"}},
+		{name: "external id", mapping: LarkOrganizationMappingResponse{Kind: "department", ExternalID: " "}},
+		{name: "role", mapping: LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("superuser")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -530,7 +514,7 @@ func TestFeishuOrgSaveValidation(t *testing.T) {
 			}
 		})
 	}
-	duplicate := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", AgentIDs: []string{}}
+	duplicate := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1"}
 	w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{duplicate, duplicate})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate group status = %d, want 400; body=%s", w.Code, w.Body.String())
@@ -618,7 +602,7 @@ func TestFeishuOrgPreviewFailureAuditSurvivesCancellation(t *testing.T) {
 
 func TestFeishuOrgApplyIsIdempotentAndReplayRecalculates(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin"), AgentIDs: []string{}}
+	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")}
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping}); w.Code != http.StatusOK {
 		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -685,9 +669,20 @@ func TestFeishuOrgApplyIsIdempotentAndReplayRecalculates(t *testing.T) {
 	}
 }
 
-func TestFeishuOrgAgentTargetChangesRequireApply(t *testing.T) {
+func grantFeishuOrgTeam(t *testing.T, agentID, groupID, createdBy string) {
+	t.Helper()
+	dbfx.Exec(t, `UPDATE agent SET permission_mode = 'public_to' WHERE id = $1`, agentID)
+	dbfx.Exec(t, `INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by) VALUES ($1, 'team', $2, $3)`, agentID, groupID, createdBy)
+}
+
+// TestFeishuOrgSyncRevokesTeamGrantsOfRemovedRules covers the one agent change
+// the sync still makes: a team grant made from the access picker stays
+// untouched while its rule exists, and is revoked after the rule is removed
+// and the removal applied. An admin may apply that cleanup even though they
+// do not own the agent.
+func TestFeishuOrgSyncRevokesTeamGrantsOfRemovedRules(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", AgentIDs: []string{fixture.agentID}}
+	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering"}
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping}); w.Code != http.StatusOK {
 		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -697,22 +692,28 @@ func TestFeishuOrgAgentTargetChangesRequireApply(t *testing.T) {
 		Users: []lark.OrgUser{{OpenID: "ou_member", Email: fixture.memberEmail, DepartmentIDs: []string{"d1"}, Active: true}},
 	}
 	wireFeishuOrgAPIClient(t, client)
-	preview := previewFeishuOrg(t, fixture)
-	previewRun := decodeFeishuOrgRun(t, preview)
-	if len(previewRun.Plan.AgentChanges) != 1 || previewRun.Plan.AgentChanges[0].Action != "agent_granted" {
-		t.Fatalf("agent preview changes = %+v", previewRun.Plan.AgentChanges)
-	}
-	if count := dbfx.Count(t, `SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'team'`, fixture.agentID); count != 0 {
-		t.Fatal("preview created the team target")
+	previewRun := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
+	if len(previewRun.Plan.AgentChanges) != 0 {
+		t.Fatalf("rules alone must not plan agent changes: %+v", previewRun.Plan.AgentChanges)
 	}
 	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusOK {
 		t.Fatalf("apply status = %d, body=%s", applied.Code, applied.Body.String())
 	}
-	if count := dbfx.Count(t, `SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'team'`, fixture.agentID); count != 1 {
-		t.Fatal("apply did not create the team target")
+	var groupID string
+	if err := testPool.QueryRow(context.Background(), `SELECT id FROM feishu_org_group WHERE workspace_id = $1 AND active`, fixture.workspaceID).Scan(&groupID); err != nil {
+		t.Fatalf("load active group: %v", err)
 	}
-	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_group WHERE workspace_id = $1 AND active`, fixture.workspaceID); count != 1 {
-		t.Fatal("apply did not activate the configured group")
+	grantFeishuOrgTeam(t, fixture.agentID, groupID, fixture.ownerID)
+
+	stillGranted := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
+	if len(stillGranted.Plan.AgentChanges) != 0 {
+		t.Fatalf("picker grant to a configured group must not be touched: %+v", stillGranted.Plan.AgentChanges)
+	}
+	if applied := applyFeishuOrg(t, fixture, stillGranted.ID); applied.Code != http.StatusOK {
+		t.Fatalf("second apply status = %d, body=%s", applied.Code, applied.Body.String())
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'team'`, fixture.agentID); count != 1 {
+		t.Fatal("apply removed a picker grant whose group is still configured")
 	}
 
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
@@ -721,16 +722,15 @@ func TestFeishuOrgAgentTargetChangesRequireApply(t *testing.T) {
 	if count := dbfx.Count(t, `SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'team'`, fixture.agentID); count != 1 {
 		t.Fatal("saving desired removal revoked access before a new apply")
 	}
-	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_group WHERE workspace_id = $1 AND active`, fixture.workspaceID); count != 1 {
-		t.Fatal("saving desired removal deactivated the group before a new apply")
+	removal := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
+	if len(removal.Plan.AgentChanges) != 1 || removal.Plan.AgentChanges[0].Action != "agent_revoked" || removal.Plan.AgentChanges[0].GroupName != "Engineering" {
+		t.Fatalf("removal preview agent changes = %+v, want one revocation of Engineering", removal.Plan.AgentChanges)
 	}
-	secondPreview := previewFeishuOrg(t, fixture)
-	secondRun := decodeFeishuOrgRun(t, secondPreview)
-	if len(secondRun.Plan.AgentChanges) != 1 || secondRun.Plan.AgentChanges[0].Action != "agent_revoked" {
-		t.Fatalf("agent removal preview changes = %+v", secondRun.Plan.AgentChanges)
-	}
-	if applied := applyFeishuOrg(t, fixture, secondRun.ID); applied.Code != http.StatusOK {
-		t.Fatalf("removal apply status = %d, body=%s", applied.Code, applied.Body.String())
+	req := feishuOrgRequest(fixture.adminID, http.MethodPost, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization/sync/"+removal.ID+"/apply", nil, "runId", removal.ID)
+	w := httptest.NewRecorder()
+	testHandler.ApplyLarkOrganizationSync(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin cleanup apply status = %d, body=%s", w.Code, w.Body.String())
 	}
 	if count := dbfx.Count(t, `SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'team'`, fixture.agentID); count != 0 {
 		t.Fatal("removal apply left the team target")
@@ -738,51 +738,18 @@ func TestFeishuOrgAgentTargetChangesRequireApply(t *testing.T) {
 	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_group WHERE workspace_id = $1 AND active`, fixture.workspaceID); count != 0 {
 		t.Fatal("removal apply left the group active")
 	}
-}
-
-func TestFeishuOrgExistingTargetStillRequiresOwnerForActivation(t *testing.T) {
-	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", AgentIDs: []string{fixture.agentID}}
-	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping}); w.Code != http.StatusOK {
-		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
-	}
-	var groupID string
-	if err := testPool.QueryRow(context.Background(), `SELECT id FROM feishu_org_group WHERE workspace_id = $1`, fixture.workspaceID).Scan(&groupID); err != nil {
-		t.Fatalf("load group: %v", err)
-	}
-	dbfx.Exec(t, `INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by) VALUES ($1, 'team', $2, $3)`, fixture.agentID, groupID, fixture.ownerID)
-	client := newFakeFeishuOrgAPIClient()
-	client.snapshot = lark.OrgSnapshot{Complete: true, Departments: []lark.OrgDepartment{{ID: "d1"}}}
-	wireFeishuOrgAPIClient(t, client)
-	preview := previewFeishuOrg(t, fixture)
-	previewRun := decodeFeishuOrgRun(t, preview)
-	if len(previewRun.Plan.AgentChanges) != 1 || previewRun.Plan.AgentChanges[0].Action != "agent_granted" {
-		t.Fatalf("inactive/private target produced no effective-access change: %+v", previewRun.Plan.AgentChanges)
-	}
-	req := feishuOrgRequest(fixture.adminID, http.MethodPost, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization/sync/"+previewRun.ID+"/apply", nil, "runId", previewRun.ID)
-	w := httptest.NewRecorder()
-	testHandler.ApplyLarkOrganizationSync(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("admin activated another owner's agent: status=%d body=%s", w.Code, w.Body.String())
-	}
-	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_group WHERE id = $1 AND active`, groupID); count != 0 {
-		t.Fatal("forbidden apply activated the group")
-	}
-	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusOK {
-		t.Fatalf("owner apply status = %d, body=%s", applied.Code, applied.Body.String())
-	}
 	var permissionMode string
 	if err := testPool.QueryRow(context.Background(), `SELECT permission_mode FROM agent WHERE id = $1`, fixture.agentID).Scan(&permissionMode); err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
 	if permissionMode != "public_to" {
-		t.Fatalf("owner apply left permission_mode = %q", permissionMode)
+		t.Fatalf("revoking a team target changed permission_mode to %q", permissionMode)
 	}
 }
 
 func TestFeishuOrgAdminCannotApplyOwnerAccessChange(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
-	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner"), AgentIDs: []string{}}
+	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", MemberRole: feishuOrgRole("owner")}
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping}); w.Code != http.StatusOK {
 		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -833,9 +800,8 @@ func TestFeishuOrgDisabledSyncRejectsReplayAndApply(t *testing.T) {
 func TestFeishuOrgRejectsCrossWorkspaceRun(t *testing.T) {
 	sourceFixture := newFeishuOrgHandlerFixture(t)
 	otherFixture := newFeishuOrgHandlerFixture(t)
-	snapshot := []byte(`{"Complete":true,"Departments":[],"Users":[]}`)
 	actor := feishuOrgActor{workspaceID: parseUUID(sourceFixture.workspaceID), userID: parseUUID(sourceFixture.ownerID)}
-	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, snapshot, emptyFeishuOrgPlan(), "", pgtype.UUID{})
+	source, err := testHandler.createFeishuOrgSyncRun(context.Background(), testHandler.Queries, actor, "preview", "preview", 1, emptyFeishuOrgPlan(), "", pgtype.UUID{}, pgtype.Timestamptz{})
 	if err != nil {
 		t.Fatalf("create source run: %v", err)
 	}
@@ -852,5 +818,277 @@ func TestFeishuOrgRejectsCrossWorkspaceRun(t *testing.T) {
 				t.Fatalf("cross-workspace %s status = %d, want 404; body=%s", operation.name, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+// TestFeishuOrgCatalogLinksMemberByLoginUnionID covers a member who signed in
+// through the login app: the directory snapshot comes from a different app,
+// so open_id differs and the email is absent, but union_id still links them.
+func TestFeishuOrgCatalogLinksMemberByLoginUnionID(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if _, err := testHandler.Queries.SetUserFeishuIdentity(context.Background(), db.SetUserFeishuIdentityParams{
+		ID: parseUUID(fixture.memberID), FeishuOpenID: "ou_login_app", FeishuUnionID: "on_login_member",
+	}); err != nil {
+		t.Fatalf("link member identity: %v", err)
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_directory_app", UnionID: "on_login_member", Name: "Member", DepartmentIDs: []string{"d1"}, Active: true},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetLarkOrganization status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Catalog == nil {
+		t.Fatal("catalog is missing")
+	}
+	for _, member := range response.Catalog.WorkspaceMembers {
+		if member.UserID != fixture.memberID {
+			continue
+		}
+		if !member.Linked || member.IdentityConflict || len(member.Departments) != 1 || member.Departments[0] != "Engineering" {
+			t.Fatalf("member linked by union_id = %+v, want linked to Engineering", member)
+		}
+		return
+	}
+	t.Fatalf("member %s missing from workspace members", fixture.memberID)
+}
+
+// TestListLarkOrganizationGroupsShowsAppliedGroupsToMembers verifies a plain
+// member can list the groups an agent may be granted to, and only those: a
+// never-applied group is hidden, and so is a group whose rule was removed,
+// even before the removal is applied.
+func TestListLarkOrganizationGroupsShowsAppliedGroupsToMembers(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	mappings := []LarkOrganizationMappingResponse{
+		{Kind: "department", ExternalID: "d1", ExternalName: "Engineering"},
+		{Kind: "job_title", ExternalID: "Designer", ExternalName: "Designer"},
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, mappings); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete: true, Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering"}},
+		Users: []lark.OrgUser{{OpenID: "ou_member", Email: fixture.memberEmail, JobTitle: "Designer", DepartmentIDs: []string{"d1"}, Active: true}},
+	}
+	wireFeishuOrgAPIClient(t, client)
+
+	list := func() ListLarkOrganizationGroupsResponse {
+		t.Helper()
+		req := feishuOrgRequest(fixture.memberID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization/groups", nil)
+		w := httptest.NewRecorder()
+		testHandler.ListLarkOrganizationGroups(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list groups status = %d, body=%s", w.Code, w.Body.String())
+		}
+		var response ListLarkOrganizationGroupsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode groups: %v", err)
+		}
+		return response
+	}
+	if got := list(); len(got.Groups) != 0 {
+		t.Fatalf("groups before apply = %+v, want none", got.Groups)
+	}
+	preview := previewFeishuOrg(t, fixture)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	if applied := applyFeishuOrg(t, fixture, decodeFeishuOrgRun(t, preview).ID); applied.Code != http.StatusOK {
+		t.Fatalf("apply status = %d, body=%s", applied.Code, applied.Body.String())
+	}
+	got := list()
+	if len(got.Groups) != 2 || got.Groups[0].Kind != "department" || got.Groups[0].ExternalName != "Engineering" || got.Groups[1].Kind != "job_title" || got.Groups[1].ExternalID != "Designer" {
+		t.Fatalf("groups after apply = %+v, want Engineering and Designer", got.Groups)
+	}
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, mappings[:1]); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := list(); len(got.Groups) != 1 || got.Groups[0].ExternalName != "Engineering" {
+		t.Fatalf("groups after removing a rule = %+v, want only Engineering", got.Groups)
+	}
+}
+
+// TestFeishuOrgCatalogCountsSubDepartments verifies the catalog reports both
+// the department's own members and the whole subtree a rule covers, with a
+// root-to-leaf path so same-named teams can be told apart.
+func TestFeishuOrgCatalogCountsSubDepartments(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete: true,
+		Departments: []lark.OrgDepartment{
+			{ID: "d_eng", Name: "Engineering", ParentID: "0"},
+			{ID: "d_platform", Name: "Platform", ParentID: "d_eng"},
+			{ID: "d_infra", Name: "Infra", ParentID: "d_platform"},
+		},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_lead", UnionID: "on_lead", Name: "Lead", DepartmentIDs: []string{"d_eng"}, Active: true},
+			{OpenID: "ou_both", UnionID: "on_both", Name: "Both", DepartmentIDs: []string{"d_platform", "d_infra"}, Active: true},
+			{OpenID: "ou_gone", UnionID: "on_gone", Name: "Gone", DepartmentIDs: []string{"d_infra"}, Active: false},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+	if preview := previewFeishuOrg(t, fixture); preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodGet, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetLarkOrganization(w, req)
+	var response LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Catalog == nil {
+		t.Fatal("catalog is missing")
+	}
+	byID := make(map[string]LarkOrganizationDepartmentResponse)
+	for _, department := range response.Catalog.Departments {
+		byID[department.ID] = department
+	}
+	eng := byID["d_eng"]
+	if eng.Path != "Engineering" || eng.ParentID != "0" || eng.DirectMemberCount != 1 || eng.MemberCount != 3 || eng.ActiveMemberCount != 2 {
+		t.Fatalf("engineering = %+v, want direct 1, subtree 3 (2 active)", eng)
+	}
+	infra := byID["d_infra"]
+	if infra.Path != "Engineering / Platform / Infra" || infra.DirectMemberCount != 2 || infra.MemberCount != 2 {
+		t.Fatalf("infra = %+v, want path and 2 members", infra)
+	}
+	if platform := byID["d_platform"]; platform.MemberCount != 2 || platform.DirectMemberCount != 1 {
+		t.Fatalf("platform = %+v, want direct 1, subtree 2 (shared member counted once)", platform)
+	}
+}
+
+// TestFeishuOrgApplyRequiresFetchedDirectory: replay and apply plan against
+// the installation's shared directory, so they refuse to run once it is gone
+// instead of silently planning against nothing.
+func TestFeishuOrgApplyRequiresFetchedDirectory(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, nil); w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{Complete: true}
+	wireFeishuOrgAPIClient(t, client)
+	previewRun := decodeFeishuOrgRun(t, previewFeishuOrg(t, fixture))
+	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID); count != 1 {
+		t.Fatalf("directory rows after preview = %d, want 1", count)
+	}
+	// A refresh after the preview invalidates the reviewed plan.
+	dbfx.Exec(t, `UPDATE feishu_org_directory SET fetched_at = now() + interval '1 second' WHERE installation_id = $1`, fixture.installationID)
+	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusConflict || !strings.Contains(applied.Body.String(), "directory changed") {
+		t.Fatalf("apply after directory refresh status = %d, want 409 directory changed; body=%s", applied.Code, applied.Body.String())
+	}
+	replayed := decodeFeishuOrgRun(t, replayFeishuOrg(t, fixture, previewRun.ID))
+	if applied := applyFeishuOrg(t, fixture, replayed.ID); applied.Code != http.StatusOK {
+		t.Fatalf("apply of a fresh replay status = %d, body=%s", applied.Code, applied.Body.String())
+	}
+	dbfx.Exec(t, `DELETE FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID)
+	if replayed := replayFeishuOrg(t, fixture, previewRun.ID); replayed.Code != http.StatusConflict {
+		t.Fatalf("replay without directory status = %d, want 409; body=%s", replayed.Code, replayed.Body.String())
+	}
+	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusConflict {
+		t.Fatalf("apply without directory status = %d, want 409; body=%s", applied.Code, applied.Body.String())
+	}
+}
+
+// TestFeishuOrgAutoSyncAppliesAndSkipsOwnerChanges drives the scheduler
+// entry point: it refreshes the shared directory, applies the plan for a
+// workspace with automatic sync on, records an "auto" run, and leaves owner
+// access alone even when a rule would change it.
+func TestFeishuOrgAutoSyncAppliesAndSkipsOwnerChanges(t *testing.T) {
+	fixture := newFeishuOrgHandlerFixture(t)
+	mappings := []LarkOrganizationMappingResponse{
+		{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")},
+		{Kind: "department", ExternalID: "d2", ExternalName: "Leadership", MemberRole: feishuOrgRole("owner")},
+	}
+	req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
+		InstallationID: fixture.installationID, Enabled: true, AutoSync: true, Mappings: mappings,
+	})
+	w := httptest.NewRecorder()
+	testHandler.UpdateLarkOrganization(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var saved LarkOrganizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil || saved.Config == nil || !saved.Config.AutoSync {
+		t.Fatalf("saved config = %+v err=%v, want auto_sync on", saved.Config, err)
+	}
+	client := newFakeFeishuOrgAPIClient()
+	client.snapshot = lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}, {ID: "d2", Name: "Leadership", ParentID: "0"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_member", Email: fixture.memberEmail, Name: "Member", DepartmentIDs: []string{"d1"}, Active: true},
+			{OpenID: "ou_admin", Email: "feishu-org-admin-" + strings.TrimPrefix(fixture.memberEmail, "feishu-org-member-"), Name: "Admin", DepartmentIDs: []string{"d2"}, Active: true},
+		},
+	}
+	wireFeishuOrgAPIClient(t, client)
+
+	applied, err := testHandler.SyncFeishuOrganizations(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFeishuOrganizations: %v", err)
+	}
+	if applied < 1 || client.calls != 1 {
+		t.Fatalf("applied = %d calls = %d, want this workspace applied from one fetch", applied, client.calls)
+	}
+	var memberRole, adminRole string
+	if err := testPool.QueryRow(context.Background(), `SELECT role FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, fixture.memberID).Scan(&memberRole); err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `SELECT role FROM member WHERE workspace_id = $1 AND user_id = $2`, fixture.workspaceID, fixture.adminID).Scan(&adminRole); err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	if memberRole != "admin" {
+		t.Fatalf("member role after auto sync = %q, want admin", memberRole)
+	}
+	if adminRole != "admin" {
+		t.Fatalf("admin role after auto sync = %q, want unchanged admin (owner grant must be skipped)", adminRole)
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM feishu_org_directory WHERE installation_id = $1`, fixture.installationID); count != 1 {
+		t.Fatalf("directory rows = %d, want 1", count)
+	}
+	runs, err := testHandler.Queries.ListFeishuOrgSyncRuns(context.Background(), parseUUID(fixture.workspaceID))
+	if err != nil || len(runs) != 1 || runs[0].Mode != "auto" || runs[0].Status != "completed" {
+		t.Fatalf("runs = %+v err=%v, want one completed auto run", runs, err)
+	}
+	var plan feishuorg.Plan
+	if err := json.Unmarshal(runs[0].Plan, &plan); err != nil {
+		t.Fatalf("decode plan: %v", err)
+	}
+	skipped := 0
+	for _, change := range plan.Changes {
+		if change.Action == "skipped" && strings.Contains(change.Reason, "owner access") {
+			skipped++
+		}
+	}
+	if skipped == 0 {
+		t.Fatalf("auto run must record the skipped owner change: %+v", plan.Changes)
+	}
+	for _, assignment := range plan.RoleAssignments {
+		if assignment.Role == "owner" {
+			t.Fatalf("auto run must not assign owner: %+v", plan.RoleAssignments)
+		}
 	}
 }

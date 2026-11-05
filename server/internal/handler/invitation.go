@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -541,11 +542,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, err := qtx.CreateMember(r.Context(), db.CreateMemberParams{
-		WorkspaceID: accepted.WorkspaceID,
-		UserID:      user.ID,
-		Role:        accepted.Role,
-	})
+	member, err := h.joinWorkspaceFromInvitation(r.Context(), qtx, accepted, user.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "you are already a member of this workspace")
@@ -584,6 +581,8 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if capacityActive {
 		h.confirmCapacityIntent(r.Context(), uuid.UUID(accepted.WorkspaceID.Bytes), uuid.UUID(accepted.ID.Bytes), uuid.UUID(member.ID.Bytes))
 	}
+	// A reactivated membership may be cached as absent from the disable.
+	h.MembershipCache.Invalidate(r.Context(), userID, uuidToString(accepted.WorkspaceID))
 
 	slog.Info("invitation accepted", "invitation_id", invitationID, "user_id", userID, "workspace_id", uuidToString(accepted.WorkspaceID))
 
@@ -709,4 +708,21 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// joinWorkspaceFromInvitation creates the membership an accepted invitation
+// grants. A member that organization sync disabled earlier still owns the
+// (workspace, user) row, so it is reactivated with the invited role instead.
+func (h *Handler) joinWorkspaceFromInvitation(ctx context.Context, q *db.Queries, inv db.WorkspaceInvitation, userID pgtype.UUID) (db.Member, error) {
+	disabled, err := q.GetDisabledMemberByUserAndWorkspace(ctx, db.GetDisabledMemberByUserAndWorkspaceParams{
+		UserID: userID, WorkspaceID: inv.WorkspaceID,
+	})
+	switch {
+	case err == nil:
+		return q.ReactivateMember(ctx, db.ReactivateMemberParams{ID: disabled.ID, Role: inv.Role})
+	case errors.Is(err, pgx.ErrNoRows):
+		return q.CreateMember(ctx, db.CreateMemberParams{WorkspaceID: inv.WorkspaceID, UserID: userID, Role: inv.Role})
+	default:
+		return db.Member{}, err
+	}
 }

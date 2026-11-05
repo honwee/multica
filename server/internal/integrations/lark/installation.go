@@ -157,9 +157,25 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 	return row, nil
 }
 
+// Get resolves a Feishu installation by id regardless of workspace. Callers
+// that act on behalf of a workspace use GetInWorkspace or
+// GetOrganizationInstallation; this is for background work that already
+// derived the id from a workspace's own configuration.
+func (s *InstallationService) Get(ctx context.Context, id pgtype.UUID) (Installation, error) {
+	row, err := s.queries.GetLarkInstallation(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Installation{}, ErrInstallationNotFound
+		}
+		return Installation{}, err
+	}
+	return row, nil
+}
+
 // GetOrganizationInstallation resolves an installation owned by this workspace
-// or explicitly shared through an enabled organization configuration. The
-// source configuration must remain present and enabled for shared access.
+// or shared with it through the source workspace's enabled organization
+// configuration. The source configuration must remain present and enabled
+// for shared access; the requesting workspace may have sync switched off.
 func (s *InstallationService) GetOrganizationInstallation(ctx context.Context, id, workspaceID pgtype.UUID) (Installation, error) {
 	row, err := s.queries.GetFeishuOrgInstallationForWorkspace(ctx, db.GetFeishuOrgInstallationForWorkspaceParams{
 		InstallationID: id,

@@ -6,14 +6,28 @@ WHERE workspace_id = $1;
 SELECT pg_advisory_xact_lock(hashtext($1::text));
 
 -- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, installation_id, enabled)
-VALUES (@workspace_id, @installation_id, @enabled)
+INSERT INTO feishu_org_config (workspace_id, installation_id, enabled, auto_sync, updated_by)
+VALUES (@workspace_id, @installation_id, @enabled, @auto_sync, @updated_by)
 ON CONFLICT (workspace_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
+    auto_sync = EXCLUDED.auto_sync,
+    updated_by = EXCLUDED.updated_by,
     revision = feishu_org_config.revision + 1,
     updated_at = now()
 RETURNING *;
+
+-- name: ListEnabledFeishuOrgConfigs :many
+-- Every workspace whose sync is on, grouped by installation so the scheduler
+-- fetches each directory once.
+SELECT * FROM feishu_org_config
+WHERE enabled
+ORDER BY installation_id, workspace_id;
+
+-- name: ListActiveOwnerUserIDs :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND role = 'owner' AND disabled_at IS NULL
+ORDER BY created_at ASC;
 
 -- name: UpsertFeishuOrgGroup :one
 INSERT INTO feishu_org_group (workspace_id, kind, external_id, external_name, configured, active)
@@ -28,6 +42,13 @@ RETURNING *;
 SELECT * FROM feishu_org_group
 WHERE workspace_id = $1
 ORDER BY kind, external_id;
+
+-- name: ListActiveFeishuOrgGroups :many
+-- Groups that currently grant access: applied (active) and still configured.
+-- Members read these to pick team targets for their own agents.
+SELECT * FROM feishu_org_group
+WHERE workspace_id = $1 AND active AND configured
+ORDER BY kind, external_name, external_id;
 
 -- name: DeactivateFeishuOrgGroupsNotIn :exec
 UPDATE feishu_org_group
@@ -56,11 +77,6 @@ INSERT INTO feishu_org_role_mapping (workspace_id, group_id, role)
 VALUES (@workspace_id, @group_id, @role)
 RETURNING *;
 
--- name: ListFeishuOrgAgentMappings :many
-SELECT * FROM feishu_org_agent_mapping
-WHERE workspace_id = $1
-ORDER BY created_at, group_id, agent_id;
-
 -- name: ListFeishuOrgAgentTargets :many
 SELECT ait.agent_id, ait.target_id AS group_id
 FROM agent_invocation_target ait
@@ -72,26 +88,11 @@ WHERE a.workspace_id = $1
   AND ait.target_type = 'team'
 ORDER BY ait.agent_id, ait.target_id;
 
--- name: DeleteFeishuOrgAgentMappings :exec
-DELETE FROM feishu_org_agent_mapping
-WHERE workspace_id = $1;
-
--- name: CreateFeishuOrgAgentMapping :one
-INSERT INTO feishu_org_agent_mapping (workspace_id, group_id, agent_id)
-VALUES (@workspace_id, @group_id, @agent_id)
-RETURNING *;
-
 -- name: DeleteAgentInvocationTarget :exec
 DELETE FROM agent_invocation_target
 WHERE agent_id = @agent_id
   AND target_type = @target_type
   AND target_id = @target_id;
-
--- name: SetAgentPublicTo :one
-UPDATE agent
-SET permission_mode = 'public_to', updated_at = now()
-WHERE id = @id AND workspace_id = @workspace_id
-RETURNING *;
 
 -- name: UpsertFeishuOrgMembership :one
 INSERT INTO feishu_org_membership (workspace_id, group_id, user_id, active)
@@ -142,11 +143,32 @@ ORDER BY fom.group_id;
 
 -- name: CreateFeishuOrgSyncRun :one
 INSERT INTO feishu_org_sync_run (
-    workspace_id, mode, status, revision, snapshot, plan, requested_by, replayed_from_id
+    workspace_id, mode, status, revision, plan, requested_by, replayed_from_id, directory_fetched_at
 ) VALUES (
-    @workspace_id, @mode, @status, @revision, @snapshot, @plan, @requested_by, @replayed_from_id
+    @workspace_id, @mode, @status, @revision, @plan, @requested_by, @replayed_from_id, @directory_fetched_at
 )
 RETURNING *;
+
+-- name: UpsertFeishuOrgDirectory :one
+-- The directory is shared by every workspace configured on the installation.
+INSERT INTO feishu_org_directory (installation_id, snapshot, fetched_at, fetched_by)
+VALUES (@installation_id, @snapshot, now(), @fetched_by)
+ON CONFLICT (installation_id) DO UPDATE SET
+    snapshot = EXCLUDED.snapshot,
+    fetched_at = now(),
+    fetched_by = EXCLUDED.fetched_by,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetFeishuOrgDirectory :one
+SELECT * FROM feishu_org_directory
+WHERE installation_id = $1;
+
+-- name: GetFeishuOrgDirectoryForWorkspace :one
+SELECT d.*
+FROM feishu_org_directory d
+JOIN feishu_org_config c ON c.installation_id = d.installation_id
+WHERE c.workspace_id = $1;
 
 -- name: GetFeishuOrgSyncRunInWorkspace :one
 SELECT * FROM feishu_org_sync_run
@@ -178,6 +200,7 @@ SELECT
     u.name AS user_name,
     u.email AS user_email,
     u.feishu_open_id,
+    u.feishu_union_id,
     COALESCE(
         ARRAY_AGG(DISTINCT b.channel_user_id ORDER BY b.channel_user_id)
             FILTER (WHERE b.channel_user_id IS NOT NULL),
@@ -234,9 +257,6 @@ deleted_sync_runs AS (
 deleted_memberships AS (
     DELETE FROM feishu_org_membership WHERE workspace_id = $1
 ),
-deleted_agent_mappings AS (
-    DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1
-),
 deleted_role_mappings AS (
     DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1
 ),
@@ -292,18 +312,11 @@ JOIN feishu_org_group target_group
  AND target_group.kind = source_group.kind
  AND target_group.external_id = source_group.external_id;
 
--- name: CloneLatestFeishuOrgSnapshot :exec
-INSERT INTO feishu_org_sync_run (workspace_id, mode, status, revision, snapshot, plan, requested_by)
-SELECT @target_workspace_id, 'preview', 'preview', @revision, snapshot, @plan, @requested_by
-FROM feishu_org_sync_run source_run
-WHERE source_run.workspace_id = @source_workspace_id
-  AND mode = 'preview'
-  AND status = 'preview'
-  AND snapshot->>'Complete' = 'true'
-ORDER BY created_at DESC, id DESC
-LIMIT 1;
-
 -- name: GetFeishuOrgInstallationForWorkspace :one
+-- A workspace may use its own installation, or one shared by the source
+-- workspace whose organization sync is enabled. The requesting workspace's
+-- own enabled flag is deliberately not a condition: a workspace that turned
+-- sync off must still be able to turn it back on.
 SELECT ci.*
 FROM channel_installation ci
 WHERE ci.id = @installation_id
@@ -319,6 +332,5 @@ WHERE ci.id = @installation_id
        AND source.enabled
       WHERE shared.workspace_id = @workspace_id
         AND shared.installation_id = ci.id
-        AND shared.enabled
     )
   );

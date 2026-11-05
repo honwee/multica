@@ -14,9 +14,7 @@ func TestFeishuOrgTeamAccessControlsViewAssignAndInvoke(t *testing.T) {
 	fixture := newFeishuOrgHandlerFixture(t)
 	outsiderID := dbfx.User(t, "Feishu org outsider", "feishu-org-outsider-"+fixture.workspaceID+"@example.com")
 	dbfx.Member(t, fixture.workspaceID, outsiderID, "member")
-	mapping := LarkOrganizationMappingResponse{
-		Kind: "department", ExternalID: "d1", ExternalName: "Engineering", AgentIDs: []string{fixture.agentID},
-	}
+	mapping := LarkOrganizationMappingResponse{Kind: "department", ExternalID: "d1", ExternalName: "Engineering"}
 	if w := saveFeishuOrgConfig(t, fixture, fixture.ownerID, true, []LarkOrganizationMappingResponse{mapping}); w.Code != http.StatusOK {
 		t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -34,6 +32,11 @@ func TestFeishuOrgTeamAccessControlsViewAssignAndInvoke(t *testing.T) {
 	if applied := applyFeishuOrg(t, fixture, previewRun.ID); applied.Code != http.StatusOK {
 		t.Fatalf("apply status = %d, body=%s", applied.Code, applied.Body.String())
 	}
+	var groupID string
+	if err := testPool.QueryRow(context.Background(), `SELECT id FROM feishu_org_group WHERE workspace_id = $1 AND active`, fixture.workspaceID).Scan(&groupID); err != nil {
+		t.Fatalf("load active group: %v", err)
+	}
+	grantFeishuOrgTeam(t, fixture.agentID, groupID, fixture.ownerID)
 
 	ctx := context.Background()
 	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(fixture.agentID))

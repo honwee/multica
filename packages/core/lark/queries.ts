@@ -8,6 +8,7 @@ export const larkKeys = {
   all: (wsId: string) => ["lark", wsId] as const,
   installations: (wsId: string) => [...larkKeys.all(wsId), "installations"] as const,
   organization: (wsId: string) => [...larkKeys.all(wsId), "organization"] as const,
+  organizationGroups: (wsId: string) => [...larkKeys.all(wsId), "organization", "groups"] as const,
   botInfo: (wsId: string, installationId: string) => [...larkKeys.all(wsId), "bot-info", installationId] as const,
 };
 
@@ -36,4 +37,13 @@ export const larkBotInfoOptions = (wsId: string, installationId: string, enabled
     queryFn: () => api.getLarkInstallationBotInfo(wsId, installationId),
     enabled: enabled && !!wsId && !!installationId,
     staleTime: 5 * 60 * 1000,
+  });
+
+/** Applied organization groups, readable by every member for agent access. */
+export const larkOrganizationGroupsOptions = (wsId: string) =>
+  queryOptions({
+    queryKey: larkKeys.organizationGroups(wsId),
+    queryFn: () => api.listLarkOrganizationGroups(wsId),
+    enabled: !!wsId,
+    staleTime: 60 * 1000,
   });

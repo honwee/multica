@@ -82,7 +82,7 @@ const previewRun = {
       agent_id: "agent-1",
       group_id: "group-1",
       group_name: "Engineering",
-      action: "agent_granted",
+      action: "agent_revoked",
     }],
     warnings: ["One member could not be matched"],
   },
@@ -105,7 +105,6 @@ function baseOrganization() {
       external_id: "dep-1",
       external_name: "Engineering",
       member_role: null,
-      agent_ids: [],
     }],
     required_scopes: ["contact:department:readonly"],
     requirements: ["Grant the bot access to organization contacts"],
@@ -161,19 +160,20 @@ describe("LarkOrganizationMapping", () => {
     const user = userEvent.setup();
     organizationRef.current = {
       ...baseOrganization(),
-      mappings: [{ kind: "department", external_id: "dep-1", external_name: "Engineering", member_role: "admin", agent_ids: ["agent-1"] }],
+      mappings: [{ kind: "department", external_id: "dep-1", external_name: "Engineering", member_role: "admin" }],
       sync_runs: [previewRun],
     };
     renderUI(false);
 
     expect(screen.getByText(enSettings.lark.organization.read_only)).toBeTruthy();
     expect(screen.getAllByText("Engineering").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Review Bot").length).toBeGreaterThan(0);
     expect(screen.getAllByText("cli_app").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("tab", { name: enSettings.lark.organization.tabs_preview }));
     expect(screen.getByText("One member could not be matched")).toBeTruthy();
     expect(screen.getByText(/Matched Engineering/)).toBeTruthy();
+    // Revocations name the agent from the workspace agent list.
+    expect(screen.getByText(/Review Bot/)).toBeTruthy();
     expect(screen.queryByText(/group_joined/)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
@@ -191,7 +191,7 @@ describe("LarkOrganizationMapping", () => {
     await user.click(screen.getByRole("button", { name: enSettings.lark.organization.rule_edit.replace("{{name}}", "Engineering") }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: /Platform/ }));
-    await user.click(within(dialog).getByRole("checkbox", { name: "Review Bot" }));
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
     await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
 
@@ -199,12 +199,12 @@ describe("LarkOrganizationMapping", () => {
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
       installation_id: installation.id,
       enabled: true,
+      auto_sync: false,
       mappings: [{
         kind: "department",
         external_id: "dep-2",
         external_name: "Platform",
         member_role: null,
-        agent_ids: ["agent-1"],
       }],
     });
     expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["lark", "workspace-1", "organization"] });
@@ -250,7 +250,7 @@ describe("LarkOrganizationMapping", () => {
     expect(within(dialog).queryByRole("option", { name: /Ada/ })).toBeNull();
   }, 30000);
 
-  it("saves an individual rule with its role and agent selection", async () => {
+  it("saves an individual rule with its role", async () => {
     const user = userEvent.setup();
     mockUpdate.mockResolvedValue(baseOrganization());
     renderUI();
@@ -262,7 +262,6 @@ describe("LarkOrganizationMapping", () => {
       target: { value: "Ada" },
     });
     await user.click(within(dialog).getByRole("option", { name: /Ada/ }));
-    await user.click(within(dialog).getByRole("checkbox", { name: "Review Bot" }));
     await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
     await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
 
@@ -270,23 +269,34 @@ describe("LarkOrganizationMapping", () => {
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
       installation_id: installation.id,
       enabled: true,
+      auto_sync: false,
       mappings: [
         {
           kind: "department",
           external_id: "dep-1",
           external_name: "Engineering",
           member_role: null,
-          agent_ids: [],
         },
         {
           kind: "user",
           external_id: "union-ada",
           external_name: "Ada",
           member_role: "member",
-          agent_ids: ["agent-1"],
         },
       ],
     });
+  }, 30000);
+
+  it("saves the automatic sync switch with the configuration", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockResolvedValue({ ...baseOrganization(), config: { ...baseOrganization().config, auto_sync: true } });
+    renderUI();
+    const autoSync = screen.getByRole("switch", { name: enSettings.lark.organization.auto_sync });
+    expect(autoSync).toHaveAttribute("aria-checked", "false");
+    await user.click(autoSync);
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockUpdate).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ enabled: true, auto_sync: true }));
   }, 30000);
 
   it("filters catalog sources before adding a rule", async () => {
@@ -301,7 +311,9 @@ describe("LarkOrganizationMapping", () => {
     await user.click(within(dialog).getByRole("option", { name: /Support/ }));
     await user.click(within(dialog).getByRole("button", { name: enSettings.lark.organization.rule_save }));
     expect(await screen.findAllByText("Support")).not.toHaveLength(0);
-    expect(screen.getAllByText(enSettings.lark.organization.no_agent_grant)).toHaveLength(2);
+    // The existing rule has no role; the new one defaults to member.
+    expect(screen.getAllByText(enSettings.lark.organization.no_member_role)).toHaveLength(1);
+    expect(screen.getAllByRole("row")).toHaveLength(3);
   });
 
   it("previews, replays, and explicitly applies a reviewed plan with natural language", async () => {

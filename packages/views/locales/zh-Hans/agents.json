@@ -866,7 +866,7 @@
     "private_desc": "只有你可以运行该智能体",
     "shared_title": "共享",
     "shared_desc": "向整个工作区或指定成员开放该智能体",
-    "shared_target_required": "保存前，请至少选择一名成员。",
+    "shared_target_required": "保存前，请至少选择一名成员或一个团队。",
     "workspace_title": "整个工作区",
     "workspace_desc": "默认允许工作区内所有成员运行该智能体",
     "members_title": "指定成员",
@@ -878,7 +878,10 @@
     "public_group": "公开访问",
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
-    "composio_switch_hint": "提示——该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
+    "composio_switch_hint": "提示——该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。",
+    "teams_group": "部门与团队",
+    "teams_hint": "来自飞书组织架构同步。所选组内的在职成员都可以运行该智能体。",
+    "trigger_teams_count_other": "{{count}} 个团队"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

@@ -1808,6 +1808,7 @@ describe("workspace subscription contract", () => {
       await expect(client.updateLarkOrganization("ws-1", {
         installation_id: "installation-1",
         enabled: true,
+        auto_sync: false,
         mappings: [],
       })).rejects.toThrow("Malformed response");
 
@@ -1821,6 +1822,7 @@ describe("workspace subscription contract", () => {
       await expect(client.updateLarkOrganization("ws-1", {
         installation_id: "installation-1",
         enabled: true,
+        auto_sync: false,
         mappings: [],
       })).rejects.toThrow("Malformed response");
     });
@@ -1893,6 +1895,33 @@ describe("workspace subscription contract", () => {
         "https://api.example.test/api/workspaces/ws-1/lark/installations/inst-1/bot-info",
         expect.any(Object),
       );
+    });
+
+    it("lists applied organization groups and tolerates a malformed payload", async () => {
+      stubFetchJson({
+        groups: [
+          { id: "g-1", kind: "department", external_id: "od_1", external_name: "Engineering" },
+          { kind: "department" },
+          "nonsense",
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const listed = await client.listLarkOrganizationGroups("ws-1");
+      // A single malformed row drops the whole array to the empty fallback
+      // rather than crashing the picker.
+      expect(listed.groups).toEqual([]);
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/lark/organization/groups",
+        expect.any(Object),
+      );
+
+      stubFetchJson({ groups: [{ id: "g-1", kind: "department", external_id: "od_1", external_name: "Engineering" }] });
+      const ok = await client.listLarkOrganizationGroups("ws-1");
+      expect(ok.groups).toEqual([{ id: "g-1", kind: "department", external_id: "od_1", external_name: "Engineering" }]);
+
+      stubFetchJson({ unexpected: true });
+      const empty = await client.listLarkOrganizationGroups("ws-1");
+      expect(empty.groups).toEqual([]);
     });
   });
 });

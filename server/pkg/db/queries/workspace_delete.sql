@@ -707,8 +707,11 @@ deleted_feishu_org_sync_runs AS (
 deleted_feishu_org_memberships AS (
     DELETE FROM feishu_org_membership WHERE workspace_id = $1
 ),
-deleted_feishu_org_agent_mappings AS (
-    DELETE FROM feishu_org_agent_mapping WHERE workspace_id = $1
+deleted_feishu_org_directories AS (
+    DELETE FROM feishu_org_directory
+    WHERE installation_id IN (
+        SELECT id FROM channel_installation WHERE workspace_id = $1 AND channel_type = 'feishu'
+    )
 ),
 deleted_feishu_org_role_mappings AS (
     DELETE FROM feishu_org_role_mapping WHERE workspace_id = $1

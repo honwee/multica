@@ -869,7 +869,7 @@
     "private_desc": "Solo tú puedes ejecutar este agente",
     "shared_title": "Compartido",
     "shared_desc": "Elige el espacio de trabajo o las personas concretas que pueden ejecutar este agente",
-    "shared_target_required": "Selecciona al menos una persona antes de guardar.",
+    "shared_target_required": "Selecciona al menos una persona o un equipo antes de guardar.",
     "workspace_title": "Todo el espacio de trabajo",
     "workspace_desc": "Todos los miembros del espacio de trabajo pueden ejecutar este agente",
     "members_title": "Personas concretas",
@@ -881,7 +881,11 @@
     "public_group": "Acceso público",
     "owner_only_readonly": "Solo el propietario del agente puede cambiar quién puede ejecutarlo.",
     "members_empty": "No hay miembros del espacio de trabajo para elegir",
-    "composio_switch_hint": "Ojo: este agente tiene apps de Composio activadas. Compartirlo permite que todos los que tengan acceso usen esas apps a través de este agente."
+    "composio_switch_hint": "Ojo: este agente tiene apps de Composio activadas. Compartirlo permite que todos los que tengan acceso usen esas apps a través de este agente.",
+    "teams_group": "Departamentos y equipos",
+    "teams_hint": "Sincronizado desde la organización de Feishu. Todos los miembros activos de un grupo seleccionado pueden ejecutar este agente.",
+    "trigger_teams_count_one": "{{count}} equipo",
+    "trigger_teams_count_other": "{{count}} equipos"
   },
   "profile_card": {
     "unavailable": "Agente no disponible",

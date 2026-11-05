@@ -717,18 +717,22 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type FeishuOrgAgentMapping struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	GroupID     pgtype.UUID        `json:"group_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type FeishuOrgConfig struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	InstallationID pgtype.UUID        `json:"installation_id"`
 	Enabled        bool               `json:"enabled"`
 	Revision       int64              `json:"revision"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	AutoSync       bool               `json:"auto_sync"`
+	UpdatedBy      pgtype.UUID        `json:"updated_by"`
+}
+
+type FeishuOrgDirectory struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Snapshot       []byte             `json:"snapshot"`
+	FetchedAt      pgtype.Timestamptz `json:"fetched_at"`
+	FetchedBy      pgtype.UUID        `json:"fetched_by"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
@@ -763,18 +767,18 @@ type FeishuOrgRoleMapping struct {
 }
 
 type FeishuOrgSyncRun struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Mode           string             `json:"mode"`
-	Status         string             `json:"status"`
-	Revision       int64              `json:"revision"`
-	Snapshot       []byte             `json:"snapshot"`
-	Plan           []byte             `json:"plan"`
-	Error          pgtype.Text        `json:"error"`
-	RequestedBy    pgtype.UUID        `json:"requested_by"`
-	ReplayedFromID pgtype.UUID        `json:"replayed_from_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Mode               string             `json:"mode"`
+	Status             string             `json:"status"`
+	Revision           int64              `json:"revision"`
+	Plan               []byte             `json:"plan"`
+	Error              pgtype.Text        `json:"error"`
+	RequestedBy        pgtype.UUID        `json:"requested_by"`
+	ReplayedFromID     pgtype.UUID        `json:"replayed_from_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	DirectoryFetchedAt pgtype.Timestamptz `json:"directory_fetched_at"`
 }
 
 type GithubInstallation struct {
@@ -1744,6 +1748,8 @@ type User struct {
 	Timezone            pgtype.Text `json:"timezone"`
 	WhatsNewSeenVersion pgtype.Text `json:"whats_new_seen_version"`
 	FeishuOpenID        pgtype.Text `json:"feishu_open_id"`
+	FeishuUnionID       pgtype.Text `json:"feishu_union_id"`
+	FeishuTenantKey     pgtype.Text `json:"feishu_tenant_key"`
 }
 
 type UserComposioConnection struct {

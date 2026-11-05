@@ -22,21 +22,27 @@ import (
 var feishuOrgRequirements = []string{
 	"Grant the required scopes and publish a new app version.",
 	"Include every required department and user in the app's contact visibility scope.",
+	"Subscribe the app to contact.user and contact.department events so changes sync between hourly runs.",
 }
 
 type LarkOrganizationConfigResponse struct {
 	InstallationID string `json:"installation_id"`
 	Enabled        bool   `json:"enabled"`
-	Revision       int64  `json:"revision"`
-	UpdatedAt      string `json:"updated_at"`
+	// AutoSync applies the plan on a schedule and whenever the directory
+	// changes, without a manual preview and apply.
+	AutoSync  bool   `json:"auto_sync"`
+	Revision  int64  `json:"revision"`
+	UpdatedAt string `json:"updated_at"`
 }
 
+// LarkOrganizationMappingResponse is one organization rule. Agent access is
+// not part of a rule: owners grant their agents to an applied group from the
+// agent access picker, and the sync only revokes grants whose group is gone.
 type LarkOrganizationMappingResponse struct {
-	Kind         string   `json:"kind"`
-	ExternalID   string   `json:"external_id"`
-	ExternalName string   `json:"external_name"`
-	MemberRole   *string  `json:"member_role"`
-	AgentIDs     []string `json:"agent_ids"`
+	Kind         string  `json:"kind"`
+	ExternalID   string  `json:"external_id"`
+	ExternalName string  `json:"external_name"`
+	MemberRole   *string `json:"member_role"`
 }
 
 type LarkOrganizationSyncRunResponse struct {
@@ -49,8 +55,10 @@ type LarkOrganizationSyncRunResponse struct {
 	Error          string         `json:"error"`
 	RequestedBy    string         `json:"requested_by"`
 	ReplayedFromID *string        `json:"replayed_from_id,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	CompletedAt    *string        `json:"completed_at,omitempty"`
+	// DirectoryFetchedAt is the directory version the plan was built from.
+	DirectoryFetchedAt *string `json:"directory_fetched_at,omitempty"`
+	CreatedAt          string  `json:"created_at"`
+	CompletedAt        *string `json:"completed_at,omitempty"`
 }
 
 type LarkOrganizationResponse struct {
@@ -65,6 +73,7 @@ type LarkOrganizationResponse struct {
 type UpdateLarkOrganizationRequest struct {
 	InstallationID string                            `json:"installation_id"`
 	Enabled        bool                              `json:"enabled"`
+	AutoSync       bool                              `json:"auto_sync"`
 	Mappings       []LarkOrganizationMappingResponse `json:"mappings"`
 }
 
@@ -126,6 +135,7 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		response.Config = &LarkOrganizationConfigResponse{
 			InstallationID: uuidToString(config.InstallationID),
 			Enabled:        config.Enabled,
+			AutoSync:       config.AutoSync,
 			Revision:       config.Revision,
 			UpdatedAt:      timestampToString(config.UpdatedAt),
 		}
@@ -138,33 +148,19 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 	if err != nil {
 		return response, err
 	}
-	agentMappings, err := h.Queries.ListFeishuOrgAgentMappings(ctx, workspaceID)
-	if err != nil {
-		return response, err
-	}
 	rolesByGroup := make(map[string]string, len(roleMappings))
 	for _, mapping := range roleMappings {
 		rolesByGroup[uuidToString(mapping.GroupID)] = mapping.Role
-	}
-	agentsByGroup := make(map[string][]string)
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		agentsByGroup[groupID] = append(agentsByGroup[groupID], uuidToString(mapping.AgentID))
 	}
 	for _, group := range groups {
 		if !group.Configured {
 			continue
 		}
 		groupID := uuidToString(group.ID)
-		agentIDs := agentsByGroup[groupID]
-		if agentIDs == nil {
-			agentIDs = []string{}
-		}
 		mapping := LarkOrganizationMappingResponse{
 			Kind:         group.Kind,
 			ExternalID:   group.ExternalID,
 			ExternalName: group.ExternalName,
-			AgentIDs:     agentIDs,
 		}
 		if role := rolesByGroup[groupID]; role != "" {
 			mapping.MemberRole = &role
@@ -181,15 +177,14 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 			return response, err
 		}
 		response.SyncRuns = append(response.SyncRuns, converted)
-		if response.Catalog == nil && run.Mode == "preview" && run.Status == "preview" {
-			var snapshot lark.OrgSnapshot
-			if err := json.Unmarshal(run.Snapshot, &snapshot); err != nil {
-				return response, err
-			}
-			if !snapshot.Complete {
-				continue
-			}
-			catalog, err := h.buildLarkOrganizationCatalog(ctx, workspaceID, run, snapshot)
+	}
+	if response.Config != nil {
+		directory, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, config.InstallationID)
+		if err != nil && !errors.Is(err, errFeishuOrgDirectoryMissing) {
+			return response, err
+		}
+		if err == nil {
+			catalog, err := h.buildLarkOrganizationCatalog(ctx, workspaceID, directory, snapshot)
 			if err != nil {
 				return response, err
 			}
@@ -197,6 +192,28 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		}
 	}
 	return response, nil
+}
+
+var errFeishuOrgDirectoryMissing = errors.New("organization directory has not been fetched")
+
+// loadFeishuOrgDirectory returns the installation's fetched directory. An
+// incomplete snapshot counts as missing: nothing may plan against it.
+func loadFeishuOrgDirectory(ctx context.Context, q *db.Queries, installationID pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, error) {
+	directory, err := q.GetFeishuOrgDirectory(ctx, installationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
+	}
+	if err != nil {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, err
+	}
+	var snapshot lark.OrgSnapshot
+	if err := json.Unmarshal(directory.Snapshot, &snapshot); err != nil {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, fmt.Errorf("decode organization directory: %w", err)
+	}
+	if !snapshot.Complete {
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
+	}
+	return directory, snapshot, nil
 }
 
 func larkOrganizationSyncRunResponse(row db.FeishuOrgSyncRun) (LarkOrganizationSyncRunResponse, error) {
@@ -216,16 +233,17 @@ func larkOrganizationSyncRunResponse(row db.FeishuOrgSyncRun) (LarkOrganizationS
 		plan.Warnings = []string{}
 	}
 	response := LarkOrganizationSyncRunResponse{
-		ID:             uuidToString(row.ID),
-		WorkspaceID:    uuidToString(row.WorkspaceID),
-		Mode:           row.Mode,
-		Status:         row.Status,
-		Revision:       row.Revision,
-		Plan:           plan,
-		RequestedBy:    uuidToString(row.RequestedBy),
-		ReplayedFromID: uuidToPtr(row.ReplayedFromID),
-		CreatedAt:      timestampToString(row.CreatedAt),
-		CompletedAt:    timestampToPtr(row.CompletedAt),
+		ID:                 uuidToString(row.ID),
+		WorkspaceID:        uuidToString(row.WorkspaceID),
+		Mode:               row.Mode,
+		Status:             row.Status,
+		Revision:           row.Revision,
+		Plan:               plan,
+		RequestedBy:        uuidToString(row.RequestedBy),
+		ReplayedFromID:     uuidToPtr(row.ReplayedFromID),
+		DirectoryFetchedAt: timestampToPtr(row.DirectoryFetchedAt),
+		CreatedAt:          timestampToString(row.CreatedAt),
+		CompletedAt:        timestampToPtr(row.CompletedAt),
 	}
 	if row.Error.Valid {
 		response.Error = row.Error.String
@@ -266,7 +284,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 	}
 
 	seenGroups := make(map[string]struct{}, len(request.Mappings))
-	seenAgents := make(map[string]struct{})
 	requiresOwner := false
 	for i := range request.Mappings {
 		mapping := &request.Mappings[i]
@@ -296,33 +313,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 			mapping.MemberRole = &role
 			requiresOwner = requiresOwner || role == "owner"
 		}
-		agentsInGroup := make(map[string]struct{}, len(mapping.AgentIDs))
-		for i, agentID := range mapping.AgentIDs {
-			agentUUID, valid := parseUUIDOrBadRequest(w, agentID, "agent_id")
-			if !valid {
-				return
-			}
-			canonicalAgentID := uuidToString(agentUUID)
-			mapping.AgentIDs[i] = canonicalAgentID
-			if _, duplicate := agentsInGroup[canonicalAgentID]; duplicate {
-				writeError(w, http.StatusBadRequest, "duplicate agent in organization mapping")
-				return
-			}
-			agentsInGroup[canonicalAgentID] = struct{}{}
-			if _, checked := seenAgents[canonicalAgentID]; checked {
-				continue
-			}
-			agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentUUID, WorkspaceID: actor.workspaceID})
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "agent_id must belong to the current workspace")
-				return
-			}
-			if agent.OwnerID != actor.userID {
-				writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-				return
-			}
-			seenAgents[canonicalAgentID] = struct{}{}
-		}
 	}
 	if requiresOwner && actor.member.Role != "owner" {
 		writeError(w, http.StatusForbidden, "only a workspace owner can configure owner role mappings")
@@ -350,39 +340,14 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusForbidden, "only a workspace owner can configure owner role mappings")
 		return
 	}
-	oldAgentMappings, err := qtx.ListFeishuOrgAgentMappings(r.Context(), actor.workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-		return
-	}
-	for _, mapping := range oldAgentMappings {
-		seenAgents[uuidToString(mapping.AgentID)] = struct{}{}
-	}
-	for agentID := range seenAgents {
-		agent, err := qtx.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: parseUUID(agentID), WorkspaceID: actor.workspaceID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-			return
-		}
-		if agent.OwnerID != actor.userID {
-			writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-			return
-		}
-	}
 	if _, err := qtx.UpsertFeishuOrgConfig(r.Context(), db.UpsertFeishuOrgConfigParams{
 		WorkspaceID: actor.workspaceID, InstallationID: installationID, Enabled: request.Enabled,
+		AutoSync: request.AutoSync, UpdatedBy: actor.userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 		return
 	}
 	if err := qtx.DeleteFeishuOrgRoleMappings(r.Context(), actor.workspaceID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-		return
-	}
-	if err := qtx.DeleteFeishuOrgAgentMappings(r.Context(), actor.workspaceID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 		return
 	}
@@ -400,15 +365,6 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		if mapping.MemberRole != nil {
 			if _, err := qtx.CreateFeishuOrgRoleMapping(r.Context(), db.CreateFeishuOrgRoleMappingParams{
 				WorkspaceID: actor.workspaceID, GroupID: group.ID, Role: *mapping.MemberRole,
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
-				return
-			}
-		}
-		for _, agentID := range mapping.AgentIDs {
-			agentUUID := parseUUID(agentID)
-			if _, err := qtx.CreateFeishuOrgAgentMapping(r.Context(), db.CreateFeishuOrgAgentMappingParams{
-				WorkspaceID: actor.workspaceID, GroupID: group.ID, AgentID: agentUUID,
 			}); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 				return
@@ -461,7 +417,7 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		// audit record. Keep the detached write bounded as well.
 		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer cancel()
-		run, err := h.createFeishuOrgSyncRun(auditCtx, h.Queries, actor, "preview", "failed", config.Revision, nil, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{})
+		run, err := h.createFeishuOrgSyncRun(auditCtx, h.Queries, actor, "preview", "failed", config.Revision, emptyFeishuOrgPlan(), cause.Error(), pgtype.UUID{}, pgtype.Timestamptz{})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to audit organization preview")
 			return
@@ -486,17 +442,24 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		fail(err)
 		return
 	}
-	plan, err := h.buildFeishuOrgPlan(r.Context(), h.Queries, actor.workspaceID, snapshot)
-	if err != nil {
-		fail(err)
-		return
-	}
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
 		fail(err)
 		return
 	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "preview", "preview", config.Revision, snapshotJSON, plan, "", pgtype.UUID{})
+	directory, err := h.Queries.UpsertFeishuOrgDirectory(r.Context(), db.UpsertFeishuOrgDirectoryParams{
+		InstallationID: installation.ID, Snapshot: snapshotJSON, FetchedBy: actor.userID,
+	})
+	if err != nil {
+		fail(err)
+		return
+	}
+	plan, err := h.buildFeishuOrgPlan(r.Context(), h.Queries, actor.workspaceID, snapshot)
+	if err != nil {
+		fail(err)
+		return
+	}
+	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "preview", "preview", config.Revision, plan, "", pgtype.UUID{}, directory.FetchedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization preview")
 		return
@@ -522,7 +485,7 @@ func (h *Handler) ReplayLarkOrganizationSync(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
 	}
-	snapshot, ok := feishuOrgRunSnapshot(w, source)
+	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
 	if !ok {
 		return
 	}
@@ -531,7 +494,7 @@ func (h *Handler) ReplayLarkOrganizationSync(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to recalculate organization preview")
 		return
 	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "replay", "preview", config.Revision, source.Snapshot, plan, "", source.ID)
+	run, err := h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "replay", "preview", config.Revision, plan, "", source.ID, directory.FetchedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization replay")
 		return
@@ -561,181 +524,35 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, "organization sync configuration changed since preview")
 		return
 	}
-	snapshot, ok := feishuOrgRunSnapshot(w, source)
+	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
 	if !ok {
 		return
 	}
-	plan := emptyFeishuOrgPlan()
-	var tx pgx.Tx
-	fail := func(cause error) {
-		if tx != nil {
-			_ = tx.Rollback(r.Context())
-		}
-		_, _ = h.createFeishuOrgSyncRun(r.Context(), h.Queries, actor, "apply", "failed", config.Revision, source.Snapshot, plan, cause.Error(), source.ID)
-		writeError(w, http.StatusInternalServerError, "failed to apply organization sync")
-	}
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		fail(err)
+	// The admin reviewed a plan built from one directory version. A refresh
+	// since then (scheduled, event-driven, or another admin's preview) may
+	// have changed who is in which department, so the reviewed plan no
+	// longer describes what apply would do.
+	if !source.DirectoryFetchedAt.Valid || !source.DirectoryFetchedAt.Time.Equal(directory.FetchedAt.Time) {
+		writeError(w, http.StatusConflict, "organization directory changed since preview; preview again")
 		return
 	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-	if err := qtx.LockFeishuOrgPermissionWrites(r.Context(), uuidToString(actor.workspaceID)); err != nil {
-		fail(err)
-		return
-	}
-	currentMember, err := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{UserID: actor.userID, WorkspaceID: actor.workspaceID})
-	if err != nil || !roleAllowed(currentMember.Role, "owner", "admin") {
-		_ = tx.Rollback(r.Context())
+	run, err := h.applyFeishuOrgSync(r.Context(), actor, config, snapshot, feishuOrgApplyOptions{mode: "apply", source: &source, directory: directory})
+	switch {
+	case errors.Is(err, errFeishuOrgInsufficientRole):
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
-	}
-	actor.member = currentMember
-	currentConfig, err := qtx.GetFeishuOrgConfig(r.Context(), actor.workspaceID)
-	if err != nil || currentConfig.Revision != source.Revision {
-		_ = tx.Rollback(r.Context())
+	case errors.Is(err, errFeishuOrgOwnerRequired):
+		writeError(w, http.StatusForbidden, "only a workspace owner can change owner access")
+		return
+	case errors.Is(err, errFeishuOrgRevisionChanged):
 		writeError(w, http.StatusConflict, "organization sync configuration changed since preview")
 		return
-	}
-	if !currentConfig.Enabled {
-		_ = tx.Rollback(r.Context())
+	case errors.Is(err, errFeishuOrgSyncDisabled):
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
-	}
-	plan, err = h.buildFeishuOrgPlan(r.Context(), qtx, actor.workspaceID, snapshot)
-	if err != nil {
-		fail(err)
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "failed to apply organization sync")
 		return
-	}
-	if actor.member.Role != "owner" {
-		requiresOwner, err := h.feishuOrgPlanRequiresOwner(r.Context(), qtx, actor.workspaceID, plan)
-		if err != nil {
-			fail(err)
-			return
-		}
-		if requiresOwner {
-			_ = tx.Rollback(r.Context())
-			writeError(w, http.StatusForbidden, "only a workspace owner can change owner access")
-			return
-		}
-	}
-	for _, change := range plan.AgentChanges {
-		agent, err := qtx.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: parseUUID(change.AgentID), WorkspaceID: actor.workspaceID})
-		if err != nil {
-			fail(err)
-			return
-		}
-		if agent.OwnerID != actor.userID {
-			_ = tx.Rollback(r.Context())
-			writeError(w, http.StatusForbidden, "only the agent owner can change organization access")
-			return
-		}
-	}
-	invalidateUsers := make(map[string]struct{})
-	type disconnectSignal struct {
-		userID   string
-		memberID string
-	}
-	disconnects := make([]disconnectSignal, 0)
-	for _, change := range plan.Changes {
-		if change.Action == "skipped" {
-			continue
-		}
-		userID := parseUUID(change.UserID)
-		switch change.Action {
-		case "member_disabled":
-			member, err := qtx.DisableFeishuOrgMember(r.Context(), db.DisableFeishuOrgMemberParams{WorkspaceID: actor.workspaceID, UserID: userID})
-			if err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-			disconnects = append(disconnects, disconnectSignal{userID: change.UserID, memberID: uuidToString(member.ID)})
-		case "member_restored":
-			member, err := qtx.RestoreFeishuOrgMember(r.Context(), db.RestoreFeishuOrgMemberParams{WorkspaceID: actor.workspaceID, UserID: userID})
-			if err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-			disconnects = append(disconnects, disconnectSignal{userID: change.UserID, memberID: uuidToString(member.ID)})
-		case "role_changed":
-			if _, err := qtx.UpdateFeishuOrgMemberRole(r.Context(), db.UpdateFeishuOrgMemberRoleParams{WorkspaceID: actor.workspaceID, UserID: userID, Role: change.After}); err != nil {
-				fail(err)
-				return
-			}
-			invalidateUsers[change.UserID] = struct{}{}
-		case "group_joined", "group_left":
-			if _, err := qtx.UpsertFeishuOrgMembership(r.Context(), db.UpsertFeishuOrgMembershipParams{
-				WorkspaceID: actor.workspaceID, GroupID: parseUUID(change.GroupID), UserID: userID, Active: change.Action == "group_joined",
-			}); err != nil {
-				fail(err)
-				return
-			}
-		default:
-			fail(fmt.Errorf("unknown organization sync action %q", change.Action))
-			return
-		}
-	}
-	for _, assignment := range plan.RoleAssignments {
-		if !roleAllowed(assignment.Role, "owner", "admin", "member") {
-			fail(fmt.Errorf("invalid managed role %q", assignment.Role))
-			return
-		}
-		if _, err := qtx.UpdateFeishuOrgMemberRole(r.Context(), db.UpdateFeishuOrgMemberRoleParams{
-			WorkspaceID: actor.workspaceID, UserID: parseUUID(assignment.UserID), Role: assignment.Role,
-		}); err != nil {
-			fail(err)
-			return
-		}
-		invalidateUsers[assignment.UserID] = struct{}{}
-	}
-	for _, change := range plan.AgentChanges {
-		switch change.Action {
-		case "agent_granted":
-			agentID := parseUUID(change.AgentID)
-			if _, err := qtx.SetAgentPublicTo(r.Context(), db.SetAgentPublicToParams{ID: agentID, WorkspaceID: actor.workspaceID}); err != nil {
-				fail(err)
-				return
-			}
-			if err := qtx.CreateAgentInvocationTarget(r.Context(), db.CreateAgentInvocationTargetParams{
-				AgentID: agentID, TargetType: invocationTargetTeam, TargetID: parseUUID(change.GroupID), CreatedBy: actor.userID,
-			}); err != nil {
-				fail(err)
-				return
-			}
-		case "agent_revoked":
-			if err := qtx.DeleteAgentInvocationTarget(r.Context(), db.DeleteAgentInvocationTargetParams{
-				AgentID: parseUUID(change.AgentID), TargetType: invocationTargetTeam, TargetID: parseUUID(change.GroupID),
-			}); err != nil {
-				fail(err)
-				return
-			}
-		default:
-			fail(fmt.Errorf("unknown organization agent action %q", change.Action))
-			return
-		}
-	}
-	if err := qtx.ApplyFeishuOrgGroupStates(r.Context(), actor.workspaceID); err != nil {
-		fail(err)
-		return
-	}
-	run, err := h.createFeishuOrgSyncRun(r.Context(), qtx, actor, "apply", "completed", config.Revision, source.Snapshot, plan, "", source.ID)
-	if err != nil {
-		fail(err)
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		fail(err)
-		return
-	}
-	workspaceID := uuidToString(actor.workspaceID)
-	for userID := range invalidateUsers {
-		h.MembershipCache.Invalidate(r.Context(), userID, workspaceID)
-	}
-	for _, signal := range disconnects {
-		h.Hub.DisconnectMember(workspaceID, signal.userID, signal.memberID)
 	}
 	response, err := larkOrganizationSyncRunResponse(run)
 	if err != nil {
@@ -750,31 +567,43 @@ func (h *Handler) feishuOrgPlanRequiresOwner(ctx context.Context, q *db.Queries,
 	if err != nil {
 		return false, err
 	}
-	roles := make(map[string]string, len(members))
-	for _, member := range members {
-		roles[uuidToString(member.UserID)] = member.Role
-	}
+	roles := feishuOrgMemberRoles(members)
 	for _, change := range plan.Changes {
-		if change.Action == "skipped" {
-			continue
-		}
-		switch change.Action {
-		case "member_disabled", "member_restored":
-			if roles[change.UserID] == "owner" {
-				return true, nil
-			}
-		case "role_changed":
-			if change.Before == "owner" || change.After == "owner" {
-				return true, nil
-			}
+		if feishuOrgChangeAffectsOwner(change, roles) {
+			return true, nil
 		}
 	}
 	for _, assignment := range plan.RoleAssignments {
-		if assignment.Role == "owner" {
+		if feishuOrgAssignmentAffectsOwner(assignment, roles) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func feishuOrgMemberRoles(members []db.ListFeishuOrgMemberIdentitiesRow) map[string]string {
+	roles := make(map[string]string, len(members))
+	for _, member := range members {
+		roles[uuidToString(member.UserID)] = member.Role
+	}
+	return roles
+}
+
+// feishuOrgChangeAffectsOwner is the one definition of "needs an owner":
+// disabling or restoring an owner, or moving anyone into or out of the owner
+// role. Both the manual owner gate and unattended skipping use it.
+func feishuOrgChangeAffectsOwner(change feishuorg.Change, roles map[string]string) bool {
+	switch change.Action {
+	case "member_disabled", "member_restored":
+		return roles[change.UserID] == "owner"
+	case "role_changed":
+		return change.Before == "owner" || change.After == "owner"
+	}
+	return false
+}
+
+func feishuOrgAssignmentAffectsOwner(assignment feishuorg.RoleAssignment, roles map[string]string) bool {
+	return assignment.Role == "owner" || roles[assignment.UserID] == "owner"
 }
 
 func (h *Handler) feishuOrgConfigForRun(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID) (db.FeishuOrgConfig, bool) {
@@ -836,18 +665,19 @@ func (h *Handler) feishuOrgSourceRun(w http.ResponseWriter, r *http.Request) (fe
 	return actor, source, true
 }
 
-func feishuOrgRunSnapshot(w http.ResponseWriter, source db.FeishuOrgSyncRun) (lark.OrgSnapshot, bool) {
-	trimmed := bytes.TrimSpace(source.Snapshot)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}")) || bytes.Equal(trimmed, []byte("null")) {
-		writeError(w, http.StatusConflict, "organization sync run has no snapshot")
-		return lark.OrgSnapshot{}, false
+// feishuOrgDirectorySnapshot loads the directory a replay or apply plans
+// against. Both work from the current directory, never from Feishu directly.
+func (h *Handler) feishuOrgDirectorySnapshot(w http.ResponseWriter, r *http.Request, installationID pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, bool) {
+	directory, snapshot, err := loadFeishuOrgDirectory(r.Context(), h.Queries, installationID)
+	if errors.Is(err, errFeishuOrgDirectoryMissing) {
+		writeError(w, http.StatusConflict, "organization directory has not been fetched; run a preview first")
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, false
 	}
-	var snapshot lark.OrgSnapshot
-	if err := json.Unmarshal(trimmed, &snapshot); err != nil {
-		writeError(w, http.StatusInternalServerError, "organization sync run has an invalid snapshot")
-		return lark.OrgSnapshot{}, false
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load organization directory")
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, false
 	}
-	return snapshot, true
+	return directory, snapshot, true
 }
 
 func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, snapshot lark.OrgSnapshot) (feishuorg.Plan, error) {
@@ -856,10 +686,6 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 		return feishuorg.Plan{}, err
 	}
 	roleMappings, err := q.ListFeishuOrgRoleMappings(ctx, workspaceID)
-	if err != nil {
-		return feishuorg.Plan{}, err
-	}
-	agentMappings, err := q.ListFeishuOrgAgentMappings(ctx, workspaceID)
 	if err != nil {
 		return feishuorg.Plan{}, err
 	}
@@ -876,11 +702,6 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 	for _, mapping := range roleMappings {
 		rolesByGroup[uuidToString(mapping.GroupID)] = mapping.Role
 	}
-	agentsByGroup := make(map[string][]string)
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		agentsByGroup[groupID] = append(agentsByGroup[groupID], uuidToString(mapping.AgentID))
-	}
 	mappings := make([]feishuorg.Mapping, 0, len(groups))
 	for _, group := range groups {
 		if !group.Configured {
@@ -889,7 +710,7 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 		groupID := uuidToString(group.ID)
 		mappings = append(mappings, feishuorg.Mapping{
 			GroupID: groupID, Kind: group.Kind, ExternalID: group.ExternalID, ExternalName: group.ExternalName,
-			MemberRole: rolesByGroup[groupID], AgentIDs: agentsByGroup[groupID],
+			MemberRole: rolesByGroup[groupID],
 		})
 	}
 	trackedUsers := make(map[string]struct{})
@@ -908,49 +729,27 @@ func (h *Handler) buildFeishuOrgPlan(ctx context.Context, q *db.Queries, workspa
 	if err != nil {
 		return feishuorg.Plan{}, err
 	}
+	// Team grants live on the agent (agent_invocation_target) and are made
+	// from the access picker. The sync only revokes grants whose group was
+	// removed from the rules, so a deleted department does not linger as a
+	// dead allow-list entry.
 	targetRows, err := q.ListFeishuOrgAgentTargets(ctx, workspaceID)
 	if err != nil {
 		return feishuorg.Plan{}, err
-	}
-	agentRows, err := q.ListAllAgents(ctx, workspaceID)
-	if err != nil {
-		return feishuorg.Plan{}, err
-	}
-	permissionModeByAgent := make(map[string]string, len(agentRows))
-	for _, agent := range agentRows {
-		permissionModeByAgent[uuidToString(agent.ID)] = agent.PermissionMode
 	}
 	groupByID := make(map[string]db.FeishuOrgGroup, len(groups))
 	for _, group := range groups {
 		groupByID[uuidToString(group.ID)] = group
 	}
-	desired := make(map[string]feishuorg.AgentChange, len(agentMappings))
-	for _, mapping := range agentMappings {
-		groupID := uuidToString(mapping.GroupID)
-		group := groupByID[groupID]
-		if !group.Configured {
+	plan.AgentChanges = []feishuorg.AgentChange{}
+	for _, row := range targetRows {
+		group := groupByID[uuidToString(row.GroupID)]
+		if group.Configured {
 			continue
 		}
-		agentID := uuidToString(mapping.AgentID)
-		desired[agentID+"\x00"+groupID] = feishuorg.AgentChange{AgentID: agentID, GroupID: groupID, GroupName: group.ExternalName, Action: "agent_granted"}
-	}
-	current := make(map[string]feishuorg.AgentChange, len(targetRows))
-	for _, row := range targetRows {
-		agentID := uuidToString(row.AgentID)
-		groupID := uuidToString(row.GroupID)
-		current[agentID+"\x00"+groupID] = feishuorg.AgentChange{AgentID: agentID, GroupID: groupID, GroupName: groupByID[groupID].ExternalName, Action: "agent_revoked"}
-	}
-	plan.AgentChanges = []feishuorg.AgentChange{}
-	for key, change := range desired {
-		_, targetExists := current[key]
-		if !targetExists || !groupByID[change.GroupID].Active || permissionModeByAgent[change.AgentID] != "public_to" {
-			plan.AgentChanges = append(plan.AgentChanges, change)
-		}
-	}
-	for key, change := range current {
-		if _, ok := desired[key]; !ok {
-			plan.AgentChanges = append(plan.AgentChanges, change)
-		}
+		plan.AgentChanges = append(plan.AgentChanges, feishuorg.AgentChange{
+			AgentID: uuidToString(row.AgentID), GroupID: uuidToString(row.GroupID), GroupName: group.ExternalName, Action: "agent_revoked",
+		})
 	}
 	sort.Slice(plan.AgentChanges, func(i, j int) bool {
 		if plan.AgentChanges[i].AgentID != plan.AgentChanges[j].AgentID {
@@ -967,10 +766,10 @@ func (h *Handler) createFeishuOrgSyncRun(
 	actor feishuOrgActor,
 	mode, status string,
 	revision int64,
-	snapshot []byte,
 	plan feishuorg.Plan,
 	errorMessage string,
 	replayedFromID pgtype.UUID,
+	directoryFetchedAt pgtype.Timestamptz,
 ) (db.FeishuOrgSyncRun, error) {
 	if plan.Changes == nil {
 		plan.Changes = []feishuorg.Change{}
@@ -985,12 +784,9 @@ func (h *Handler) createFeishuOrgSyncRun(
 	if err != nil {
 		return db.FeishuOrgSyncRun{}, err
 	}
-	if len(bytes.TrimSpace(snapshot)) == 0 {
-		snapshot = []byte("{}")
-	}
 	run, err := q.CreateFeishuOrgSyncRun(ctx, db.CreateFeishuOrgSyncRunParams{
 		WorkspaceID: actor.workspaceID, Mode: mode, Status: status, Revision: revision,
-		Snapshot: snapshot, Plan: planJSON, RequestedBy: actor.userID, ReplayedFromID: replayedFromID,
+		Plan: planJSON, RequestedBy: actor.userID, ReplayedFromID: replayedFromID, DirectoryFetchedAt: directoryFetchedAt,
 	})
 	if err != nil || status == "preview" {
 		return run, err

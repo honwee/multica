@@ -708,7 +708,7 @@
     "private_desc": "あなただけがこのエージェントを実行できます",
     "shared_title": "共有",
     "shared_desc": "このエージェントを実行できるワークスペースまたはメンバーを選択します",
-    "shared_target_required": "保存する前に、ワークスペースまたは1人以上のメンバーを選択してください。",
+    "shared_target_required": "保存する前に、少なくとも 1 人またはチームを選択してください。",
     "workspace_title": "ワークスペースに公開",
     "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
     "members_title": "特定のメンバーに公開",
@@ -720,7 +720,10 @@
     "public_group": "公開アクセス",
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
-    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。",
+    "teams_group": "部署とチーム",
+    "teams_hint": "Feishu の組織から同期されます。選択したグループの在籍メンバー全員がこのエージェントを実行できます。",
+    "trigger_teams_count_other": "{{count}} チーム"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

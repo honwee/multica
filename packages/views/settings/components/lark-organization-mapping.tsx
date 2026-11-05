@@ -78,6 +78,7 @@ export function LarkOrganizationMapping({
   );
   const [installationId, setInstallationId] = useState("");
   const [enabled, setEnabled] = useState(false);
+  const [autoSync, setAutoSync] = useState(false);
   const [mappings, setMappings] = useState<LarkOrganizationMappingValue[]>([]);
   const [run, setRun] = useState<LarkOrganizationSyncRun | null>(null);
   const [pending, setPending] = useState<OrganizationPendingAction>(null);
@@ -98,11 +99,9 @@ export function LarkOrganizationMapping({
         : activeInstallations[0]?.id ?? "",
     );
     setEnabled(config?.enabled ?? false);
+    setAutoSync(config?.auto_sync ?? false);
     setMappings(
-      (data?.mappings ?? []).map((mapping) => ({
-        ...mapping,
-        agent_ids: [...mapping.agent_ids],
-      })),
+      (data?.mappings ?? []).map((mapping) => ({ ...mapping })),
     );
   }, [data, activeInstallations]);
 
@@ -130,11 +129,12 @@ export function LarkOrganizationMapping({
   const displayedRun = run ?? latestStoredRun;
   const config = data?.config ?? null;
   const catalog = data?.catalog ?? null;
-  const draftSignature = JSON.stringify({ installation_id: installationId, enabled, mappings });
+  const draftSignature = JSON.stringify({ installation_id: installationId, enabled, auto_sync: autoSync, mappings });
   const savedSignature = config
     ? JSON.stringify({
         installation_id: config.installation_id,
         enabled: config.enabled,
+        auto_sync: config.auto_sync ?? false,
         mappings: data?.mappings ?? [],
       })
     : null;
@@ -147,7 +147,9 @@ export function LarkOrganizationMapping({
   const canApply = Boolean(
     canManage && displayedRun &&
       (displayedRun.mode === "preview" || displayedRun.mode === "replay") &&
-      displayedRun.status === "preview" && displayedRun.revision === config?.revision,
+      displayedRun.status === "preview" && displayedRun.revision === config?.revision &&
+      // The directory a preview was planned against must still be current.
+      (!displayedRun.directory_fetched_at || !catalog || displayedRun.directory_fetched_at === catalog.snapshot_at),
   );
   const canReplay = Boolean(
     canManage && displayedRun && (displayedRun.mode === "preview" || displayedRun.mode === "replay"),
@@ -170,6 +172,7 @@ export function LarkOrganizationMapping({
       await api.updateLarkOrganization(wsId, {
         installation_id: installationId,
         enabled,
+        auto_sync: autoSync,
         mappings: nextMappings,
       });
       setMappings(nextMappings);
@@ -325,7 +328,23 @@ export function LarkOrganizationMapping({
                   {canManage && (
                     <div className="flex items-center gap-2 pb-2">
                       <Label htmlFor={`${id}-enabled`}>{t(($) => $.lark.organization.enabled)}</Label>
-                      <Switch id={`${id}-enabled`} checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} disabled={pending !== null} />
+                      <Switch
+                        id={`${id}-enabled`}
+                        checked={enabled}
+                        onCheckedChange={(checked) => {
+                          setEnabled(checked === true);
+                          // Automatic sync has no meaning while sync is off; clear it
+                          // so re-enabling later does not silently resume unattended applies.
+                          if (checked !== true) setAutoSync(false);
+                        }}
+                        disabled={pending !== null}
+                      />
+                    </div>
+                  )}
+                  {canManage && (
+                    <div className="flex items-center gap-2 pb-2" title={t(($) => $.lark.organization.auto_sync_hint)}>
+                      <Label htmlFor={`${id}-auto-sync`}>{t(($) => $.lark.organization.auto_sync)}</Label>
+                      <Switch id={`${id}-auto-sync`} checked={autoSync} onCheckedChange={(checked) => setAutoSync(checked === true)} disabled={pending !== null || !enabled} />
                     </div>
                   )}
                 </div>
@@ -356,7 +375,6 @@ export function LarkOrganizationMapping({
                   <TableHeader><TableRow>
                     <TableHead>{t(($) => $.lark.organization.rule_source)}</TableHead>
                     <TableHead>{t(($) => $.lark.organization.member_role)}</TableHead>
-                    <TableHead>{t(($) => $.lark.organization.agents)}</TableHead>
                     {canManage && <TableHead className="w-24"><span className="sr-only">{t(($) => $.lark.organization.rule_actions)}</span></TableHead>}
                   </TableRow></TableHeader>
                   <TableBody>
@@ -378,11 +396,6 @@ export function LarkOrganizationMapping({
                             </div>
                           </TableCell>
                           <TableCell>{mapping.member_role ?? t(($) => $.lark.organization.no_member_role)}</TableCell>
-                          <TableCell className="whitespace-normal">
-                            {mapping.agent_ids.length
-                              ? mapping.agent_ids.map((agentId) => agentNames.get(agentId) ?? t(($) => $.lark.organization.unknown_agent)).join(", ")
-                              : t(($) => $.lark.organization.no_agent_grant)}
-                          </TableCell>
                           {canManage && (
                             <TableCell>
                               <div className="flex justify-end">
@@ -435,7 +448,7 @@ export function LarkOrganizationMapping({
                   agentNames={agentNames}
                   canApply={canApply}
                   canReplay={canReplay}
-                  stale={displayedRun.revision !== config?.revision && displayedRun.status === "preview"}
+                  stale={displayedRun.status === "preview" && (displayedRun.revision !== config?.revision || (!!displayedRun.directory_fetched_at && !!catalog && displayedRun.directory_fetched_at !== catalog.snapshot_at))}
                   pending={pending}
                   onReplay={() => displayedRun && replay(displayedRun)}
                   onApply={() => setApplyOpen(true)}
@@ -464,7 +477,6 @@ export function LarkOrganizationMapping({
           open={editorOpen}
           mapping={editingMapping}
           catalog={catalog}
-          agents={agents}
           onOpenChange={setEditorOpen}
           onSave={editMapping}
         />
@@ -617,6 +629,7 @@ function HistoryMode({ run }: { run: LarkOrganizationSyncRun }) {
   switch (run.mode) {
     case "preview": return <>{t(($) => $.lark.organization.history_mode_preview)}</>;
     case "replay": return <>{t(($) => $.lark.organization.history_mode_replay)}</>;
+    case "auto": return <>{t(($) => $.lark.organization.history_mode_auto)}</>;
     case "apply": return <>{t(($) => $.lark.organization.history_mode_apply)}</>;
     default: return <>{run.mode}</>;
   }

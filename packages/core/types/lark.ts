@@ -96,18 +96,22 @@ export interface RedeemLarkBindingTokenResponse {
 export interface LarkOrganizationConfig {
   installation_id: string;
   enabled: boolean;
+  /** Apply the plan hourly and on Feishu contact events without a manual
+   * review. Optional so older servers still parse. */
+  auto_sync?: boolean;
   revision: number;
   updated_at: string;
 }
 
 export type LarkOrganizationMemberRole = "owner" | "admin" | "member";
 
+/** One organization rule. Agent access is granted from the agent access
+ * picker against an applied group, not from the rule. */
 export interface LarkOrganizationMapping {
-  kind: "department" | "job_title" | string;
+  kind: "department" | "job_title" | "user" | string;
   external_id: string;
   external_name: string;
   member_role: LarkOrganizationMemberRole | null;
-  agent_ids: string[];
 }
 
 export interface LarkOrganizationSyncChange {
@@ -142,6 +146,9 @@ export interface LarkOrganizationSyncRun {
   error: string;
   requested_by: string;
   replayed_from_id?: string | null;
+  /** Directory version the plan was built from; compare with the catalog's
+   * snapshot_at to tell whether the plan is still current. */
+  directory_fetched_at?: string | null;
   created_at: string;
   completed_at?: string | null;
 }
@@ -149,8 +156,16 @@ export interface LarkOrganizationSyncRun {
 export interface LarkOrganizationDepartment {
   id: string;
   name: string;
+  /** Parent open_department_id; "0" for top-level departments. Optional
+   * so older servers that predate nesting still parse. */
+  parent_id?: string;
+  /** "Parent / Child" display path from the root. */
+  path?: string;
   direct_member_count: number;
   active_direct_member_count: number;
+  /** Members including every sub-department: what a department rule covers. */
+  member_count?: number;
+  active_member_count?: number;
 }
 
 export interface LarkOrganizationJobTitle {
@@ -204,5 +219,20 @@ export interface LarkOrganizationResponse {
 export interface UpdateLarkOrganizationRequest {
   installation_id: string;
   enabled: boolean;
+  auto_sync: boolean;
   mappings: LarkOrganizationMapping[];
+}
+
+/** An applied organization group any workspace member may grant an agent
+ * to. Wire shape mirrors `LarkOrganizationGroupResponse` in
+ * `server/internal/handler/feishu_org_groups.go`. */
+export interface LarkOrganizationGroup {
+  id: string;
+  kind: "department" | "job_title" | "user" | string;
+  external_id: string;
+  external_name: string;
+}
+
+export interface ListLarkOrganizationGroupsResponse {
+  groups: LarkOrganizationGroup[];
 }

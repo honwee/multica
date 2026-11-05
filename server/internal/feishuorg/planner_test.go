@@ -317,6 +317,11 @@ func TestBuildPlanIdentityFallbacks(t *testing.T) {
 			member: Member{Email: "Person@Example.com"},
 			user:   lark.OrgUser{Email: "person@example.COM"},
 		},
+		{
+			name:   "enterprise email",
+			member: Member{Email: "person@corp.example.com"},
+			user:   lark.OrgUser{Email: "personal@example.com", EnterpriseEmail: "Person@Corp.Example.com"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -533,4 +538,75 @@ func groupChange(userID, userName, action, groupID, groupName string) Change {
 		change.After = "inactive"
 	}
 	return change
+}
+
+func TestBuildPlanDepartmentRuleCoversSubDepartments(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete: true,
+		Departments: []lark.OrgDepartment{
+			{ID: "d_eng", Name: "Engineering", ParentID: "0"},
+			{ID: "d_platform", Name: "Platform", ParentID: "d_eng"},
+			{ID: "d_design", Name: "Design", ParentID: "0"},
+		},
+		Users: []lark.OrgUser{
+			{UnionID: "union-platform", Name: "Platform Person", DepartmentIDs: []string{"d_platform"}, Active: true},
+			{UnionID: "union-design", Name: "Design Person", DepartmentIDs: []string{"d_design"}, Active: true},
+		},
+	}
+	mapping := Mapping{GroupID: "g_eng", Kind: "department", ExternalID: "d_eng", ExternalName: "Engineering", MemberRole: "admin"}
+	members := []Member{
+		{UserID: "u1", Name: "Platform Person", Role: "member", UnionIDs: []string{"union-platform"}, Tracked: true},
+		{UserID: "u2", Name: "Design Person", Role: "member", UnionIDs: []string{"union-design"}, Tracked: true},
+	}
+	got, err := BuildPlan(snapshot, []Mapping{mapping}, members, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	joined := map[string]bool{}
+	for _, change := range got.Changes {
+		if change.Action == "group_joined" {
+			joined[change.UserID] = true
+		}
+	}
+	if !joined["u1"] || joined["u2"] {
+		t.Fatalf("sub-department member must join and a sibling must not: %+v", got.Changes)
+	}
+	if len(got.RoleAssignments) != 1 || got.RoleAssignments[0].UserID != "u1" || got.RoleAssignments[0].Role != "admin" {
+		t.Fatalf("role assignments = %+v, want u1 admin", got.RoleAssignments)
+	}
+}
+
+func TestResolveAccessAndFindUser(t *testing.T) {
+	snapshot := lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d_eng", Name: "Engineering", ParentID: "0"}, {ID: "d_platform", Name: "Platform", ParentID: "d_eng"}},
+		Users: []lark.OrgUser{
+			{UnionID: "on_platform", OpenID: "ou_platform", EnterpriseEmail: "Platform@Corp.com", Name: "Platform", DepartmentIDs: []string{"d_platform"}, JobTitle: "Engineer", Active: true},
+			{UnionID: "on_outside", Name: "Outside", DepartmentIDs: []string{"0"}, Active: true},
+		},
+	}
+	mappings := []Mapping{
+		{GroupID: "g_eng", Kind: "department", ExternalID: "d_eng", MemberRole: "member"},
+		{GroupID: "g_eng_title", Kind: "job_title", ExternalID: "Engineer", MemberRole: "admin"},
+		{GroupID: "g_bad", Kind: "department", ExternalID: "d_missing", MemberRole: "owner"},
+	}
+	user, ok := FindUser(snapshot, "on_platform", "")
+	if !ok {
+		t.Fatal("FindUser by union id failed")
+	}
+	access := ResolveAccess(snapshot, mappings, user)
+	if !access.Entitled() || access.Role != "admin" || len(access.GroupIDs) != 2 || access.GroupIDs[0] != "g_eng" || access.GroupIDs[1] != "g_eng_title" {
+		t.Fatalf("access = %+v, want admin via job title plus both groups", access)
+	}
+	byEmail, ok := FindUser(snapshot, "", "platform@corp.com")
+	if !ok || byEmail.UnionID != "on_platform" {
+		t.Fatalf("FindUser by enterprise email = %+v ok=%v", byEmail, ok)
+	}
+	outside, _ := FindUser(snapshot, "on_outside", "")
+	if ResolveAccess(snapshot, mappings, outside).Entitled() {
+		t.Fatal("user outside every rule must not be entitled")
+	}
+	if _, ok := FindUser(snapshot, "on_nobody", "nobody@corp.com"); ok {
+		t.Fatal("unknown user must not be found")
+	}
 }

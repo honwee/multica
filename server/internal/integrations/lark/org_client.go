@@ -25,20 +25,27 @@ var RequiredOrgScopes = []string{
 }
 
 // OrgDepartment is a department identified by its open_department_id.
+// ParentID is the department it was listed under; direct children of the
+// virtual root carry the root id "0".
 type OrgDepartment struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	ParentID string
 }
 
 // OrgUser is a user and every directly fetched department they belong to.
+// EnterpriseEmail is the tenant-managed mailbox and the identity the login
+// flow keys accounts by; Email is the personal mailbox from the contact
+// profile and only a fallback.
 type OrgUser struct {
-	OpenID        string
-	UnionID       string
-	Email         string
-	Name          string
-	JobTitle      string
-	DepartmentIDs []string
-	Active        bool
+	OpenID          string
+	UnionID         string
+	Email           string
+	EnterpriseEmail string
+	Name            string
+	JobTitle        string
+	DepartmentIDs   []string
+	Active          bool
 }
 
 // OrgSnapshot is complete only when every department and user page succeeded.
@@ -98,6 +105,7 @@ func (c *httpAPIClient) FetchOrganization(ctx context.Context, creds Installatio
 				continue
 			}
 			seenDepartments[department.ID] = struct{}{}
+			department.ParentID = departmentID
 			snapshot.Departments = append(snapshot.Departments, department)
 			pending = append(pending, department.ID)
 		}
@@ -207,12 +215,13 @@ func (c *httpAPIClient) fetchOrgDepartmentUsers(ctx context.Context, creds Insta
 			Msg  string `json:"msg"`
 			Data struct {
 				Items []struct {
-					OpenID   string `json:"open_id"`
-					UnionID  string `json:"union_id"`
-					Email    string `json:"email"`
-					Name     string `json:"name"`
-					JobTitle string `json:"job_title"`
-					Status   struct {
+					OpenID          string `json:"open_id"`
+					UnionID         string `json:"union_id"`
+					Email           string `json:"email"`
+					EnterpriseEmail string `json:"enterprise_email"`
+					Name            string `json:"name"`
+					JobTitle        string `json:"job_title"`
+					Status          struct {
 						IsResigned bool `json:"is_resigned"`
 					} `json:"status"`
 				} `json:"items"`
@@ -231,12 +240,13 @@ func (c *httpAPIClient) fetchOrgDepartmentUsers(ctx context.Context, creds Insta
 		}
 		for _, item := range resp.Data.Items {
 			users = append(users, OrgUser{
-				OpenID:   item.OpenID,
-				UnionID:  item.UnionID,
-				Email:    item.Email,
-				Name:     item.Name,
-				JobTitle: item.JobTitle,
-				Active:   !item.Status.IsResigned,
+				OpenID:          item.OpenID,
+				UnionID:         item.UnionID,
+				Email:           item.Email,
+				EnterpriseEmail: item.EnterpriseEmail,
+				Name:            item.Name,
+				JobTitle:        item.JobTitle,
+				Active:          !item.Status.IsResigned,
 			})
 		}
 
@@ -286,4 +296,46 @@ func isOrgScopeErrorCode(code int) bool {
 	default:
 		return false
 	}
+}
+
+// LoginEmail is the address the login flow would key this user's account by:
+// the enterprise mailbox first, then the personal one, lowercased.
+func (u OrgUser) LoginEmail() string {
+	if email := strings.ToLower(strings.TrimSpace(u.EnterpriseEmail)); email != "" {
+		return email
+	}
+	return strings.ToLower(strings.TrimSpace(u.Email))
+}
+
+// DepartmentClosure maps every department to itself plus all of its
+// descendants, so a rule on a parent department also covers its sub-teams.
+func (s OrgSnapshot) DepartmentClosure() map[string]map[string]struct{} {
+	children := make(map[string][]string, len(s.Departments))
+	for _, department := range s.Departments {
+		if department.ID == "" || department.ParentID == "" || department.ParentID == department.ID {
+			continue
+		}
+		children[department.ParentID] = append(children[department.ParentID], department.ID)
+	}
+	closure := make(map[string]map[string]struct{}, len(s.Departments))
+	for _, department := range s.Departments {
+		if department.ID == "" {
+			continue
+		}
+		set := map[string]struct{}{department.ID: {}}
+		pending := []string{department.ID}
+		for len(pending) > 0 {
+			current := pending[0]
+			pending = pending[1:]
+			for _, child := range children[current] {
+				if _, seen := set[child]; seen {
+					continue
+				}
+				set[child] = struct{}{}
+				pending = append(pending, child)
+			}
+		}
+		closure[department.ID] = set
+	}
+	return closure
 }

@@ -859,6 +859,11 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
+	// Feishu organization directories refresh hourly; workspaces with
+	// automatic sync on get their plan applied in the same pass.
+	if err := schedulerMgr.Register(scheduler.FeishuOrgSyncJob(h)); err != nil {
+		slog.Warn("scheduler: failed to register feishu_org_sync job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

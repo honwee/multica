@@ -50,6 +50,24 @@ type feishuUserInfo struct {
 	Email           string `json:"email"`
 	EnterpriseEmail string `json:"enterprise_email"`
 	OpenID          string `json:"open_id"`
+	UnionID         string `json:"union_id"`
+	TenantKey       string `json:"tenant_key"`
+}
+
+// feishuIdentityID normalizes a Feishu open_id, union_id, or tenant_key and
+// reports whether it is well-formed. Feishu identifiers are ASCII tokens;
+// anything else is treated as absent rather than stored.
+func feishuIdentityID(raw string) (string, bool) {
+	id := strings.ToLower(strings.TrimSpace(raw))
+	if id == "" {
+		return "", false
+	}
+	for _, char := range id {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
+			return "", false
+		}
+	}
+	return id, true
 }
 
 type feishuUserInfoResponse struct {
@@ -192,17 +210,15 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		email = strings.ToLower(strings.TrimSpace(fUser.Data.Email))
 	}
 
-	// open_id is the stable identity across a Feishu app installation. Once it
-	// is linked to a Multica user it takes precedence over email, so a person
-	// without an enterprise mailbox can still return to the same account.
-	openID := strings.ToLower(strings.TrimSpace(fUser.Data.OpenID))
-	validOpenID := openID != ""
-	for _, char := range openID {
-		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
-			validOpenID = false
-			break
-		}
-	}
+	// union_id is stable across every app of the same Feishu developer, so it
+	// is the primary link between a login and an organization directory entry.
+	// open_id only identifies the user within the login app and stays as a
+	// secondary key for accounts linked before union_id was stored. Either one
+	// takes precedence over email, so a person without an enterprise mailbox
+	// can still return to the same account.
+	openID, validOpenID := feishuIdentityID(fUser.Data.OpenID)
+	unionID, validUnionID := feishuIdentityID(fUser.Data.UnionID)
+	tenantKey, _ := feishuIdentityID(fUser.Data.TenantKey)
 	if email == "" && !validOpenID {
 		writeErrorCode(w, http.StatusBadRequest, feishuLoginCodeAccountWithoutEmail, "Feishu did not provide an email address or a valid Open ID for this sign-in")
 		return
@@ -218,37 +234,25 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user db.User
-	var isNew bool
-	if validOpenID {
-		user, err = h.Queries.GetUserByFeishuOpenID(r.Context(), pgtype.Text{String: openID, Valid: true})
-		if err != nil && !isNotFound(err) {
-			slog.Warn("linked Feishu identity lookup failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusInternalServerError, "failed to look up Feishu identity")
+	user, isNew, err := h.resolveFeishuUser(r, email, openID, unionID)
+	if err != nil {
+		if writeGoogleLoginActionableError(w, err) {
 			return
 		}
+		slog.Warn("feishu login user resolution failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve Feishu identity")
+		return
 	}
-
-	if !validOpenID || isNotFound(err) {
-		user, isNew, err = h.findOrCreateUser(r.Context(), email)
+	if validOpenID || validUnionID {
+		linked, err := h.Queries.SetUserFeishuIdentity(r.Context(), db.SetUserFeishuIdentityParams{
+			ID: user.ID, FeishuOpenID: openID, FeishuUnionID: unionID, FeishuTenantKey: tenantKey,
+		})
 		if err != nil {
-			if writeGoogleLoginActionableError(w, err) {
-				return
-			}
-			slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
-			writeError(w, http.StatusInternalServerError, "failed to create user")
+			slog.Warn("failed to link Feishu identity", append(logger.RequestAttrs(r), "error", err, "user_id", uuidToString(user.ID))...)
+			writeError(w, http.StatusInternalServerError, "failed to link Feishu identity")
 			return
 		}
-		if validOpenID {
-			user, err = h.Queries.SetUserFeishuOpenID(r.Context(), db.SetUserFeishuOpenIDParams{
-				ID: user.ID, FeishuOpenID: pgtype.Text{String: openID, Valid: true},
-			})
-			if err != nil {
-				slog.Warn("failed to link Feishu identity", append(logger.RequestAttrs(r), "error", err, "user_id", uuidToString(user.ID))...)
-				writeError(w, http.StatusInternalServerError, "failed to link Feishu identity")
-				return
-			}
-		}
+		user = linked
 	}
 	if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
 		writeErrorCode(w, http.StatusForbidden, googleLoginCodeAccountDisabled, auth.TemporarilyDisabledUserError)
@@ -286,6 +290,10 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Organization rules may admit the user to workspaces directly, so the
+	// first workspace list after sign-in already includes them.
+	h.joinFeishuOrganizationWorkspaces(r.Context(), user)
+
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		if writeGoogleLoginActionableError(w, err) {
@@ -311,4 +319,30 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  h.userToResponse(user),
 	})
+}
+
+// resolveFeishuUser finds the account a Feishu sign-in belongs to: a linked
+// union_id first, then a linked open_id, then the email-keyed account, which
+// is created when it does not exist yet.
+func (h *Handler) resolveFeishuUser(r *http.Request, email, openID, unionID string) (db.User, bool, error) {
+	ctx := r.Context()
+	if unionID != "" {
+		user, err := h.Queries.GetUserByFeishuUnionID(ctx, pgtype.Text{String: unionID, Valid: true})
+		if err == nil {
+			return user, false, nil
+		}
+		if !isNotFound(err) {
+			return db.User{}, false, err
+		}
+	}
+	if openID != "" {
+		user, err := h.Queries.GetUserByFeishuOpenID(ctx, pgtype.Text{String: openID, Valid: true})
+		if err == nil {
+			return user, false, nil
+		}
+		if !isNotFound(err) {
+			return db.User{}, false, err
+		}
+	}
+	return h.findOrCreateUser(ctx, email)
 }

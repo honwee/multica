@@ -200,6 +200,7 @@ import type {
   RedeemLarkBindingTokenResponse,
   LarkOrganizationResponse,
   LarkOrganizationSyncRun,
+  ListLarkOrganizationGroupsResponse,
   UpdateLarkOrganizationRequest,
   ComposioToolkit,
   ComposioConnection,
@@ -415,6 +416,8 @@ import {
   EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   LarkInstallationBotInfoSchema,
   EMPTY_LARK_ORGANIZATION_RESPONSE,
+  ListLarkOrganizationGroupsResponseSchema,
+  EMPTY_LARK_ORGANIZATION_GROUPS_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -5302,6 +5305,17 @@ export class ApiClient {
       LarkOrganizationResponseSchema,
       EMPTY_LARK_ORGANIZATION_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/lark/organization" },
+    );
+  }
+
+  /** Applied organization groups any member may grant an agent to. */
+  async listLarkOrganizationGroups(workspaceId: string): Promise<ListLarkOrganizationGroupsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/organization/groups`);
+    return parseWithFallback(
+      raw,
+      ListLarkOrganizationGroupsResponseSchema,
+      EMPTY_LARK_ORGANIZATION_GROUPS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/lark/organization/groups" },
     );
   }
 

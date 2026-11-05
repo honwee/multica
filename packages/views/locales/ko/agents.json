@@ -716,7 +716,7 @@
     "private_desc": "나만 이 에이전트를 실행할 수 있습니다",
     "shared_title": "공유",
     "shared_desc": "이 에이전트를 실행할 워크스페이스 또는 특정 사용자를 선택합니다",
-    "shared_target_required": "저장하기 전에 워크스페이스 또는 한 명 이상의 사용자를 선택하세요.",
+    "shared_target_required": "저장하기 전에 최소 한 명 또는 한 팀을 선택하세요.",
     "workspace_title": "워크스페이스에 공개",
     "workspace_desc": "이 워크스페이스의 모든 사람이 이 에이전트를 실행할 수 있습니다",
     "members_title": "특정 사용자에게 공개",
@@ -728,7 +728,10 @@
     "public_group": "공개 액세스",
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
-    "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
+    "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
+    "teams_group": "부서 및 팀",
+    "teams_hint": "Feishu 조직에서 동기화됩니다. 선택한 그룹의 재직 구성원 모두가 이 에이전트를 실행할 수 있습니다.",
+    "trigger_teams_count_other": "{{count}}개 팀"
   },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",

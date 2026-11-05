@@ -47,6 +47,34 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getDisabledMemberByUserAndWorkspace = `-- name: GetDisabledMemberByUserAndWorkspace :one
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NOT NULL
+`
+
+type GetDisabledMemberByUserAndWorkspaceParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Organization sync disables members instead of deleting them so a returning
+// person keeps their history. The row still holds the (workspace_id, user_id)
+// slot, so joining again must reactivate it rather than insert.
+func (q *Queries) GetDisabledMemberByUserAndWorkspace(ctx context.Context, arg GetDisabledMemberByUserAndWorkspaceParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getDisabledMemberByUserAndWorkspace, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
+	)
+	return i, err
+}
+
 const getMember = `-- name: GetMember :one
 SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
 WHERE id = $1
@@ -240,6 +268,33 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const reactivateMember = `-- name: ReactivateMember :one
+UPDATE member
+SET disabled_at = NULL, role = $1, feishu_managed_role = NULL
+WHERE id = $2 AND disabled_at IS NOT NULL
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+`
+
+type ReactivateMemberParams struct {
+	Role string      `json:"role"`
+	ID   pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) ReactivateMember(ctx context.Context, arg ReactivateMemberParams) (Member, error) {
+	row := q.db.QueryRow(ctx, reactivateMember, arg.Role, arg.ID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.FeishuManagedRole,
+	)
+	return i, err
 }
 
 const updateMemberRole = `-- name: UpdateMemberRole :one

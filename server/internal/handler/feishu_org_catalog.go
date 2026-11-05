@@ -11,11 +11,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// LarkOrganizationDepartmentResponse describes one department. MemberCount
+// includes every sub-department, matching what a department rule covers;
+// DirectMemberCount is the department alone.
 type LarkOrganizationDepartmentResponse struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
+	ParentID                string `json:"parent_id"`
+	Path                    string `json:"path"`
 	DirectMemberCount       int    `json:"direct_member_count"`
 	ActiveDirectMemberCount int    `json:"active_direct_member_count"`
+	MemberCount             int    `json:"member_count"`
+	ActiveMemberCount       int    `json:"active_member_count"`
 }
 
 type LarkOrganizationJobTitleResponse struct {
@@ -48,7 +55,7 @@ type LarkOrganizationCatalogResponse struct {
 	WorkspaceMembers []LarkOrganizationWorkspaceMemberResponse `json:"workspace_members"`
 }
 
-func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID pgtype.UUID, run db.FeishuOrgSyncRun, snapshot lark.OrgSnapshot) (*LarkOrganizationCatalogResponse, error) {
+func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID pgtype.UUID, directory db.FeishuOrgDirectory, snapshot lark.OrgSnapshot) (*LarkOrganizationCatalogResponse, error) {
 	memberRows, err := h.Queries.ListFeishuOrgMemberIdentities(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -57,7 +64,7 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 	matches, blocked := feishuorg.MatchMembers(snapshot.Users, members)
 
 	catalog := &LarkOrganizationCatalogResponse{
-		SnapshotAt:       timestampToString(run.CreatedAt),
+		SnapshotAt:       timestampToString(directory.FetchedAt),
 		Departments:      make([]LarkOrganizationDepartmentResponse, 0, len(snapshot.Departments)),
 		JobTitles:        make([]LarkOrganizationJobTitleResponse, 0),
 		Users:            buildLarkOrganizationUsers(snapshot, matches, blocked),
@@ -65,7 +72,12 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 		WorkspaceMembers: make([]LarkOrganizationWorkspaceMemberResponse, 0, len(members)),
 	}
 	departmentCounts := make(map[string][2]int)
+	subtreeCounts := make(map[string][2]int)
 	jobTitleCounts := make(map[string][2]int)
+	departmentByID := make(map[string]lark.OrgDepartment, len(snapshot.Departments))
+	for _, department := range snapshot.Departments {
+		departmentByID[department.ID] = department
+	}
 	for _, user := range snapshot.Users {
 		active := 0
 		if user.Active {
@@ -79,11 +91,24 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 			counts[1] += active
 			jobTitleCounts[user.JobTitle] = counts
 		}
+		// A user in two sub-teams of one parent counts once for the parent.
+		covered := make(map[string]struct{})
 		for _, departmentID := range user.DepartmentIDs {
 			counts := departmentCounts[departmentID]
 			counts[0]++
 			counts[1] += active
 			departmentCounts[departmentID] = counts
+			for current, depth := departmentID, 0; current != "" && depth < len(departmentByID)+1; depth++ {
+				if _, seen := covered[current]; seen {
+					break
+				}
+				covered[current] = struct{}{}
+				subtree := subtreeCounts[current]
+				subtree[0]++
+				subtree[1] += active
+				subtreeCounts[current] = subtree
+				current = departmentByID[current].ParentID
+			}
 		}
 	}
 	for _, department := range snapshot.Departments {
@@ -91,14 +116,17 @@ func (h *Handler) buildLarkOrganizationCatalog(ctx context.Context, workspaceID 
 			continue
 		}
 		counts := departmentCounts[department.ID]
+		subtree := subtreeCounts[department.ID]
 		catalog.Departments = append(catalog.Departments, LarkOrganizationDepartmentResponse{
-			ID: department.ID, Name: department.Name,
+			ID: department.ID, Name: department.Name, ParentID: department.ParentID,
+			Path:              departmentPath(departmentByID, department.ID),
 			DirectMemberCount: counts[0], ActiveDirectMemberCount: counts[1],
+			MemberCount: subtree[0], ActiveMemberCount: subtree[1],
 		})
 	}
 	sort.Slice(catalog.Departments, func(i, j int) bool {
-		if catalog.Departments[i].Name != catalog.Departments[j].Name {
-			return catalog.Departments[i].Name < catalog.Departments[j].Name
+		if catalog.Departments[i].Path != catalog.Departments[j].Path {
+			return catalog.Departments[i].Path < catalog.Departments[j].Path
 		}
 		return catalog.Departments[i].ID < catalog.Departments[j].ID
 	})
@@ -153,11 +181,36 @@ func feishuOrgMemberInputs(rows []db.ListFeishuOrgMemberIdentitiesRow) []feishuo
 		if row.FeishuOpenID.Valid {
 			feishuOpenID = row.FeishuOpenID.String
 		}
+		// The login-linked union_id joins the bot-binding union_ids: both
+		// identify the same person across every app of the tenant.
+		unionIDs := append([]string{}, row.UnionIds...)
+		if row.FeishuUnionID.Valid && row.FeishuUnionID.String != "" {
+			unionIDs = append(unionIDs, row.FeishuUnionID.String)
+		}
 		members = append(members, feishuorg.Member{
 			MemberID: uuidToString(row.ID), UserID: uuidToString(row.UserID), Name: row.UserName, Email: row.UserEmail,
 			Role: row.Role, FeishuOpenID: feishuOpenID, ManagedRole: managedRole, Disabled: row.DisabledAt.Valid,
-			ChannelOpenIDs: row.ChannelOpenIds, UnionIDs: row.UnionIds,
+			ChannelOpenIDs: row.ChannelOpenIds, UnionIDs: unionIDs,
 		})
 	}
 	return members
+}
+
+// departmentPath renders "Parent / Child" from the root down, so two teams
+// that share a name can be told apart in the rule editor.
+func departmentPath(departments map[string]lark.OrgDepartment, id string) string {
+	names := make([]string, 0, 4)
+	seen := make(map[string]struct{})
+	for current := id; current != ""; current = departments[current].ParentID {
+		if _, loop := seen[current]; loop {
+			break
+		}
+		seen[current] = struct{}{}
+		department, ok := departments[current]
+		if !ok {
+			break
+		}
+		names = append([]string{department.Name}, names...)
+	}
+	return strings.Join(names, " / ")
 }

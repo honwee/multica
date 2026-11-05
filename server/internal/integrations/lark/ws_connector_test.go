@@ -1024,3 +1024,49 @@ func TestReadDeadlineForPingInterval(t *testing.T) {
 		}
 	}
 }
+
+// Contact events reach the sink and are ACKed like any other frame instead
+// of being logged as unhandled.
+func TestWSConnectorForwardsContactEventsToSink(t *testing.T) {
+	t.Parallel()
+	conn := newFakeWSConn()
+	logs := &syncBuffer{}
+	decoder := FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) {
+		return InboundMessage{}, false, nil
+	})
+	c := connectorWithLogger(t, conn, decoder, time.Hour, slog.New(slog.NewTextHandler(logs, nil)))
+	var mu sync.Mutex
+	var seen []string
+	c.cfg.ContactEvents = ContactEventSinkFunc(func(_ context.Context, inst Installation, eventType string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, inst.AppID+":"+eventType)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx, Installation{AppID: "test_app"}, func(context.Context, InboundMessage) (DispatchResult, error) {
+			return DispatchResult{}, nil
+		})
+	}()
+
+	pushDataFrame(conn, []byte(`{"schema":"2.0","header":{"event_type":"contact.user.updated_v3","event_id":"c1"}}`), "m1")
+	pushDataFrame(conn, []byte(`{"schema":"2.0","header":{"event_type":"im.chat.access_event_v1","event_id":"c2"}}`), "m2")
+	waitForWrites(t, conn, 2)
+	mu.Lock()
+	got := append([]string(nil), seen...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "test_app:contact.user.updated_v3" {
+		t.Fatalf("sink received %v, want only the contact event", got)
+	}
+	if strings.Contains(logs.String(), "contact.user.updated_v3") {
+		t.Fatalf("contact event must not be logged as unhandled; log was:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "im.chat.access_event_v1") {
+		t.Fatalf("non-contact event must still be reported as unhandled; log was:\n%s", logs.String())
+	}
+	cancel()
+	<-done
+}

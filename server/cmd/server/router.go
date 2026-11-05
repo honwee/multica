@@ -684,7 +684,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Registering the Factory (connect/send) + ResolverSet
 				// (inbound pipeline seams) is all it takes to add the platform
 				// to the engine — no engine edit.
-				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				// Contact events refresh the organization directory between
+				// scheduled syncs; the sink debounces per installation.
+				connector, connectorLabel := buildLarkConnector(installSvc, larkClient, handler.NewFeishuOrgContactSync(h))
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
 					APIClient:   larkClient,
@@ -1896,6 +1898,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
+					// Active organization groups are member-visible so agent
+					// owners can grant their own agents to a department.
+					r.Get("/lark/organization/groups", h.ListLarkOrganizationGroups)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
@@ -2624,7 +2629,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 //
 // Returns the connector plus a short label for the boot log:
 // "ws-long-conn" in the healthy case, "noop" in the fallback case.
-func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.EventConnector, string) {
+func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient, contactEvents lark.ContactEventSink) (lark.EventConnector, string) {
 	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
 		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 		Logger:  slog.Default(),
@@ -2669,6 +2674,7 @@ func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.API
 		Enricher:            enricher,
 		CredentialsProvider: credsProvider,
 		InboundVerifier:     installSvc,
+		ContactEvents:       contactEvents,
 		Logger:              slog.Default(),
 	})
 	if err != nil {
