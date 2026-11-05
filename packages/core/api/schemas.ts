@@ -3468,7 +3468,9 @@ export const LarkInstallationBotInfoSchema = z.object({
 }).loose();
 
 export const LarkOrganizationConfigSchema = z.object({
-  installation_id: z.string(),
+  // Older servers have no source: they only read from an installation.
+  source: z.enum(["login_app", "installation"]).catch("installation").default("installation"),
+  installation_id: z.string().default(""),
   enabled: z.boolean(),
   auto_sync: z.boolean().optional(),
   revision: z.number().int().nonnegative(),
@@ -3576,6 +3578,7 @@ export const LarkOrganizationResponseSchema = z.object({
   requirements: z.array(z.string()).catch([]).default([]),
   sync_runs: z.array(LarkOrganizationSyncRunSchema).catch([]).default([]),
   catalog: LarkOrganizationCatalogSchema.nullable().catch(null).default(null),
+  login_app: z.object({ app_id: z.string() }).loose().nullable().catch(null).default(null),
 }).loose();
 
 export const LarkOrganizationWriteResponseSchema = LarkOrganizationResponseSchema.extend({
@@ -3606,6 +3609,7 @@ export const EMPTY_LARK_ORGANIZATION_RESPONSE: LarkOrganizationResponse = {
   requirements: [],
   sync_runs: [],
   catalog: null,
+  login_app: null,
 };
 
 export const DingTalkInstallationSchema = z.object({

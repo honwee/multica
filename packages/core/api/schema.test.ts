@@ -1750,7 +1750,37 @@ describe("workspace subscription contract", () => {
         requirements: [],
         sync_runs: [],
         catalog: null,
+        login_app: null,
       });
+    });
+
+    it("defaults the source to installation for older backends", async () => {
+      stubFetchJson({
+        config: { installation_id: "installation-1", enabled: true, revision: 2, updated_at: "" },
+        mappings: [], required_scopes: [], requirements: [], sync_runs: [],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const legacy = await client.getLarkOrganization("ws-1");
+      expect(legacy.config?.source).toBe("installation");
+      expect(legacy.login_app).toBeNull();
+
+      stubFetchJson({
+        config: { source: "login_app", installation_id: "", enabled: true, revision: 3, updated_at: "" },
+        mappings: [], required_scopes: [], requirements: [], sync_runs: [],
+        login_app: { app_id: "cli_login" },
+      });
+      const current = await client.getLarkOrganization("ws-1");
+      expect(current.config?.source).toBe("login_app");
+      expect(current.login_app?.app_id).toBe("cli_login");
+
+      stubFetchJson({
+        config: { source: "future_source", installation_id: "installation-1", enabled: true, revision: 3, updated_at: "" },
+        mappings: [], required_scopes: [], requirements: [], sync_runs: [],
+        login_app: "malformed",
+      });
+      const future = await client.getLarkOrganization("ws-1");
+      expect(future.config?.source).toBe("installation");
+      expect(future.login_app).toBeNull();
     });
 
     it("parses the organization catalog and defaults it for older backends", async () => {
@@ -1806,6 +1836,7 @@ describe("workspace subscription contract", () => {
       const client = new ApiClient("https://api.example.test");
 
       await expect(client.updateLarkOrganization("ws-1", {
+        source: "installation",
         installation_id: "installation-1",
         enabled: true,
         auto_sync: false,
@@ -1820,6 +1851,7 @@ describe("workspace subscription contract", () => {
         sync_runs: [],
       });
       await expect(client.updateLarkOrganization("ws-1", {
+        source: "installation",
         installation_id: "installation-1",
         enabled: true,
         auto_sync: false,

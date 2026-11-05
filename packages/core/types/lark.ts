@@ -93,7 +93,13 @@ export interface RedeemLarkBindingTokenResponse {
   lark_open_id: string;
 }
 
+/** Where organization data is read from: the deployment's Feishu login app
+ * (credentials from the server environment) or a connected installation. */
+export type LarkOrganizationSource = "login_app" | "installation";
+
 export interface LarkOrganizationConfig {
+  source: LarkOrganizationSource;
+  /** Empty for the login app source. */
   installation_id: string;
   enabled: boolean;
   /** Apply the plan hourly and on Feishu contact events without a manual
@@ -214,10 +220,14 @@ export interface LarkOrganizationResponse {
   requirements: string[];
   sync_runs: LarkOrganizationSyncRun[];
   catalog?: LarkOrganizationCatalog | null;
+  /** The login app, present when the server has its credentials. */
+  login_app: { app_id: string } | null;
 }
 
 export interface UpdateLarkOrganizationRequest {
-  installation_id: string;
+  source: LarkOrganizationSource;
+  /** Required for the installation source. */
+  installation_id?: string;
   enabled: boolean;
   auto_sync: boolean;
   mappings: LarkOrganizationMapping[];
