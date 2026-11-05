@@ -54,6 +54,9 @@ import {
   type OrganizationPendingAction,
 } from "./lark-organization-display";
 
+// Select value of the login app source; installation options use their UUID.
+const LOGIN_APP_SOURCE = "login_app";
+
 export function LarkOrganizationMapping({
   installations,
   canManage,
@@ -72,11 +75,14 @@ export function LarkOrganizationMapping({
     queryFn: () => api.listAgents({ workspace_id: wsId, include_archived: true }),
     enabled: !!wsId,
   });
+  const loginApp = data?.login_app ?? null;
+  // The login app's own installation reads the same organization, so it is
+  // offered once, as the login app.
   const activeInstallations = useMemo(
-    () => installations.filter((installation) => installation.status === "active"),
-    [installations],
+    () => installations.filter((installation) => installation.status === "active" && installation.app_id !== loginApp?.app_id),
+    [installations, loginApp?.app_id],
   );
-  const [installationId, setInstallationId] = useState("");
+  const [sourceValue, setSourceValue] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
   const [mappings, setMappings] = useState<LarkOrganizationMappingValue[]>([]);
@@ -93,17 +99,15 @@ export function LarkOrganizationMapping({
     const configuredInstallationIsActive = activeInstallations.some(
       (installation) => installation.id === config?.installation_id,
     );
-    setInstallationId(
-      config && configuredInstallationIsActive
-        ? config.installation_id
-        : activeInstallations[0]?.id ?? "",
-    );
+    if (config?.source === "login_app" && loginApp) setSourceValue(LOGIN_APP_SOURCE);
+    else if (config?.source !== "login_app" && configuredInstallationIsActive) setSourceValue(config?.installation_id ?? "");
+    else setSourceValue(loginApp ? LOGIN_APP_SOURCE : activeInstallations[0]?.id ?? "");
     setEnabled(config?.enabled ?? false);
     setAutoSync(config?.auto_sync ?? false);
     setMappings(
       (data?.mappings ?? []).map((mapping) => ({ ...mapping })),
     );
-  }, [data, activeInstallations]);
+  }, [data, activeInstallations, loginApp]);
 
   useEffect(() => {
     if (pending !== "preview") {
@@ -129,10 +133,10 @@ export function LarkOrganizationMapping({
   const displayedRun = run ?? latestStoredRun;
   const config = data?.config ?? null;
   const catalog = data?.catalog ?? null;
-  const draftSignature = JSON.stringify({ installation_id: installationId, enabled, auto_sync: autoSync, mappings });
+  const draftSignature = JSON.stringify({ source: sourceValue, enabled, auto_sync: autoSync, mappings });
   const savedSignature = config
     ? JSON.stringify({
-        installation_id: config.installation_id,
+        source: config.source === "login_app" ? LOGIN_APP_SOURCE : config.installation_id,
         enabled: config.enabled,
         auto_sync: config.auto_sync ?? false,
         mappings: data?.mappings ?? [],
@@ -141,9 +145,16 @@ export function LarkOrganizationMapping({
   const dirty = !savedSignature || draftSignature !== savedSignature;
   const missingExternalId = mappings.some((mapping) => !mapping.external_id.trim());
   const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
-  const installationName = (installation: LarkInstallation) => installation.app_id;
-  const selectedInstallation = installations.find((installation) => installation.id === installationId)
-    ?? installations.find((installation) => installation.id === config?.installation_id);
+  const loginAppName = loginApp ? t(($) => $.lark.organization.source_login_app, { appId: loginApp.app_id }) : "";
+  const sourceOptions = [
+    ...(loginApp ? [{ value: LOGIN_APP_SOURCE, label: loginAppName }] : []),
+    ...activeInstallations.map((installation) => ({ value: installation.id, label: installation.app_id })),
+  ];
+  const usesLoginApp = sourceValue === LOGIN_APP_SOURCE;
+  const selectedInstallation = usesLoginApp
+    ? undefined
+    : installations.find((installation) => installation.id === sourceValue)
+      ?? (config?.source === "installation" ? installations.find((installation) => installation.id === config.installation_id) : undefined);
   const canApply = Boolean(
     canManage && displayedRun &&
       (displayedRun.mode === "preview" || displayedRun.mode === "replay") &&
@@ -161,7 +172,7 @@ export function LarkOrganizationMapping({
   }
 
   async function save() {
-    if (!installationId || missingExternalId || pending) return;
+    if (!sourceValue || missingExternalId || pending) return;
     const nextMappings = mappings.map((mapping) => ({
       ...mapping,
       external_id: mapping.external_id.trim(),
@@ -170,7 +181,7 @@ export function LarkOrganizationMapping({
     setPending("save");
     try {
       await api.updateLarkOrganization(wsId, {
-        installation_id: installationId,
+        ...(usesLoginApp ? { source: "login_app" as const } : { source: "installation" as const, installation_id: sourceValue }),
         enabled,
         auto_sync: autoSync,
         mappings: nextMappings,
@@ -258,17 +269,19 @@ export function LarkOrganizationMapping({
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  {selectedInstallation?.status === "active" ? (
+                  {usesLoginApp || selectedInstallation?.status === "active" ? (
                     <>
                       <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
-                      <Badge variant="secondary">{t(($) => $.lark.organization.connection_connected)}</Badge>
+                      <Badge variant="secondary">{usesLoginApp ? loginAppName : selectedInstallation?.app_id}</Badge>
                     </>
                   ) : selectedInstallation ? (
-                    <Badge variant="outline">{t(($) => $.lark.revoked_badge)}</Badge>
-                  ) : null}
-                  <span className="text-body font-medium">
-                    {selectedInstallation ? installationName(selectedInstallation) : t(($) => $.lark.organization.no_active_installations)}
-                  </span>
+                    <>
+                      <Badge variant="outline">{t(($) => $.lark.revoked_badge)}</Badge>
+                      <span className="text-body font-medium">{selectedInstallation.app_id}</span>
+                    </>
+                  ) : (
+                    <span className="text-body font-medium">{t(($) => $.lark.organization.no_active_installations)}</span>
+                  )}
                 </div>
                 {canManage && (
                   <Button variant="outline" disabled={dirty || !config || pending !== null} aria-busy={pending === "preview" || undefined} onClick={preview}>
@@ -305,19 +318,23 @@ export function LarkOrganizationMapping({
                   {canManage ? (
                     <div className="space-y-1.5">
                       <Label htmlFor={`${id}-source`} className="sr-only">{t(($) => $.lark.organization.source)}</Label>
-                      {activeInstallations.length > 0 ? (
+                      {sourceOptions.length > 1 ? (
                         <Select
-                          items={activeInstallations.map((installation) => ({ value: installation.id, label: installationName(installation) }))}
-                          value={installationId}
-                          onValueChange={(value) => setInstallationId(value ?? "")}
+                          items={sourceOptions}
+                          value={sourceValue}
+                          onValueChange={(value) => setSourceValue(value ?? "")}
                         >
-                          <SelectTrigger id={`${id}-source`} className="w-56"><SelectValue /></SelectTrigger>
+                          <SelectTrigger id={`${id}-source`} className="w-64"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {activeInstallations.map((installation) => (
-                              <SelectItem key={installation.id} value={installation.id}>{installationName(installation)}</SelectItem>
+                            {sourceOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
+                      ) : sourceOptions.length === 1 ? (
+                        <span className="text-caption text-muted-foreground">
+                          {t(($) => $.lark.organization.source_current, { name: usesLoginApp ? t(($) => $.lark.organization.source_login_app_short) : sourceOptions[0]?.label ?? "" })}
+                        </span>
                       ) : <span className="text-caption text-muted-foreground">{t(($) => $.lark.organization.no_active_installations)}</span>}
                     </div>
                   ) : (
@@ -358,7 +375,7 @@ export function LarkOrganizationMapping({
               {canManage && dirty && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                   <p className="text-caption">{t(($) => $.lark.organization.unsaved_changes)}</p>
-                  <Button size="sm" disabled={!installationId || missingExternalId || pending !== null} aria-busy={pending === "save" || undefined} onClick={save}>
+                  <Button size="sm" disabled={!sourceValue || missingExternalId || pending !== null} aria-busy={pending === "save" || undefined} onClick={save}>
                     {pending === "save" && <LoaderCircle className="animate-spin" />}
                     {pending === "save" ? t(($) => $.lark.organization.saving) : t(($) => $.lark.organization.save)}
                   </Button>
