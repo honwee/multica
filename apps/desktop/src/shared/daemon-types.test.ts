@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { daemonStateDescription, daemonStatusAlive } from "./daemon-types";
+import {
+  daemonStateDescription,
+  daemonStatusAlive,
+  parseWorkspaceAllowlist,
+} from "./daemon-types";
 
 describe("daemonStatusAlive", () => {
   it("treats a ready daemon as alive", () => {
@@ -27,5 +31,19 @@ describe("daemonStateDescription", () => {
     expect(daemonStateDescription("recovery_paused", 0)).toMatch(
       /start manually/i,
     );
+  });
+});
+
+describe("parseWorkspaceAllowlist", () => {
+  it("trims, drops blanks and de-duplicates", () => {
+    expect(parseWorkspaceAllowlist([" ws-a", "", "ws-b", "ws-a", 3])).toEqual([
+      "ws-a",
+      "ws-b",
+    ]);
+  });
+
+  it("treats a missing or malformed value as all workspaces", () => {
+    expect(parseWorkspaceAllowlist(undefined)).toEqual([]);
+    expect(parseWorkspaceAllowlist("ws-a")).toEqual([]);
   });
 });

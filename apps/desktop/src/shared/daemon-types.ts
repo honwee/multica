@@ -120,3 +120,19 @@ export function daemonStateDescription(state: DaemonState, runtimeCount: number)
       return "Sign-in expired · sign in again to bring this device back online.";
   }
 }
+
+/**
+ * Normalizes the persisted `daemon_workspaces` value: trimmed, de-duplicated
+ * workspace IDs. Anything that is not a string array reads as an empty list,
+ * which the daemon treats as "every workspace".
+ */
+export function parseWorkspaceAllowlist(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const id = item.trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}

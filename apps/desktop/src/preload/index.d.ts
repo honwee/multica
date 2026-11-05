@@ -158,6 +158,11 @@ interface DaemonAPI {
     userId: string,
   ) => Promise<DaemonReauthResult>;
   isCliInstalled: () => Promise<boolean>;
+  /** Workspace IDs this machine's daemon registers in; empty = all. */
+  getWorkspaceAllowlist: () => Promise<string[]>;
+  setWorkspaceAllowlist: (
+    workspaceIds: string[],
+  ) => Promise<{ success: boolean; error?: string }>;
   getPrefs: () => Promise<DaemonPrefs>;
   setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;
   autoStart: () => Promise<void>;

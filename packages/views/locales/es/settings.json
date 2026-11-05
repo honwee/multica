@@ -1454,6 +1454,8 @@
       "server_url": "URL del servidor",
       "device_name": "Nombre del dispositivo",
       "workspaces": "Espacios de trabajo",
+      "workspace_allowlist_title": "Registrar runtimes en",
+      "workspace_allowlist_all": "Todos los espacios de trabajo, incluidos los que se unan más adelante.",
       "state_stopped": "Detenido",
       "state_starting": "Iniciando…",
       "state_running": "En ejecución",

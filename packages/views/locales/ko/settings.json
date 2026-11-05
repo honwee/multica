@@ -1009,6 +1009,8 @@
       "server_url": "서버 URL",
       "device_name": "기기 이름",
       "workspaces": "워크스페이스",
+      "workspace_allowlist_title": "런타임을 등록할 워크스페이스",
+      "workspace_allowlist_all": "이후 참여하는 워크스페이스를 포함한 모든 워크스페이스.",
       "state_stopped": "중지됨",
       "state_starting": "시작 중...",
       "state_running": "실행 중",

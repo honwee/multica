@@ -1465,6 +1465,8 @@
       "server_url": "サーバー URL",
       "device_name": "デバイス名",
       "workspaces": "ワークスペース",
+      "workspace_allowlist_title": "ランタイムを登録するワークスペース",
+      "workspace_allowlist_all": "すべてのワークスペース（今後参加するものを含む）。",
       "state_stopped": "停止中",
       "state_starting": "起動中…",
       "state_running": "実行中",

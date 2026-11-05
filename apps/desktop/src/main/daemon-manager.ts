@@ -21,7 +21,7 @@ import type {
   DaemonPrefs,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
-import { daemonStatusAlive } from "../shared/daemon-types";
+import { daemonStatusAlive, parseWorkspaceAllowlist } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import { createDaemonQuitHandler } from "./daemon-quit";
@@ -226,6 +226,51 @@ async function fetchProfileHealth(
   return probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
+}
+
+/**
+ * The workspaces this machine's daemon registers runtimes in, persisted as
+ * `daemon_workspaces` in the profile config. An empty list means every
+ * workspace the account belongs to; the daemon re-reads the key on each
+ * workspace sync.
+ */
+async function getWorkspaceAllowlist(): Promise<string[]> {
+  const active = await ensureActiveProfile();
+  if (!active) return [];
+  return parseWorkspaceAllowlist(
+    (await readProfileConfig(active.name)).daemon_workspaces,
+  );
+}
+
+async function setWorkspaceAllowlist(
+  workspaceIds: string[],
+): Promise<{ success: boolean; error?: string }> {
+  const active = await ensureActiveProfile();
+  if (!active) return { success: false, error: "No active daemon profile" };
+  const ids = parseWorkspaceAllowlist(workspaceIds);
+  const cfg = await readProfileConfig(active.name);
+  if (ids.length > 0) cfg.daemon_workspaces = ids;
+  else delete cfg.daemon_workspaces;
+  await writeProfileConfig(active.name, cfg);
+  // Ask the running daemon for an immediate sync. A daemon that is down, or
+  // too old to serve this endpoint, picks the list up on its next sync.
+  let daemonPort: number | null = null;
+  await probeProfileHealth(active.name, async (port) => {
+    const health = await fetchHealthAtPort(port);
+    if (health) daemonPort = port;
+    return health;
+  });
+  if (daemonPort !== null) {
+    try {
+      await fetch(`http://127.0.0.1:${daemonPort}/workspaces/sync`, {
+        method: "POST",
+        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+      });
+    } catch {
+      // Best-effort; the periodic sync is the backstop.
+    }
+  }
+  return { success: true };
 }
 
 /**
@@ -1524,6 +1569,13 @@ export function setupDaemonManager(
     cachedCliBinaryVersion = undefined;
     await lifecycleOperations.runForeground(() => bootstrapCli());
   });
+  ipcMain.handle("daemon:get-workspace-allowlist", () =>
+    getWorkspaceAllowlist(),
+  );
+  ipcMain.handle(
+    "daemon:set-workspace-allowlist",
+    (_event, workspaceIds: string[]) => setWorkspaceAllowlist(workspaceIds),
+  );
   ipcMain.handle("daemon:get-prefs", () => loadPrefs());
   ipcMain.handle(
     "daemon:set-prefs",
