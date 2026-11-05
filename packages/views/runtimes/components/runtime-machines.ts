@@ -20,6 +20,11 @@ export interface RuntimeMachine {
   deviceInfo: string | null;
   cliVersion: string | null;
   launchedBy: string | null;
+  /**
+   * Workspace IDs the machine's daemon registers in, as it last reported:
+   * empty = every workspace, null = not reported (older daemon).
+   */
+  workspaceAllowlist: string[] | null;
   mode: AgentRuntime["runtime_mode"];
   section: RuntimeMachineSection;
   isCurrent: boolean;
@@ -138,6 +143,7 @@ function placeholderLocalMachine(
     deviceInfo: null,
     cliVersion: null,
     launchedBy: null,
+    workspaceAllowlist: null,
     mode: "local",
     section: "local",
     isCurrent: true,
@@ -265,6 +271,7 @@ function finalizeRuntimeMachine(
     deviceInfo,
     cliVersion: currentMachineMetadata(runtimes, "cli_version"),
     launchedBy: currentMachineMetadata(runtimes, "launched_by"),
+    workspaceAllowlist: machineWorkspaceAllowlist(runtimes),
     mode: draft.mode,
     section: isCurrent ? "local" : draft.mode === "cloud" ? "cloud" : "remote",
     isCurrent,
@@ -445,4 +452,44 @@ function sectionRank(section: RuntimeMachineSection): number {
     case "cloud":
       return 2;
   }
+}
+
+/**
+ * The workspace allowlist the machine's daemon reported most recently, read
+ * from runtime metadata with the same online-first ordering as the CLI
+ * version. Malformed entries are ignored.
+ */
+export function machineWorkspaceAllowlist(
+  runtimes: AgentRuntime[],
+): string[] | null {
+  const online = runtimes.filter((runtime) => runtime.status === "online");
+  const candidates = online.length > 0 ? online : runtimes;
+
+  for (const runtime of candidates.toSorted(compareRuntimeReports)) {
+    const value = runtime.metadata?.workspace_allowlist;
+    if (!Array.isArray(value)) continue;
+    return value.filter(
+      (id): id is string => typeof id === "string" && id.trim() !== "",
+    );
+  }
+  return null;
+}
+
+/**
+ * Splits a reported allowlist into the workspaces the viewer can name and a
+ * count of the rest, which belong to workspaces the viewer is not in.
+ */
+export function resolveWorkspaceAllowlist(
+  allowlist: string[],
+  workspaces: { id: string; name: string }[],
+): { names: string[]; hiddenCount: number } {
+  const byId = new Map(workspaces.map((ws) => [ws.id, ws.name]));
+  const names: string[] = [];
+  let hiddenCount = 0;
+  for (const id of allowlist) {
+    const name = byId.get(id);
+    if (name === undefined) hiddenCount++;
+    else names.push(name);
+  }
+  return { names, hiddenCount };
 }

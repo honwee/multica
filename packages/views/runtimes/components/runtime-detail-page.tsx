@@ -10,6 +10,7 @@ import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
+import { workspaceListOptions } from "@multica/core/workspace";
 import {
   agentListOptions,
   memberListOptions,
@@ -43,6 +44,7 @@ import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import {
   buildRuntimeMachines,
+  resolveWorkspaceAllowlist,
   sharedCustomName,
   type RuntimeMachine,
 } from "./runtime-machines";
@@ -434,6 +436,20 @@ function MachineProperties({
     : null;
   const busy = machine.runningCount + machine.queuedCount > 0;
   const daemonShort = shortDaemonId(machine.daemonId);
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  let registeredIn: string | null = null;
+  if (machine.workspaceAllowlist && machine.workspaceAllowlist.length > 0) {
+    const { names, hiddenCount } = resolveWorkspaceAllowlist(
+      machine.workspaceAllowlist,
+      workspaces,
+    );
+    registeredIn = [
+      ...names,
+      ...(hiddenCount > 0
+        ? [t(($) => $.detail.registered_in_hidden, { count: hiddenCount })]
+        : []),
+    ].join(", ");
+  }
 
   return (
     <ObjectPanelSection title={tLayout(($) => $.object_page.properties)}>
@@ -483,6 +499,13 @@ function MachineProperties({
             : t(($) => $.machine.metrics.workload_idle)}
         </span>
       </ObjectProperty>
+      {machine.workspaceAllowlist && (
+        <ObjectProperty label={t(($) => $.detail.fact_registered_in)}>
+          <span className="truncate">
+            {registeredIn ?? t(($) => $.detail.registered_in_all)}
+          </span>
+        </ObjectProperty>
+      )}
       {daemonShort && (
         <ObjectProperty label={t(($) => $.detail.fact_daemon_id)}>
           <span className="truncate font-mono">{daemonShort}</span>

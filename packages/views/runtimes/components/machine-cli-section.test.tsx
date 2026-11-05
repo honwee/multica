@@ -56,6 +56,7 @@ function machine(runtimes: AgentRuntime[]): RuntimeMachine {
     deviceInfo: "dev.local",
     cliVersion: "0.3.17",
     launchedBy: launchedBy ?? null,
+    workspaceAllowlist: null,
     mode: "local",
     section: "remote",
     isCurrent: false,
