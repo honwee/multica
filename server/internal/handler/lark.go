@@ -226,7 +226,8 @@ func (h *Handler) GetLarkInstallationBotInfo(w http.ResponseWriter, r *http.Requ
 
 // RevokeLarkInstallation (DELETE /api/workspaces/{id}/lark/installations/{installationId})
 // flips status to 'revoked' so the WS hub drops the connection on its
-// next sweep. The row itself is preserved for audit; a re-install via
+// next sweep. A Bot installation that is still an organization source
+// is detached from its agent instead and stays active. The row itself is preserved for audit; a re-install via
 // the device-flow path flips status back to 'active' atomically.
 //
 // Membership is checked at the router; the per-agent authorization
@@ -286,7 +287,24 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
+	// Unbinding a Bot never takes organization data with it: an installation
+	// that some workspace reads its organization from stays active as an
+	// agent-less application connection, and only the message route goes.
+	keepAsOrgSource := false
+	if inst.AgentID.Valid {
+		isSource, err := h.Queries.FeishuOrgInstallationIsSource(r.Context(), instUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke installation")
+			return
+		}
+		keepAsOrgSource = isSource
+	}
+	if keepAsOrgSource {
+		if err := h.Queries.DetachChannelInstallationAgent(r.Context(), instUUID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke installation")
+			return
+		}
+	} else if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
