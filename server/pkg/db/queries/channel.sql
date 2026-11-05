@@ -63,14 +63,20 @@ RETURNING *;
 
 -- name: UpsertWorkspaceLarkConnection :one
 -- Owner/admin-managed application credentials for organization data. The merge
--- preserves bot identifiers when the same app also has a message route.
+-- preserves bot identifiers when the same app also has an active message route.
+-- A revoked row is reactivated as an agent-less connection: its old Bot route
+-- (agent and bot identifiers) is dropped so connecting an app for organization
+-- data never brings a revoked Bot back online.
 INSERT INTO channel_installation (
     workspace_id, agent_id, channel_type, config, installer_user_id
 ) VALUES (
     $1, NULL, 'feishu', $2, $3
 )
 ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
-    config            = channel_installation.config || EXCLUDED.config,
+    agent_id          = CASE WHEN channel_installation.status = 'active' THEN channel_installation.agent_id END,
+    config            = CASE WHEN channel_installation.status = 'active'
+                             THEN channel_installation.config || EXCLUDED.config
+                             ELSE EXCLUDED.config END,
     installer_user_id = EXCLUDED.installer_user_id,
     status            = 'active',
     installed_at      = now(),
