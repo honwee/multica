@@ -511,6 +511,16 @@ UPDATE channel_installation
 SET status = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: DetachChannelInstallationAgent :exec
+-- Unbinds the Bot from an installation that stays active as an agent-less
+-- application connection: the message route (agent and bot identifiers) is
+-- dropped, the app credentials are kept.
+UPDATE channel_installation
+SET agent_id = NULL,
+    config = config - 'bot_open_id' - 'bot_union_id',
+    updated_at = now()
+WHERE id = $1;
+
 -- name: SetChannelInstallationConfig :exec
 -- Replaces the whole config blob for one installation. Prefer field-level
 -- patches for metadata that can change concurrently with receipt evidence.

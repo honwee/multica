@@ -6,9 +6,10 @@ WHERE workspace_id = $1;
 SELECT pg_advisory_xact_lock(hashtext($1::text));
 
 -- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, installation_id, enabled, auto_sync, updated_by)
-VALUES (@workspace_id, @installation_id, @enabled, @auto_sync, @updated_by)
+INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, updated_by)
+VALUES (@workspace_id, @source, @installation_id, @enabled, @auto_sync, @updated_by)
 ON CONFLICT (workspace_id) DO UPDATE SET
+    source = EXCLUDED.source,
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
     auto_sync = EXCLUDED.auto_sync,
@@ -18,11 +19,33 @@ ON CONFLICT (workspace_id) DO UPDATE SET
 RETURNING *;
 
 -- name: ListEnabledFeishuOrgConfigs :many
--- Every workspace whose sync is on, grouped by installation so the scheduler
+-- Every workspace whose sync is on, grouped by source so the scheduler
 -- fetches each directory once.
 SELECT * FROM feishu_org_config
 WHERE enabled
-ORDER BY installation_id, workspace_id;
+ORDER BY source, installation_id, workspace_id;
+
+-- name: SwitchFeishuOrgConfigsToLoginApp :many
+-- Moves configs whose installation is the login app itself, or has been
+-- revoked, onto the login app. Bumping the revision invalidates previews
+-- planned against the old source.
+UPDATE feishu_org_config c
+SET source = 'login_app',
+    installation_id = NULL,
+    revision = c.revision + 1,
+    updated_at = now()
+FROM channel_installation ci
+WHERE c.source = 'installation'
+  AND ci.id = c.installation_id
+  AND ci.channel_type = 'feishu'
+  AND (ci.config ->> 'app_id' = sqlc.arg('login_app_id')::text OR ci.status = 'revoked')
+RETURNING c.workspace_id, ci.id AS previous_installation_id;
+
+-- name: FeishuOrgInstallationIsSource :one
+SELECT EXISTS (
+    SELECT 1 FROM feishu_org_config
+    WHERE source = 'installation' AND installation_id = $1
+);
 
 -- name: ListActiveOwnerUserIDs :many
 SELECT user_id FROM member
@@ -164,12 +187,6 @@ RETURNING *;
 SELECT * FROM feishu_org_directory
 WHERE installation_id = $1;
 
--- name: GetFeishuOrgDirectoryForWorkspace :one
-SELECT d.*
-FROM feishu_org_directory d
-JOIN feishu_org_config c ON c.installation_id = d.installation_id
-WHERE c.workspace_id = $1;
-
 -- name: GetFeishuOrgSyncRunInWorkspace :one
 SELECT * FROM feishu_org_sync_run
 WHERE id = @id AND workspace_id = @workspace_id;
@@ -273,12 +290,17 @@ JOIN member m
  AND m.user_id = @user_id
  AND m.disabled_at IS NULL
  AND m.role IN ('owner', 'admin')
-JOIN channel_installation ci
-  ON ci.id = c.installation_id
- AND ci.workspace_id = c.workspace_id
- AND ci.channel_type = 'feishu'
- AND ci.status = 'active'
 WHERE c.enabled
+  AND (
+    c.source = 'login_app'
+    OR EXISTS (
+      SELECT 1 FROM channel_installation ci
+      WHERE ci.id = c.installation_id
+        AND ci.workspace_id = c.workspace_id
+        AND ci.channel_type = 'feishu'
+        AND ci.status = 'active'
+    )
+  )
 ORDER BY c.updated_at DESC, c.workspace_id DESC
 LIMIT 1;
 

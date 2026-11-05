@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 )
 
@@ -17,9 +16,9 @@ func TestFeishuOrgContactSyncCoalescesEventsPerInstallation(t *testing.T) {
 	calls := make(map[string]int)
 	done := make(chan struct{}, 4)
 	sink := &FeishuOrgContactSync{delay: 20 * time.Millisecond, pending: make(map[string]*time.Timer)}
-	sink.sync = func(_ context.Context, installationID pgtype.UUID) error {
+	sink.sync = func(_ context.Context, installation lark.Installation) error {
 		mu.Lock()
-		calls[uuidToString(installationID)]++
+		calls[uuidToString(installation.ID)]++
 		mu.Unlock()
 		done <- struct{}{}
 		return nil

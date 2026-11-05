@@ -255,20 +255,39 @@ func (q *Queries) DisableFeishuOrgMember(ctx context.Context, arg DisableFeishuO
 	return i, err
 }
 
+const feishuOrgInstallationIsSource = `-- name: FeishuOrgInstallationIsSource :one
+SELECT EXISTS (
+    SELECT 1 FROM feishu_org_config
+    WHERE source = 'installation' AND installation_id = $1
+)
+`
+
+func (q *Queries) FeishuOrgInstallationIsSource(ctx context.Context, installationID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, feishuOrgInstallationIsSource, installationID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getFeishuOrgBootstrapSource = `-- name: GetFeishuOrgBootstrapSource :one
-SELECT c.workspace_id, c.installation_id, c.enabled, c.revision, c.created_at, c.updated_at, c.auto_sync, c.updated_by
+SELECT c.workspace_id, c.installation_id, c.enabled, c.revision, c.created_at, c.updated_at, c.auto_sync, c.updated_by, c.source
 FROM feishu_org_config c
 JOIN member m
   ON m.workspace_id = c.workspace_id
  AND m.user_id = $1
  AND m.disabled_at IS NULL
  AND m.role IN ('owner', 'admin')
-JOIN channel_installation ci
-  ON ci.id = c.installation_id
- AND ci.workspace_id = c.workspace_id
- AND ci.channel_type = 'feishu'
- AND ci.status = 'active'
 WHERE c.enabled
+  AND (
+    c.source = 'login_app'
+    OR EXISTS (
+      SELECT 1 FROM channel_installation ci
+      WHERE ci.id = c.installation_id
+        AND ci.workspace_id = c.workspace_id
+        AND ci.channel_type = 'feishu'
+        AND ci.status = 'active'
+    )
+  )
 ORDER BY c.updated_at DESC, c.workspace_id DESC
 LIMIT 1
 `
@@ -285,12 +304,13 @@ func (q *Queries) GetFeishuOrgBootstrapSource(ctx context.Context, userID pgtype
 		&i.UpdatedAt,
 		&i.AutoSync,
 		&i.UpdatedBy,
+		&i.Source,
 	)
 	return i, err
 }
 
 const getFeishuOrgConfig = `-- name: GetFeishuOrgConfig :one
-SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by FROM feishu_org_config
+SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source FROM feishu_org_config
 WHERE workspace_id = $1
 `
 
@@ -306,6 +326,7 @@ func (q *Queries) GetFeishuOrgConfig(ctx context.Context, workspaceID pgtype.UUI
 		&i.UpdatedAt,
 		&i.AutoSync,
 		&i.UpdatedBy,
+		&i.Source,
 	)
 	return i, err
 }
@@ -317,27 +338,6 @@ WHERE installation_id = $1
 
 func (q *Queries) GetFeishuOrgDirectory(ctx context.Context, installationID pgtype.UUID) (FeishuOrgDirectory, error) {
 	row := q.db.QueryRow(ctx, getFeishuOrgDirectory, installationID)
-	var i FeishuOrgDirectory
-	err := row.Scan(
-		&i.InstallationID,
-		&i.Snapshot,
-		&i.FetchedAt,
-		&i.FetchedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getFeishuOrgDirectoryForWorkspace = `-- name: GetFeishuOrgDirectoryForWorkspace :one
-SELECT d.installation_id, d.snapshot, d.fetched_at, d.fetched_by, d.created_at, d.updated_at
-FROM feishu_org_directory d
-JOIN feishu_org_config c ON c.installation_id = d.installation_id
-WHERE c.workspace_id = $1
-`
-
-func (q *Queries) GetFeishuOrgDirectoryForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (FeishuOrgDirectory, error) {
-	row := q.db.QueryRow(ctx, getFeishuOrgDirectoryForWorkspace, workspaceID)
 	var i FeishuOrgDirectory
 	err := row.Scan(
 		&i.InstallationID,
@@ -526,12 +526,12 @@ func (q *Queries) ListActiveOwnerUserIDs(ctx context.Context, workspaceID pgtype
 }
 
 const listEnabledFeishuOrgConfigs = `-- name: ListEnabledFeishuOrgConfigs :many
-SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by FROM feishu_org_config
+SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source FROM feishu_org_config
 WHERE enabled
-ORDER BY installation_id, workspace_id
+ORDER BY source, installation_id, workspace_id
 `
 
-// Every workspace whose sync is on, grouped by installation so the scheduler
+// Every workspace whose sync is on, grouped by source so the scheduler
 // fetches each directory once.
 func (q *Queries) ListEnabledFeishuOrgConfigs(ctx context.Context) ([]FeishuOrgConfig, error) {
 	rows, err := q.db.Query(ctx, listEnabledFeishuOrgConfigs)
@@ -551,6 +551,7 @@ func (q *Queries) ListEnabledFeishuOrgConfigs(ctx context.Context) ([]FeishuOrgC
 			&i.UpdatedAt,
 			&i.AutoSync,
 			&i.UpdatedBy,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -931,6 +932,48 @@ func (q *Queries) SetFeishuOrgManagedRole(ctx context.Context, arg SetFeishuOrgM
 	return i, err
 }
 
+const switchFeishuOrgConfigsToLoginApp = `-- name: SwitchFeishuOrgConfigsToLoginApp :many
+UPDATE feishu_org_config c
+SET source = 'login_app',
+    installation_id = NULL,
+    revision = c.revision + 1,
+    updated_at = now()
+FROM channel_installation ci
+WHERE c.source = 'installation'
+  AND ci.id = c.installation_id
+  AND ci.channel_type = 'feishu'
+  AND (ci.config ->> 'app_id' = $1::text OR ci.status = 'revoked')
+RETURNING c.workspace_id, ci.id AS previous_installation_id
+`
+
+type SwitchFeishuOrgConfigsToLoginAppRow struct {
+	WorkspaceID            pgtype.UUID `json:"workspace_id"`
+	PreviousInstallationID pgtype.UUID `json:"previous_installation_id"`
+}
+
+// Moves configs whose installation is the login app itself, or has been
+// revoked, onto the login app. Bumping the revision invalidates previews
+// planned against the old source.
+func (q *Queries) SwitchFeishuOrgConfigsToLoginApp(ctx context.Context, loginAppID string) ([]SwitchFeishuOrgConfigsToLoginAppRow, error) {
+	rows, err := q.db.Query(ctx, switchFeishuOrgConfigsToLoginApp, loginAppID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SwitchFeishuOrgConfigsToLoginAppRow{}
+	for rows.Next() {
+		var i SwitchFeishuOrgConfigsToLoginAppRow
+		if err := rows.Scan(&i.WorkspaceID, &i.PreviousInstallationID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateFeishuOrgMemberRole = `-- name: UpdateFeishuOrgMemberRole :one
 UPDATE member
 SET role = $1, feishu_managed_role = $1
@@ -1006,20 +1049,22 @@ func (q *Queries) UpdateFeishuOrgSyncRun(ctx context.Context, arg UpdateFeishuOr
 }
 
 const upsertFeishuOrgConfig = `-- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, installation_id, enabled, auto_sync, updated_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (workspace_id) DO UPDATE SET
+    source = EXCLUDED.source,
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
     auto_sync = EXCLUDED.auto_sync,
     updated_by = EXCLUDED.updated_by,
     revision = feishu_org_config.revision + 1,
     updated_at = now()
-RETURNING workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by
+RETURNING workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source
 `
 
 type UpsertFeishuOrgConfigParams struct {
 	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Source         string      `json:"source"`
 	InstallationID pgtype.UUID `json:"installation_id"`
 	Enabled        bool        `json:"enabled"`
 	AutoSync       bool        `json:"auto_sync"`
@@ -1029,6 +1074,7 @@ type UpsertFeishuOrgConfigParams struct {
 func (q *Queries) UpsertFeishuOrgConfig(ctx context.Context, arg UpsertFeishuOrgConfigParams) (FeishuOrgConfig, error) {
 	row := q.db.QueryRow(ctx, upsertFeishuOrgConfig,
 		arg.WorkspaceID,
+		arg.Source,
 		arg.InstallationID,
 		arg.Enabled,
 		arg.AutoSync,
@@ -1044,6 +1090,7 @@ func (q *Queries) UpsertFeishuOrgConfig(ctx context.Context, arg UpsertFeishuOrg
 		&i.UpdatedAt,
 		&i.AutoSync,
 		&i.UpdatedBy,
+		&i.Source,
 	)
 	return i, err
 }

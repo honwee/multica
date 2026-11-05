@@ -23,7 +23,7 @@ func inheritFeishuOrganization(ctx context.Context, q *db.Queries, userID, works
 	}
 
 	if _, err := q.UpsertFeishuOrgConfig(ctx, db.UpsertFeishuOrgConfigParams{
-		WorkspaceID: workspaceID, InstallationID: source.InstallationID, Enabled: source.Enabled,
+		WorkspaceID: workspaceID, Source: feishuOrgConfigSource(source), InstallationID: source.InstallationID, Enabled: source.Enabled,
 		AutoSync: source.AutoSync, UpdatedBy: userID,
 	}); err != nil {
 		return fmt.Errorf("inherit organization config: %w", err)

@@ -1332,6 +1332,22 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const detachChannelInstallationAgent = `-- name: DetachChannelInstallationAgent :exec
+UPDATE channel_installation
+SET agent_id = NULL,
+    config = config - 'bot_open_id' - 'bot_union_id',
+    updated_at = now()
+WHERE id = $1
+`
+
+// Unbinds the Bot from an installation that stays active as an agent-less
+// application connection: the message route (agent and bot identifiers) is
+// dropped, the app credentials are kept.
+func (q *Queries) DetachChannelInstallationAgent(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, detachChannelInstallationAgent, id)
+	return err
+}
+
 const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id

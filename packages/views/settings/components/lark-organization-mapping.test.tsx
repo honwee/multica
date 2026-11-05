@@ -140,10 +140,10 @@ function baseOrganization() {
   };
 }
 
-function renderUI(canManage = true) {
+function renderUI(canManage = true, installations: LarkInstallation[] = [installation]) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <LarkOrganizationMapping installations={[installation]} canManage={canManage} />
+      <LarkOrganizationMapping installations={installations} canManage={canManage} />
     </I18nProvider>,
   );
 }
@@ -156,6 +156,41 @@ beforeEach(() => {
 });
 
 describe("LarkOrganizationMapping", () => {
+  it("renders a legacy response without a source as the installation", () => {
+    renderUI();
+    expect(screen.getAllByText("cli_app").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Login app/)).toBeNull();
+  });
+
+  it("selects the login app by default and saves it without an installation", async () => {
+    const user = userEvent.setup();
+    const organization = { ...baseOrganization(), config: null, login_app: { app_id: "cli_login" } };
+    organizationRef.current = organization;
+    mockUpdate.mockResolvedValue({ ...organization, config: { ...baseOrganization().config, source: "login_app", installation_id: "" } });
+    renderUI();
+
+    const loginAppLabel = enSettings.lark.organization.source_login_app.replace("{{appId}}", "cli_login");
+    expect(screen.getByRole("combobox")).toHaveTextContent(loginAppLabel);
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    const request = mockUpdate.mock.calls[0]?.[1];
+    expect(request).toMatchObject({ source: "login_app" });
+    expect(request).not.toHaveProperty("installation_id");
+  }, 30000);
+
+  it("shows the login app as the source without a picker when it is the only one", () => {
+    organizationRef.current = {
+      ...baseOrganization(),
+      config: { ...baseOrganization().config, source: "login_app", installation_id: "" },
+      login_app: { app_id: "cli_login" },
+    };
+    renderUI(true, []);
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText(enSettings.lark.organization.source_current.replace("{{name}}", enSettings.lark.organization.source_login_app_short))).toBeInTheDocument();
+    expect(screen.getByText(enSettings.lark.organization.source_login_app.replace("{{appId}}", "cli_login"))).toBeInTheDocument();
+  });
+
   it("shows read-only configuration and preview without write controls", async () => {
     const user = userEvent.setup();
     organizationRef.current = {
@@ -197,6 +232,7 @@ describe("LarkOrganizationMapping", () => {
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
+      source: "installation",
       installation_id: installation.id,
       enabled: true,
       auto_sync: false,
@@ -267,6 +303,7 @@ describe("LarkOrganizationMapping", () => {
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", {
+      source: "installation",
       installation_id: installation.id,
       enabled: true,
       auto_sync: false,

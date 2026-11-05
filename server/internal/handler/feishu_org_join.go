@@ -45,10 +45,10 @@ func (h *Handler) joinFeishuOrganizationWorkspaces(ctx context.Context, user db.
 			slog.Warn("feishu org join: membership lookup failed", "workspace_id", uuidToString(config.WorkspaceID), "error", err)
 			continue
 		}
-		key := uuidToString(config.InstallationID)
+		key := feishuOrgConfigSource(config) + ":" + uuidToString(config.InstallationID)
 		snapshot, ok := directories[key]
 		if !ok {
-			snapshot = h.feishuOrgJoinDirectory(ctx, config.InstallationID, user)
+			snapshot = h.feishuOrgJoinDirectory(ctx, config, user)
 			directories[key] = snapshot
 		}
 		if snapshot == nil {
@@ -64,11 +64,12 @@ func (h *Handler) joinFeishuOrganizationWorkspaces(ctx context.Context, user db.
 	}
 }
 
-// feishuOrgJoinDirectory returns the installation's directory when it may
-// contain the user: a tenant_key on both sides must agree. nil means skip.
-func (h *Handler) feishuOrgJoinDirectory(ctx context.Context, installationID pgtype.UUID, user db.User) *lark.OrgSnapshot {
-	if h.LarkInstallations != nil && user.FeishuTenantKey.Valid && user.FeishuTenantKey.String != "" {
-		installation, err := h.LarkInstallations.Get(ctx, installationID)
+// feishuOrgJoinDirectory returns the source's directory when it may contain
+// the user: for an installation, a tenant_key on both sides must agree. The
+// login app is the app the user just signed in with. nil means skip.
+func (h *Handler) feishuOrgJoinDirectory(ctx context.Context, config db.FeishuOrgConfig, user db.User) *lark.OrgSnapshot {
+	if feishuOrgConfigSource(config) == feishuOrgSourceInstallation && h.LarkInstallations != nil && user.FeishuTenantKey.Valid && user.FeishuTenantKey.String != "" {
+		installation, err := h.LarkInstallations.Get(ctx, config.InstallationID)
 		if err != nil {
 			return nil
 		}
@@ -76,7 +77,11 @@ func (h *Handler) feishuOrgJoinDirectory(ctx context.Context, installationID pgt
 			return nil
 		}
 	}
-	_, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, installationID)
+	directoryKey, err := feishuOrgDirectoryKey(config)
+	if err != nil {
+		return nil
+	}
+	_, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, directoryKey)
 	if err != nil {
 		return nil
 	}

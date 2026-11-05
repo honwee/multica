@@ -459,6 +459,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
 	invitationRateLimits.Recipient.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_RECIPIENT_24H", invitationRateLimits.Recipient.Limit)
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
+	// One-time repair at boot: organization configs still pointing at the
+	// login app's own installation, or at a revoked one, read from the login
+	// app. A failure only delays the repair to the next boot.
+	{
+		repairCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := h.SwitchFeishuOrgSourcesToLoginApp(repairCtx); err != nil {
+			slog.Warn("feishu org: switching organization sources to the login app failed", "error", err)
+		}
+		cancel()
+	}
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags

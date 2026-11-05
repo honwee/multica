@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 )
 
@@ -24,7 +23,7 @@ type FeishuOrgContactSync struct {
 	mu      sync.Mutex
 	pending map[string]*time.Timer
 	// sync is swapped in tests; it defaults to the handler's installation sync.
-	sync func(ctx context.Context, installationID pgtype.UUID) error
+	sync func(ctx context.Context, installation lark.Installation) error
 }
 
 // NewFeishuOrgContactSync builds the sink the Lark connector reports contact
@@ -60,7 +59,7 @@ func (s *FeishuOrgContactSync) NotifyContactChange(_ context.Context, inst lark.
 		s.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := s.sync(ctx, inst.ID); err != nil {
+		if err := s.sync(ctx, inst); err != nil {
 			slog.Warn("feishu org: event-driven sync failed", "installation_id", key, "error", err)
 		}
 	})
