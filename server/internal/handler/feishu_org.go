@@ -26,6 +26,9 @@ var feishuOrgRequirements = []string{
 }
 
 type LarkOrganizationConfigResponse struct {
+	// Source is "login_app" or "installation". InstallationID is empty for
+	// the login app.
+	Source         string `json:"source"`
 	InstallationID string `json:"installation_id"`
 	Enabled        bool   `json:"enabled"`
 	// AutoSync applies the plan on a schedule and whenever the directory
@@ -68,9 +71,18 @@ type LarkOrganizationResponse struct {
 	Requirements   []string                          `json:"requirements"`
 	SyncRuns       []LarkOrganizationSyncRunResponse `json:"sync_runs"`
 	Catalog        *LarkOrganizationCatalogResponse  `json:"catalog,omitempty"`
+	// LoginApp is the deployment's Feishu login app, present when its
+	// credentials are configured and it can be chosen as the source.
+	LoginApp *LarkOrganizationLoginAppResponse `json:"login_app"`
+}
+
+type LarkOrganizationLoginAppResponse struct {
+	AppID string `json:"app_id"`
 }
 
 type UpdateLarkOrganizationRequest struct {
+	// Source defaults to "installation" for clients that predate it.
+	Source         string                            `json:"source"`
 	InstallationID string                            `json:"installation_id"`
 	Enabled        bool                              `json:"enabled"`
 	AutoSync       bool                              `json:"auto_sync"`
@@ -127,12 +139,16 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		Requirements:   append([]string{}, feishuOrgRequirements...),
 		SyncRuns:       []LarkOrganizationSyncRunResponse{},
 	}
+	if loginApp, ok := feishuLoginApp(); ok {
+		response.LoginApp = &LarkOrganizationLoginAppResponse{AppID: loginApp.AppID}
+	}
 	config, err := h.Queries.GetFeishuOrgConfig(ctx, workspaceID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return response, err
 	}
 	if err == nil {
 		response.Config = &LarkOrganizationConfigResponse{
+			Source:         feishuOrgConfigSource(config),
 			InstallationID: uuidToString(config.InstallationID),
 			Enabled:        config.Enabled,
 			AutoSync:       config.AutoSync,
@@ -178,8 +194,9 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 		}
 		response.SyncRuns = append(response.SyncRuns, converted)
 	}
-	if response.Config != nil {
-		directory, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, config.InstallationID)
+	directoryKey, keyErr := feishuOrgDirectoryKey(config)
+	if response.Config != nil && keyErr == nil {
+		directory, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, directoryKey)
 		if err != nil && !errors.Is(err, errFeishuOrgDirectoryMissing) {
 			return response, err
 		}
@@ -256,30 +273,46 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if h.LarkInstallations == nil {
-		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
-		return
-	}
 	var request UpdateLarkOrganizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	installationID, ok := parseUUIDOrBadRequest(w, request.InstallationID, "installation_id")
-	if !ok {
-		return
+	source := strings.TrimSpace(request.Source)
+	if source == "" {
+		source = feishuOrgSourceInstallation
 	}
-	installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), installationID, actor.workspaceID)
-	if errors.Is(err, lark.ErrInstallationNotFound) {
-		writeError(w, http.StatusNotFound, "lark installation not found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load installation")
-		return
-	}
-	if lark.InstallationStatus(installation.Status) != lark.InstallationActive {
-		writeError(w, http.StatusBadRequest, "lark installation must be active")
+	var installationID pgtype.UUID
+	switch source {
+	case feishuOrgSourceLoginApp:
+		if _, configured := feishuLoginApp(); !configured {
+			writeError(w, http.StatusBadRequest, "the Feishu login app is not configured on this server (FEISHU_APP_ID / FEISHU_APP_SECRET)")
+			return
+		}
+	case feishuOrgSourceInstallation:
+		if h.LarkInstallations == nil {
+			writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+			return
+		}
+		installationID, ok = parseUUIDOrBadRequest(w, request.InstallationID, "installation_id")
+		if !ok {
+			return
+		}
+		installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), installationID, actor.workspaceID)
+		if errors.Is(err, lark.ErrInstallationNotFound) {
+			writeError(w, http.StatusNotFound, "lark installation not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load installation")
+			return
+		}
+		if lark.InstallationStatus(installation.Status) != lark.InstallationActive {
+			writeError(w, http.StatusBadRequest, "lark installation must be active")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "source must be 'login_app' or 'installation'")
 		return
 	}
 
@@ -341,7 +374,7 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if _, err := qtx.UpsertFeishuOrgConfig(r.Context(), db.UpsertFeishuOrgConfigParams{
-		WorkspaceID: actor.workspaceID, InstallationID: installationID, Enabled: request.Enabled,
+		WorkspaceID: actor.workspaceID, Source: source, InstallationID: installationID, Enabled: request.Enabled,
 		AutoSync: request.AutoSync, UpdatedBy: actor.userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
@@ -402,7 +435,7 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
 	}
-	installation, ok := h.feishuOrgActiveInstallation(w, r, actor.workspaceID, config.InstallationID)
+	credentials, directoryKey, installation, ok := h.feishuOrgPreviewCredentials(w, r, actor.workspaceID, config)
 	if !ok {
 		return
 	}
@@ -430,14 +463,15 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, response)
 	}
 
-	secret, err := h.LarkInstallations.DecryptAppSecret(installation)
-	if err != nil {
-		fail(err)
-		return
+	if installation != nil {
+		secret, err := h.LarkInstallations.DecryptAppSecret(*installation)
+		if err != nil {
+			fail(err)
+			return
+		}
+		credentials.AppSecret = secret
 	}
-	snapshot, err := orgClient.FetchOrganization(r.Context(), lark.InstallationCredentials{
-		AppID: installation.AppID, AppSecret: secret, TenantKey: installation.TenantKey.String, Region: lark.Region(installation.Region),
-	})
+	snapshot, err := orgClient.FetchOrganization(r.Context(), credentials)
 	if err != nil {
 		fail(err)
 		return
@@ -448,7 +482,7 @@ func (h *Handler) PreviewLarkOrganization(w http.ResponseWriter, r *http.Request
 		return
 	}
 	directory, err := h.Queries.UpsertFeishuOrgDirectory(r.Context(), db.UpsertFeishuOrgDirectoryParams{
-		InstallationID: installation.ID, Snapshot: snapshotJSON, FetchedBy: actor.userID,
+		InstallationID: directoryKey, Snapshot: snapshotJSON, FetchedBy: actor.userID,
 	})
 	if err != nil {
 		fail(err)
@@ -485,7 +519,7 @@ func (h *Handler) ReplayLarkOrganizationSync(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusConflict, "organization sync must be enabled")
 		return
 	}
-	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
+	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config)
 	if !ok {
 		return
 	}
@@ -524,7 +558,7 @@ func (h *Handler) ApplyLarkOrganizationSync(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, "organization sync configuration changed since preview")
 		return
 	}
-	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config.InstallationID)
+	directory, snapshot, ok := h.feishuOrgDirectorySnapshot(w, r, config)
 	if !ok {
 		return
 	}
@@ -619,25 +653,39 @@ func (h *Handler) feishuOrgConfigForRun(w http.ResponseWriter, r *http.Request, 
 	return config, true
 }
 
-func (h *Handler) feishuOrgActiveInstallation(w http.ResponseWriter, r *http.Request, workspaceID, installationID pgtype.UUID) (lark.Installation, bool) {
+// feishuOrgPreviewCredentials resolves who a preview fetches the directory
+// as, and the directory key it stores under. For an installation the secret
+// is left empty and the installation returned: a decrypt failure is a preview
+// failure recorded as a run, not a request error.
+func (h *Handler) feishuOrgPreviewCredentials(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, config db.FeishuOrgConfig) (lark.InstallationCredentials, pgtype.UUID, *lark.Installation, bool) {
+	if feishuOrgConfigSource(config) == feishuOrgSourceLoginApp {
+		loginApp, ok := feishuLoginApp()
+		if !ok {
+			writeError(w, http.StatusConflict, "the Feishu login app is not configured on this server")
+			return lark.InstallationCredentials{}, pgtype.UUID{}, nil, false
+		}
+		return loginApp, feishuOrgLoginAppDirectoryKey(loginApp.AppID), nil, true
+	}
 	if h.LarkInstallations == nil {
 		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
-		return lark.Installation{}, false
+		return lark.InstallationCredentials{}, pgtype.UUID{}, nil, false
 	}
-	installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), installationID, workspaceID)
+	installation, err := h.LarkInstallations.GetOrganizationInstallation(r.Context(), config.InstallationID, workspaceID)
 	if errors.Is(err, lark.ErrInstallationNotFound) {
 		writeError(w, http.StatusNotFound, "lark installation not found")
-		return lark.Installation{}, false
+		return lark.InstallationCredentials{}, pgtype.UUID{}, nil, false
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load installation")
-		return lark.Installation{}, false
+		return lark.InstallationCredentials{}, pgtype.UUID{}, nil, false
 	}
 	if lark.InstallationStatus(installation.Status) != lark.InstallationActive {
 		writeError(w, http.StatusConflict, "lark installation must be active")
-		return lark.Installation{}, false
+		return lark.InstallationCredentials{}, pgtype.UUID{}, nil, false
 	}
-	return installation, true
+	return lark.InstallationCredentials{
+		AppID: installation.AppID, TenantKey: installation.TenantKey.String, Region: lark.Region(installation.Region),
+	}, installation.ID, &installation, true
 }
 
 func (h *Handler) feishuOrgSourceRun(w http.ResponseWriter, r *http.Request) (feishuOrgActor, db.FeishuOrgSyncRun, bool) {
@@ -667,8 +715,13 @@ func (h *Handler) feishuOrgSourceRun(w http.ResponseWriter, r *http.Request) (fe
 
 // feishuOrgDirectorySnapshot loads the directory a replay or apply plans
 // against. Both work from the current directory, never from Feishu directly.
-func (h *Handler) feishuOrgDirectorySnapshot(w http.ResponseWriter, r *http.Request, installationID pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, bool) {
-	directory, snapshot, err := loadFeishuOrgDirectory(r.Context(), h.Queries, installationID)
+func (h *Handler) feishuOrgDirectorySnapshot(w http.ResponseWriter, r *http.Request, config db.FeishuOrgConfig) (db.FeishuOrgDirectory, lark.OrgSnapshot, bool) {
+	directoryKey, err := feishuOrgDirectoryKey(config)
+	if err != nil {
+		writeError(w, http.StatusConflict, "the Feishu login app is not configured on this server")
+		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, false
+	}
+	directory, snapshot, err := loadFeishuOrgDirectory(r.Context(), h.Queries, directoryKey)
 	if errors.Is(err, errFeishuOrgDirectoryMissing) {
 		writeError(w, http.StatusConflict, "organization directory has not been fetched; run a preview first")
 		return db.FeishuOrgDirectory{}, lark.OrgSnapshot{}, false

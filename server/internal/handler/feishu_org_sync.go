@@ -224,11 +224,11 @@ func (h *Handler) feishuOrgSkipOwnerChanges(ctx context.Context, q *db.Queries, 
 	return plan, nil
 }
 
-// SyncFeishuOrganizations refreshes every enabled installation's directory
-// from Feishu and applies the plan for each workspace that opted into
-// automatic sync. It returns how many workspaces were applied. Failures are
-// logged per installation or workspace so one broken tenant does not stop
-// the others; the first error is returned for the job audit row.
+// SyncFeishuOrganizations refreshes every enabled source's directory from
+// Feishu and applies the plan for each workspace that opted into automatic
+// sync. It returns how many workspaces were applied. Failures are logged per
+// source or workspace so one broken tenant does not stop the others; the
+// first error is returned for the job audit row.
 func (h *Handler) SyncFeishuOrganizations(ctx context.Context) (int, error) {
 	configs, err := h.Queries.ListEnabledFeishuOrgConfigs(ctx)
 	if err != nil {
@@ -242,19 +242,19 @@ func (h *Handler) SyncFeishuOrganizations(ctx context.Context) (int, error) {
 		snapshot  lark.OrgSnapshot
 		err       error
 	}
-	// One fetch per installation, successful or not: a tenant whose app lost
-	// its scopes must not be crawled once per workspace sharing it.
+	// One fetch per source, successful or not: a tenant whose app lost its
+	// scopes must not be crawled once per workspace sharing it.
 	refreshed := make(map[string]refreshResult)
 	var firstErr error
 	applied := 0
 	for _, config := range configs {
-		installationKey := uuidToString(config.InstallationID)
-		result, ok := refreshed[installationKey]
+		sourceKey := feishuOrgConfigSource(config) + ":" + uuidToString(config.InstallationID)
+		result, ok := refreshed[sourceKey]
 		if !ok {
-			result.directory, result.snapshot, result.err = h.refreshFeishuOrgDirectory(ctx, config.InstallationID, pgtype.UUID{})
-			refreshed[installationKey] = result
+			result.directory, result.snapshot, result.err = h.refreshFeishuOrgDirectory(ctx, config, pgtype.UUID{})
+			refreshed[sourceKey] = result
 			if result.err != nil {
-				slog.Warn("feishu org auto sync: directory refresh failed", "installation_id", installationKey, "error", result.err)
+				slog.Warn("feishu org auto sync: directory refresh failed", "source", feishuOrgConfigSource(config), "installation_id", uuidToString(config.InstallationID), "error", result.err)
 				if firstErr == nil {
 					firstErr = result.err
 				}
@@ -275,26 +275,39 @@ func (h *Handler) SyncFeishuOrganizations(ctx context.Context) (int, error) {
 	return applied, firstErr
 }
 
-// SyncFeishuOrganizationInstallation refreshes one installation's directory
-// and auto-applies every workspace configured on it. The Lark connector
-// calls it when Feishu reports a contact change.
-func (h *Handler) SyncFeishuOrganizationInstallation(ctx context.Context, installationID pgtype.UUID) error {
+// SyncFeishuOrganizationInstallation refreshes the directory of the app an
+// installation's contact event arrived on and auto-applies every workspace
+// reading it: workspaces configured on that installation, or on the login
+// app when the installation is the login app. The Lark connector calls it
+// when Feishu reports a contact change.
+func (h *Handler) SyncFeishuOrganizationInstallation(ctx context.Context, installation lark.Installation) error {
 	configs, err := h.Queries.ListEnabledFeishuOrgConfigs(ctx)
 	if err != nil {
 		return err
 	}
+	loginApp, loginAppConfigured := feishuLoginApp()
+	isLoginApp := loginAppConfigured && installation.AppID == loginApp.AppID
 	// A bot installed for messaging only has no directory to keep; skip the
-	// contact crawl unless some workspace syncs from this installation.
+	// contact crawl unless some workspace syncs from this app.
 	relevant := configs[:0]
 	for _, config := range configs {
-		if config.InstallationID == installationID {
-			relevant = append(relevant, config)
+		switch feishuOrgConfigSource(config) {
+		case feishuOrgSourceInstallation:
+			if config.InstallationID == installation.ID {
+				relevant = append(relevant, config)
+			}
+		case feishuOrgSourceLoginApp:
+			if isLoginApp {
+				relevant = append(relevant, config)
+			}
 		}
 	}
 	if len(relevant) == 0 {
 		return nil
 	}
-	directory, snapshot, err := h.refreshFeishuOrgDirectory(ctx, installationID, pgtype.UUID{})
+	// Every relevant config reads the same app; the first one names the
+	// source to refresh.
+	directory, snapshot, err := h.refreshFeishuOrgDirectory(ctx, relevant[0], pgtype.UUID{})
 	if err != nil {
 		return err
 	}
@@ -313,34 +326,25 @@ func (h *Handler) SyncFeishuOrganizationInstallation(ctx context.Context, instal
 	return firstErr
 }
 
-// refreshFeishuOrgDirectory fetches the organization behind an installation
-// and stores it as the shared directory. The installation must be active;
-// shared access is validated by the configs that point at it.
-func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, installationID, fetchedBy pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, error) {
+// refreshFeishuOrgDirectory fetches the organization behind a config's
+// source and stores it as the shared directory. An installation source must
+// be active; shared access is validated by the configs that point at it.
+func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, config db.FeishuOrgConfig, fetchedBy pgtype.UUID) (db.FeishuOrgDirectory, lark.OrgSnapshot, error) {
 	none := db.FeishuOrgDirectory{}
-	if h.LarkInstallations == nil || h.LarkAPIClient == nil {
+	if h.LarkAPIClient == nil {
 		return none, lark.OrgSnapshot{}, errors.New("feishu org: lark integration not configured")
 	}
 	orgClient, ok := h.LarkAPIClient.(lark.OrgAPIClient)
 	if !ok {
 		return none, lark.OrgSnapshot{}, errors.New("feishu org: lark organization API not configured")
 	}
-	installation, err := h.LarkInstallations.Get(ctx, installationID)
-	if err != nil {
-		return none, lark.OrgSnapshot{}, err
-	}
-	if lark.InstallationStatus(installation.Status) != lark.InstallationActive {
-		return none, lark.OrgSnapshot{}, errors.New("feishu org: installation is not active")
-	}
-	secret, err := h.LarkInstallations.DecryptAppSecret(installation)
+	credentials, directoryKey, err := h.feishuOrgSourceCredentials(ctx, config)
 	if err != nil {
 		return none, lark.OrgSnapshot{}, err
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	snapshot, err := orgClient.FetchOrganization(fetchCtx, lark.InstallationCredentials{
-		AppID: installation.AppID, AppSecret: secret, TenantKey: installation.TenantKey.String, Region: lark.Region(installation.Region),
-	})
+	snapshot, err := orgClient.FetchOrganization(fetchCtx, credentials)
 	if err != nil {
 		return none, lark.OrgSnapshot{}, err
 	}
@@ -352,7 +356,7 @@ func (h *Handler) refreshFeishuOrgDirectory(ctx context.Context, installationID,
 		return none, lark.OrgSnapshot{}, err
 	}
 	directory, err := h.Queries.UpsertFeishuOrgDirectory(ctx, db.UpsertFeishuOrgDirectoryParams{
-		InstallationID: installationID, Snapshot: snapshotJSON, FetchedBy: fetchedBy,
+		InstallationID: directoryKey, Snapshot: snapshotJSON, FetchedBy: fetchedBy,
 	})
 	if err != nil {
 		return none, lark.OrgSnapshot{}, err

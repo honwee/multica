@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -18,24 +17,22 @@ var (
 	errFeishuInviteeIdentity = errors.New("feishu member has no invitable identity")
 )
 
-// workspaceFeishuOrgDirectory loads the directory of the installation the
+// workspaceFeishuOrgDirectory loads the directory of the source the
 // workspace's organization config points at.
 func (h *Handler) workspaceFeishuOrgDirectory(ctx context.Context, workspaceID pgtype.UUID) (lark.OrgSnapshot, error) {
-	directory, err := h.Queries.GetFeishuOrgDirectoryForWorkspace(ctx, workspaceID)
+	config, err := h.Queries.GetFeishuOrgConfig(ctx, workspaceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
 	}
 	if err != nil {
 		return lark.OrgSnapshot{}, err
 	}
-	var snapshot lark.OrgSnapshot
-	if err := json.Unmarshal(directory.Snapshot, &snapshot); err != nil {
-		return lark.OrgSnapshot{}, err
-	}
-	if !snapshot.Complete {
+	directoryKey, err := feishuOrgDirectoryKey(config)
+	if err != nil {
 		return lark.OrgSnapshot{}, errFeishuOrgDirectoryMissing
 	}
-	return snapshot, nil
+	_, snapshot, err := loadFeishuOrgDirectory(ctx, h.Queries, directoryKey)
+	return snapshot, err
 }
 
 // resolveFeishuInvitationEmail resolves an invitation from the same directory
