@@ -605,6 +605,11 @@ type Daemon struct {
 	// runtime profiles that may have changed during the gap.
 	workspaceChanges *workspaceChangeSignal
 
+	// allowlistSig is the workspace allowlist the last sync applied; guarded
+	// by reloading, which serializes syncWorkspacesFromAPI.
+	allowlistSig      string
+	allowlistSigKnown bool
+
 	// wsRPC carries generic request/response RPCs (e.g. tasks.claim, MUL-4257)
 	// over the task-wakeup WS connection. It is attached to the live
 	// connection in runTaskWakeupConnection and detached on disconnect; when
@@ -2954,14 +2959,15 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 	}
 
 	req := map[string]any{
-		"workspace_id":      workspaceID,
-		"daemon_id":         d.cfg.DaemonID,
-		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
-		"device_name":       d.cfg.DeviceName,
-		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
-		"failed_profiles":   failedProfiles,
+		"workspace_id":        workspaceID,
+		"daemon_id":           d.cfg.DaemonID,
+		"legacy_daemon_ids":   d.cfg.LegacyDaemonIDs,
+		"device_name":         d.cfg.DeviceName,
+		"cli_version":         d.cfg.CLIVersion,
+		"launched_by":         d.cfg.LaunchedBy,
+		"workspace_allowlist": d.workspaceAllowlistIDs(),
+		"runtimes":            runtimes,
+		"failed_profiles":     failedProfiles,
 	}
 
 	resp, err := d.client.Register(ctx, req)
@@ -2999,13 +3005,14 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		return nil, ErrNoRuntimesToRegister
 	}
 	req := map[string]any{
-		"workspace_id":      workspaceID,
-		"daemon_id":         d.cfg.DaemonID,
-		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
-		"device_name":       d.cfg.DeviceName,
-		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
+		"workspace_id":        workspaceID,
+		"daemon_id":           d.cfg.DaemonID,
+		"legacy_daemon_ids":   d.cfg.LegacyDaemonIDs,
+		"device_name":         d.cfg.DeviceName,
+		"cli_version":         d.cfg.CLIVersion,
+		"launched_by":         d.cfg.LaunchedBy,
+		"workspace_allowlist": d.workspaceAllowlistIDs(),
+		"runtimes":            runtimes,
 		// Deliberately empty: this call carries no profiles, so it must not
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
@@ -4215,6 +4222,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
 	allowed := d.workspaceAllowlist()
+	allowlistSig := strings.Join(d.workspaceAllowlistIDs(), ",")
+	allowlistChanged := d.allowlistSigKnown && allowlistSig != d.allowlistSig
+	d.allowlistSig, d.allowlistSigKnown = allowlistSig, true
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {
 		if allowed != nil && !allowed[ws.ID] {
@@ -4251,6 +4261,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
+			if allowlistChanged {
+				// The server stores the allowlist in each runtime's metadata
+				// at register time, so workspaces that stay tracked re-register
+				// to report the new list.
+				if err := d.withWorkspaceRegisterLock(id, func() error {
+					return d.applyProfileDriftRegistration(ctx, id)
+				}); err != nil {
+					d.logger.Debug("workspace allowlist: re-register failed", "workspace_id", id, "error", err)
+				}
+			}
 			if reconcileProfiles {
 				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
 					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
@@ -4426,6 +4446,19 @@ func (d *Daemon) stopWatchingWorkspace(id string) []string {
 	}
 	delete(d.workspaces, id)
 	return runtimeIDs
+}
+
+// workspaceAllowlistIDs is the allowlist as reported to the server: sorted,
+// and an empty (non-nil) slice when every workspace is allowed, so the server
+// can tell "all" apart from a daemon too old to report it.
+func (d *Daemon) workspaceAllowlistIDs() []string {
+	allowed := d.workspaceAllowlist()
+	ids := make([]string, 0, len(allowed))
+	for id := range allowed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // workspaceAllowlist returns the set of workspace IDs this machine may register

@@ -324,7 +324,11 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes        []struct {
+	// WorkspaceAllowlist is the daemon's per-machine list of workspaces it
+	// registers in: empty = all, nil = a daemon too old to report it. Stored in
+	// runtime metadata for read-only display.
+	WorkspaceAllowlist []string `json:"workspace_allowlist"`
+	Runtimes           []struct {
 		Name        string `json:"name"`
 		RuntimeMode string `json:"runtime_mode,omitempty"`
 		Type        string `json:"type"`
@@ -774,12 +778,16 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// live request — the resource-save gate and the UI — decide from the
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
-		metadata, _ := json.Marshal(map[string]any{
+		metadataFields := map[string]any{
 			"version":      runtime.Version,
 			"cli_version":  req.CLIVersion,
 			"launched_by":  req.LaunchedBy,
 			"capabilities": requestClientCapabilities(r),
-		})
+		}
+		if req.WorkspaceAllowlist != nil {
+			metadataFields["workspace_allowlist"] = req.WorkspaceAllowlist
+		}
+		metadata, _ := json.Marshal(metadataFields)
 
 		var registered db.AgentRuntime
 		var inserted bool

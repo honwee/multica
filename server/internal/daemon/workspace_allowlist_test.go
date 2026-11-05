@@ -132,3 +132,26 @@ func TestWorkspaceAllowlist_NoMatchIsNotAStartupFailure(t *testing.T) {
 		t.Errorf("tracked = %v, want none", got)
 	}
 }
+
+func TestWorkspaceAllowlist_ReportedOnRegisterAndRefreshedOnChange(t *testing.T) {
+	fx, setAllowlist := allowlistFixture(t)
+	syncOnce(t, fx.daemon)
+
+	got, calls := fx.lastAllowlistFor("ws-a")
+	if calls != 1 || got == nil || len(got) != 0 {
+		t.Fatalf("initial ws-a register: allowlist=%v calls=%d, want [] after 1 call", got, calls)
+	}
+
+	// An unchanged list must not cause another register round.
+	syncOnce(t, fx.daemon)
+	if _, calls := fx.lastAllowlistFor("ws-a"); calls != 1 {
+		t.Fatalf("ws-a register calls after an unchanged sync = %d, want 1", calls)
+	}
+
+	setAllowlist("ws-a")
+	syncOnce(t, fx.daemon)
+	got, calls = fx.lastAllowlistFor("ws-a")
+	if calls != 2 || len(got) != 1 || got[0] != "ws-a" {
+		t.Fatalf("ws-a after narrowing: allowlist=%v calls=%d, want [ws-a] after 2 calls", got, calls)
+	}
+}
