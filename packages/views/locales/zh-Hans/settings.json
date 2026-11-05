@@ -1465,6 +1465,8 @@
       "server_url": "服务器 URL",
       "device_name": "设备名称",
       "workspaces": "工作区",
+      "workspace_allowlist_title": "在这些工作区注册运行时",
+      "workspace_allowlist_all": "全部工作区，包括之后加入的。",
       "state_stopped": "已停止",
       "state_starting": "正在启动...",
       "state_running": "运行中",

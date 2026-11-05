@@ -151,6 +151,13 @@ type CLIConfig struct {
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
+	// DaemonWorkspaces limits the workspaces this machine's daemon registers
+	// runtimes in. Empty means every workspace the account belongs to. The
+	// daemon re-reads it on each workspace sync, so edits apply without a
+	// restart. Resolution precedence: MULTICA_DAEMON_WORKSPACES env (comma
+	// separated), this field, default (all workspaces).
+	DaemonWorkspaces []string `json:"daemon_workspaces,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same
@@ -400,4 +407,20 @@ func SaveCLIConfigForProfile(cfg CLIConfig, profile string) error {
 		return fmt.Errorf("rename config file: %w", err)
 	}
 	return nil
+}
+
+// ParseWorkspaceIDList splits a comma-separated workspace ID list, trimming
+// blanks and dropping duplicates. An empty input yields nil ("all workspaces").
+func ParseWorkspaceIDList(value string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(value, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }

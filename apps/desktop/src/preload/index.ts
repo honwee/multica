@@ -332,6 +332,12 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
+  getWorkspaceAllowlist: (): Promise<string[]> =>
+    ipcRenderer.invoke("daemon:get-workspace-allowlist"),
+  setWorkspaceAllowlist: (
+    workspaceIds: string[],
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:set-workspace-allowlist", workspaceIds),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
     ipcRenderer.invoke("daemon:get-prefs"),
   setPrefs: (prefs: Partial<{ autoStart: boolean; autoStop: boolean }>): Promise<{ autoStart: boolean; autoStop: boolean }> =>

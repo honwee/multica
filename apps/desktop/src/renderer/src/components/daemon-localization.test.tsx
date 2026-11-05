@@ -11,6 +11,11 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+// The workspace picker has its own test and needs a QueryClient; this suite
+// only covers the tab's localized strings.
+vi.mock("./daemon-workspace-allowlist", () => ({
+  DaemonWorkspaceAllowlist: () => null,
+}));
 vi.mock("../platform/daemon-reauth", () => ({
   reauthenticateDaemon: vi.fn(),
 }));

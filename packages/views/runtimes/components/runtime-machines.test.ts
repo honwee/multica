@@ -6,6 +6,8 @@ import {
   buildRuntimeMachines,
   countRuntimeMachines,
   filterRuntimeMachines,
+  machineWorkspaceAllowlist,
+  resolveWorkspaceAllowlist,
   runtimeMachineCounts,
   runtimeRowLabel,
   sharedCustomName,
@@ -485,5 +487,55 @@ describe("runtimeRowLabel", () => {
         "Dev Box",
       ),
     ).toBe("just this one");
+  });
+});
+
+describe("machine workspace allowlist", () => {
+  it("is null when no runtime reported one (older daemon)", () => {
+    expect(machineWorkspaceAllowlist([makeRuntime()])).toBeNull();
+  });
+
+  it("reads an empty list as every workspace", () => {
+    expect(
+      machineWorkspaceAllowlist([
+        makeRuntime({ metadata: { workspace_allowlist: [] } }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("prefers an online runtime's report and drops malformed entries", () => {
+    expect(
+      machineWorkspaceAllowlist([
+        makeRuntime({
+          id: "rt-offline",
+          status: "offline",
+          metadata: { workspace_allowlist: ["ws-old"] },
+        }),
+        makeRuntime({
+          id: "rt-online",
+          metadata: { workspace_allowlist: ["ws-1", 3, " "] },
+        }),
+      ]),
+    ).toEqual(["ws-1"]);
+  });
+
+  it("is exposed on the built machine", () => {
+    const [machine] = buildRuntimeMachines(
+      [makeRuntime({ metadata: { workspace_allowlist: ["ws-1"] } })],
+      { now: NOW },
+    );
+    expect(machine!.workspaceAllowlist).toEqual(["ws-1"]);
+  });
+
+  it("names visible workspaces and counts the rest", () => {
+    expect(
+      resolveWorkspaceAllowlist(
+        ["ws-1", "ws-secret", "ws-2"],
+        [
+          { id: "ws-1", name: "Lumist" },
+          { id: "ws-2", name: "教务FDE" },
+        ],
+      ),
+    ).toEqual({ names: ["Lumist", "教务FDE"], hiddenCount: 1 });
   });
 });

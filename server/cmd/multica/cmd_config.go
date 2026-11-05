@@ -47,6 +47,7 @@ var configSetSupportedKeys = []string{
 	"disable_auto_update",
 	"auto_update_check_interval",
 	"disable_auto_reload",
+	"daemon_workspaces",
 }
 
 var configSetCmd = &cobra.Command{
@@ -57,7 +58,7 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
 		"heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, daemon_workspaces.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, ws_claim_poll_interval, heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -72,7 +73,11 @@ var configSetCmd = &cobra.Command{
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
-		"value (e.g. `config set poll_interval \"\"`).",
+		"value (e.g. `config set poll_interval \"\"`).\n\n" +
+		"daemon_workspaces takes a comma-separated list of workspace IDs; the " +
+		"daemon only registers runtimes in those workspaces and takes its runtimes " +
+		"offline in the others on its next workspace sync, without a restart. " +
+		"An empty value means every workspace. MULTICA_DAEMON_WORKSPACES overrides it.",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -115,6 +120,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "daemon_workspaces:", valueOrDefault(strings.Join(cfg.DaemonWorkspaces, ","), "(all)"))
 	return nil
 }
 
@@ -266,6 +272,8 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
 			return err
 		}
+	case "daemon_workspaces":
+		cfg.DaemonWorkspaces = cli.ParseWorkspaceIDList(value)
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}

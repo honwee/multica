@@ -1472,6 +1472,8 @@
       "server_url": "Server URL",
       "device_name": "Device name",
       "workspaces": "Workspaces",
+      "workspace_allowlist_title": "Register runtimes in",
+      "workspace_allowlist_all": "All workspaces, including ones you join later.",
       "state_stopped": "Stopped",
       "state_starting": "Starting…",
       "state_running": "Running",

@@ -1471,6 +1471,8 @@
       "server_url": "URL du serveur",
       "device_name": "Nom de l'appareil",
       "workspaces": "Espaces de travail",
+      "workspace_allowlist_title": "Enregistrer les runtimes dans",
+      "workspace_allowlist_all": "Tous les espaces de travail, y compris ceux rejoints plus tard.",
       "state_stopped": "Arrêté",
       "state_starting": "Démarrage…",
       "state_running": "En cours",

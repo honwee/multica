@@ -179,6 +179,8 @@ func (fx *batchFixture) profilesShouldFail() bool {
 type registeredCall struct {
 	workspaceID string
 	types       []string
+	// allowlist is the workspace_allowlist the call reported; nil when absent.
+	allowlist []string
 	// versions maps runtime type -> the version that call reported, so a test
 	// can assert the server was told about an in-place CLI upgrade.
 	versions map[string]string
@@ -347,8 +349,9 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			_ = json.NewEncoder(w).Encode(list)
 		case r.URL.Path == "/api/daemon/register":
 			var body struct {
-				WorkspaceID string              `json:"workspace_id"`
-				Runtimes    []map[string]string `json:"runtimes"`
+				WorkspaceID        string              `json:"workspace_id"`
+				Runtimes           []map[string]string `json:"runtimes"`
+				WorkspaceAllowlist []string            `json:"workspace_allowlist"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.mu.Lock()
@@ -377,6 +380,7 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			}
 			call := registeredCall{
 				workspaceID: body.WorkspaceID,
+				allowlist:   body.WorkspaceAllowlist,
 				versions:    map[string]string{},
 				names:       map[string]string{},
 			}
@@ -915,4 +919,20 @@ func TestRegisterRuntimesForWorkspaceBatch_DoesNotMutateSharedPayload(t *testing
 	if len(builtins) != 1 || builtins[0]["type"] != "claude" {
 		t.Fatalf("shared built-in payload was mutated: %v", builtins)
 	}
+}
+
+// lastAllowlistFor returns the allowlist the most recent register call for a
+// workspace reported, and how many register calls that workspace has seen.
+func (fx *batchFixture) lastAllowlistFor(workspaceID string) ([]string, int) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	var last []string
+	var calls int
+	for _, call := range fx.registered {
+		if call.workspaceID == workspaceID {
+			last = call.allowlist
+			calls++
+		}
+	}
+	return last, calls
 }

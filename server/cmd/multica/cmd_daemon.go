@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -1130,6 +1131,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// Set by the Electron Desktop app when it spawns the CLI so the server
 	// can mark those runtimes as "managed" and hide CLI self-update UI.
 	cfg.LaunchedBy = os.Getenv("MULTICA_LAUNCHED_BY")
+	cfg.WorkspaceAllowlist = daemonWorkspaceAllowlistResolver(profile)
 	lock, err := acquireDaemonProfileLock(profile, os.Getenv("MULTICA_DAEMON_HANDOFF") == "1")
 	if err != nil {
 		return err
@@ -2514,5 +2516,30 @@ func formatAge(seconds int64) string {
 		return fmt.Sprintf("%dm %ds", int(d/time.Minute), int((d%time.Minute)/time.Second))
 	default:
 		return fmt.Sprintf("%ds", seconds)
+	}
+}
+
+// daemonWorkspaceAllowlistResolver returns the daemon's per-sync allowlist
+// lookup. MULTICA_DAEMON_WORKSPACES, when set, pins the list for the process
+// lifetime; otherwise config.json is re-read on every call so `config set
+// daemon_workspaces` and the desktop picker apply without a restart.
+func daemonWorkspaceAllowlistResolver(profile string) func() []string {
+	if env, ok := os.LookupEnv("MULTICA_DAEMON_WORKSPACES"); ok && strings.TrimSpace(env) != "" {
+		ids := cli.ParseWorkspaceIDList(env)
+		return func() []string { return ids }
+	}
+	// A config file caught mid-write or briefly unreadable must not widen the
+	// list to every workspace, so a failed read keeps the last good value.
+	var (
+		mu       sync.Mutex
+		lastGood []string
+	)
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		if fileCfg, err := cli.LoadCLIConfigForProfile(profile); err == nil {
+			lastGood = fileCfg.DaemonWorkspaces
+		}
+		return lastGood
 	}
 }

@@ -6,10 +6,11 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import type { AgentRuntime } from "@multica/core/types";
+import type { AgentRuntime, Workspace } from "@multica/core/types";
 import {
   agentListOptions,
   memberListOptions,
+  workspaceListOptions,
 } from "@multica/core/workspace/queries";
 import enCommon from "../../locales/en/common.json";
 import enLayout from "../../locales/en/layout.json";
@@ -108,6 +109,9 @@ function renderPage({
   qc.setQueryData(runtimeProfileListOptions(WS).queryKey, []);
   qc.setQueryData(agentListOptions(WS).queryKey, []);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
+  qc.setQueryData(workspaceListOptions().queryKey, [
+    { id: WS, name: "Lumist", slug: "lumist" } as Workspace,
+  ]);
   qc.setQueryData(memberListOptions(WS).queryKey, [
     {
       id: "member-1",
@@ -174,6 +178,37 @@ describe("RuntimeDetailPage", () => {
     expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText("Jiayuan")).toBeInTheDocument();
     expect(screen.getByText("Daemon ID")).toBeInTheDocument();
+  });
+
+  it("shows where the daemon registers, naming only workspaces the viewer can see", () => {
+    renderPage({
+      runtimes: [
+        makeRuntime({
+          metadata: {
+            cli_version: "0.3.17",
+            workspace_allowlist: [WS, "ws-hidden"],
+          },
+        }),
+      ],
+    });
+
+    expect(screen.getByText("Registered in")).toBeInTheDocument();
+    expect(screen.getByText("Lumist, 1 other workspace")).toBeInTheDocument();
+  });
+
+  it("shows 'All workspaces' for an empty allowlist and nothing when unreported", () => {
+    const { unmount } = renderPage({
+      runtimes: [
+        makeRuntime({
+          metadata: { cli_version: "0.3.17", workspace_allowlist: [] },
+        }),
+      ],
+    });
+    expect(screen.getByText("All workspaces")).toBeInTheDocument();
+    unmount();
+
+    renderPage();
+    expect(screen.queryByText("Registered in")).not.toBeInTheDocument();
   });
 
   it("moves Rename machine into the ⋯ menu", async () => {

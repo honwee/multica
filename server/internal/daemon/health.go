@@ -406,6 +406,22 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// workspaceSyncHandler asks the workspace sync loop for an immediate round, so
+// an edited workspace allowlist applies without waiting for the periodic sync.
+func (d *Daemon) workspaceSyncHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.workspaceChanges != nil {
+			d.workspaceChanges.broadcast()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "sync requested"})
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
@@ -413,6 +429,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	mux.HandleFunc("/workspaces/sync", d.workspaceSyncHandler())
 
 	srv := &http.Server{Handler: mux}
 

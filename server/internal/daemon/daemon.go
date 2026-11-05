@@ -605,6 +605,11 @@ type Daemon struct {
 	// runtime profiles that may have changed during the gap.
 	workspaceChanges *workspaceChangeSignal
 
+	// allowlistSig is the workspace allowlist the last sync applied; guarded
+	// by reloading, which serializes syncWorkspacesFromAPI.
+	allowlistSig      string
+	allowlistSigKnown bool
+
 	// wsRPC carries generic request/response RPCs (e.g. tasks.claim, MUL-4257)
 	// over the task-wakeup WS connection. It is attached to the live
 	// connection in runTaskWakeupConnection and detached on disconnect; when
@@ -2954,14 +2959,15 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 	}
 
 	req := map[string]any{
-		"workspace_id":      workspaceID,
-		"daemon_id":         d.cfg.DaemonID,
-		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
-		"device_name":       d.cfg.DeviceName,
-		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
-		"failed_profiles":   failedProfiles,
+		"workspace_id":        workspaceID,
+		"daemon_id":           d.cfg.DaemonID,
+		"legacy_daemon_ids":   d.cfg.LegacyDaemonIDs,
+		"device_name":         d.cfg.DeviceName,
+		"cli_version":         d.cfg.CLIVersion,
+		"launched_by":         d.cfg.LaunchedBy,
+		"workspace_allowlist": d.workspaceAllowlistIDs(),
+		"runtimes":            runtimes,
+		"failed_profiles":     failedProfiles,
 	}
 
 	resp, err := d.client.Register(ctx, req)
@@ -2999,13 +3005,14 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		return nil, ErrNoRuntimesToRegister
 	}
 	req := map[string]any{
-		"workspace_id":      workspaceID,
-		"daemon_id":         d.cfg.DaemonID,
-		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
-		"device_name":       d.cfg.DeviceName,
-		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
+		"workspace_id":        workspaceID,
+		"daemon_id":           d.cfg.DaemonID,
+		"legacy_daemon_ids":   d.cfg.LegacyDaemonIDs,
+		"device_name":         d.cfg.DeviceName,
+		"cli_version":         d.cfg.CLIVersion,
+		"launched_by":         d.cfg.LaunchedBy,
+		"workspace_allowlist": d.workspaceAllowlistIDs(),
+		"runtimes":            runtimes,
 		// Deliberately empty: this call carries no profiles, so it must not
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
@@ -4214,8 +4221,15 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
+	allowed := d.workspaceAllowlist()
+	allowlistSig := strings.Join(d.workspaceAllowlistIDs(), ",")
+	allowlistChanged := d.allowlistSigKnown && allowlistSig != d.allowlistSig
+	d.allowlistSig, d.allowlistSigKnown = allowlistSig, true
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {
+		if allowed != nil && !allowed[ws.ID] {
+			continue
+		}
 		apiIDs[ws.ID] = ws.Name
 	}
 
@@ -4247,6 +4261,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
+			if allowlistChanged {
+				// The server stores the allowlist in each runtime's metadata
+				// at register time, so workspaces that stay tracked re-register
+				// to report the new list.
+				if err := d.withWorkspaceRegisterLock(id, func() error {
+					return d.applyProfileDriftRegistration(ctx, id)
+				}); err != nil {
+					d.logger.Debug("workspace allowlist: re-register failed", "workspace_id", id, "error", err)
+				}
+			}
 			if reconcileProfiles {
 				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
 					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
@@ -4359,20 +4383,32 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		registered++
 	}
 
-	// Remove workspaces the user no longer belongs to.
+	// Remove workspaces the user no longer belongs to, or that this machine's
+	// workspace allowlist excludes.
+	stillMember := make(map[string]bool, len(workspaces))
+	for _, ws := range workspaces {
+		stillMember[ws.ID] = true
+	}
 	for id := range currentIDs {
-		if _, ok := apiIDs[id]; !ok {
-			d.mu.Lock()
-			if ws, exists := d.workspaces[id]; exists {
-				for _, rid := range ws.runtimeIDs {
-					delete(d.runtimeIndex, rid)
-				}
-			}
-			delete(d.workspaces, id)
-			d.mu.Unlock()
+		if _, ok := apiIDs[id]; ok {
+			continue
+		}
+		if !stillMember[id] {
+			d.stopWatchingWorkspace(id)
 			d.logger.Info("stopped watching workspace", "workspace_id", id)
 			removed++
+			continue
 		}
+		// Still a member, so the server would keep listing this machine's
+		// rows as online until the stale-heartbeat sweep. Take them offline
+		// now, under the register lock like every other deregistration.
+		_ = d.withWorkspaceRegisterLock(id, func() error {
+			runtimeIDs := d.stopWatchingWorkspace(id)
+			d.deregisterDroppedRuntimes(ctx, id, runtimeIDs, "workspace excluded by allowlist", nil)
+			return nil
+		})
+		d.logger.Info("stopped watching workspace excluded by allowlist", "workspace_id", id)
+		removed++
 	}
 	if registered > 0 || removed > 0 {
 		d.notifyRuntimeSetChanged()
@@ -4386,13 +4422,63 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	// just upgraded, and a state file removed by repo cache GC.
 	d.publishTrackedCoAuthoredByState()
 
-	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
-		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(workspaces))
+	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(apiIDs) > 0 {
+		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(apiIDs))
 	}
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
 	return nil
+}
+
+// stopWatchingWorkspace drops a workspace and its runtimes from local state and
+// returns the runtime IDs it was tracking.
+func (d *Daemon) stopWatchingWorkspace(id string) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, exists := d.workspaces[id]
+	if !exists {
+		return nil
+	}
+	runtimeIDs := append([]string(nil), ws.runtimeIDs...)
+	for _, rid := range runtimeIDs {
+		delete(d.runtimeIndex, rid)
+	}
+	delete(d.workspaces, id)
+	return runtimeIDs
+}
+
+// workspaceAllowlistIDs is the allowlist as reported to the server: sorted,
+// and an empty (non-nil) slice when every workspace is allowed, so the server
+// can tell "all" apart from a daemon too old to report it.
+func (d *Daemon) workspaceAllowlistIDs() []string {
+	allowed := d.workspaceAllowlist()
+	ids := make([]string, 0, len(allowed))
+	for id := range allowed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// workspaceAllowlist returns the set of workspace IDs this machine may register
+// in, or nil when every workspace is allowed.
+func (d *Daemon) workspaceAllowlist() map[string]bool {
+	if d.cfg.WorkspaceAllowlist == nil {
+		return nil
+	}
+	var allowed map[string]bool
+	for _, id := range d.cfg.WorkspaceAllowlist() {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if allowed == nil {
+			allowed = make(map[string]bool)
+		}
+		allowed[id] = true
+	}
+	return allowed
 }
 
 // heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
