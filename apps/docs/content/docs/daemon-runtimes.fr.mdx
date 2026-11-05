@@ -59,6 +59,8 @@ Pour placer les répertoires de travail des exécutions sur un autre disque, enr
 
 Au démarrage, le daemon détecte les outils de codage IA pris en charge présents dans le `PATH` et enregistre des runtimes pour les espaces de travail auxquels vous êtes autorisé à vous connecter. Si vous venez d'installer un outil ou de vous y connecter, redémarrez le daemon pour qu'il le détecte.
 
+Pour limiter les espaces de travail où cette machine s'enregistre, choisissez-les dans Desktop sous **Paramètres → Démon → Enregistrer les runtimes dans**, ou exécutez `multica config set daemon_workspaces <id>,<id>` (une valeur vide signifie tous les espaces de travail). `MULTICA_DAEMON_WORKSPACES` prévaut sur la valeur de configuration. Le changement s'applique à la prochaine synchronisation des espaces de travail, sans redémarrage : dans les espaces désélectionnés, les runtimes de cette machine passent hors ligne ; les nouveaux espaces sélectionnés sont enregistrés.
+
 Pour démarrer, le daemon a besoin de détecter au moins un outil de codage IA intégré pris en charge. Les méthodes d'installation et les noms des exécutables figurent dans [Installer les outils de codage IA](/install-agent-runtime).
 
 ### Démarrage à l'ouverture de session [#autostart]

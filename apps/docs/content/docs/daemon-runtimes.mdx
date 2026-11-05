@@ -59,6 +59,8 @@ To place run workspaces on another disk, persist a root for the current profile 
 
 On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it.
 
+To limit which workspaces this machine registers in, choose them in Desktop under **Settings → Daemon → Register runtimes in**, or run `multica config set daemon_workspaces <id>,<id>` (an empty value means every workspace). `MULTICA_DAEMON_WORKSPACES` overrides the config value. The change applies on the next workspace sync without a restart: workspaces you deselect have this machine's runtimes taken offline, and newly selected ones are registered.
+
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
 
 ### Start at login [#autostart]
