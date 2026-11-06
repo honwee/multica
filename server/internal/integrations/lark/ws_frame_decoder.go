@@ -83,6 +83,11 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	if err := json.Unmarshal(env.Event, &evt); err != nil {
 		return InboundMessage{}, false, fmt.Errorf("event: %w", err)
 	}
+	// Messages an app sends, including the inbox notifications an agent's
+	// bot delivers, are never user input and must not start a run.
+	if evt.Sender.SenderType == "app" {
+		return InboundMessage{}, false, nil
+	}
 
 	msg := InboundMessage{
 		EventType:    env.Header.EventType,

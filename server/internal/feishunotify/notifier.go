@@ -1,5 +1,8 @@
 // Package feishunotify pushes a member's inbox notifications to Feishu as
-// direct messages from the deployment's Feishu login app.
+// direct messages. When the issue is assigned to an agent that owns a Feishu
+// bot in the workspace, the bot sends them, so they land in the member's chat
+// with that agent; otherwise, or when the bot cannot reach the member, the
+// deployment's Feishu login app sends them.
 //
 // Delivery is opt-in per member and workspace through the
 // `feishu_notifications` preference and follows the member's inbox group
@@ -63,9 +66,19 @@ type Queries interface {
 	GetIssueStatusEntryByKey(ctx context.Context, arg db.GetIssueStatusEntryByKeyParams) (db.IssueStatus, error)
 }
 
+// BotRouter resolves an agent's Feishu bot and how a member is addressed
+// through it. lark.ErrNoAgentBot and lark.ErrAgentBotRecipientUnreachable
+// mean the login app should send instead.
+type BotRouter interface {
+	Route(ctx context.Context, workspaceID, agentID pgtype.UUID, user db.User) (lark.AgentBotRoute, error)
+}
+
 // Config tunes a Notifier. Zero values take the defaults.
 type Config struct {
+	// Credentials are the login app's, used when no agent bot sends.
 	Credentials lark.InstallationCredentials
+	// Bots resolves agent bots. Nil sends everything through the login app.
+	Bots BotRouter
 	// AppURL is the web origin issue links point at.
 	AppURL string
 	// Window is the per-recipient, per-issue merge window. Default 1 minute.
@@ -94,10 +107,15 @@ type Notifier struct {
 	inflight sync.WaitGroup
 }
 
+// windowKey includes the sending agent so a reassignment inside a window
+// opens a new window for the new sender instead of merging into the old one.
 type windowKey struct {
 	workspaceID string
 	recipientID string
 	issueID     string
+	// agentID is the assigned agent whose bot is tried first; empty means
+	// the login app.
+	agentID string
 }
 
 // window is an open rate-limit window for one recipient and issue. pending
@@ -187,7 +205,12 @@ func (n *Notifier) accept(ctx context.Context, ev event) {
 	if !n.eligible(lookupCtx, ev) {
 		return
 	}
-	key := windowKey{workspaceID: ev.WorkspaceID, recipientID: ev.RecipientID, issueID: ev.IssueID}
+	key := windowKey{
+		workspaceID: ev.WorkspaceID,
+		recipientID: ev.RecipientID,
+		issueID:     ev.IssueID,
+		agentID:     n.assignedAgent(lookupCtx, ev),
+	}
 
 	n.mu.Lock()
 	if w, open := n.windows[key]; open {
@@ -202,7 +225,7 @@ func (n *Notifier) accept(ctx context.Context, ev event) {
 	n.inflight.Add(1)
 	go func() {
 		defer n.inflight.Done()
-		n.deliver(ctx, []event{ev})
+		n.deliver(ctx, key, []event{ev})
 	}()
 	time.AfterFunc(n.cfg.Window, func() {
 		defer n.inflight.Done()
@@ -225,7 +248,7 @@ func (n *Notifier) closeWindow(ctx context.Context, key windowKey) {
 	n.inflight.Add(1)
 	n.mu.Unlock()
 
-	n.deliver(ctx, batch)
+	n.deliver(ctx, key, batch)
 	time.AfterFunc(n.cfg.Window, func() {
 		defer n.inflight.Done()
 		n.closeWindow(ctx, key)
@@ -282,57 +305,128 @@ func Recipient(u db.User) (receiveIDType, receiveID string, ok bool) {
 	return "", "", false
 }
 
-func (n *Notifier) deliver(ctx context.Context, batch []event) {
+// assignedAgent returns the issue's assigned agent when a bot router is
+// configured, or "" to send through the login app.
+func (n *Notifier) assignedAgent(ctx context.Context, ev event) string {
+	if n.cfg.Bots == nil {
+		return ""
+	}
+	issueID, err := util.ParseUUID(ev.IssueID)
+	if err != nil {
+		return ""
+	}
+	issue, err := n.q.GetIssue(ctx, issueID)
+	if err != nil {
+		n.logger.Warn("feishu notify: load issue assignee failed; using login app", "issue_id", ev.IssueID, "error", err)
+		return ""
+	}
+	if issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return ""
+	}
+	return util.UUIDToString(issue.AssigneeID)
+}
+
+func (n *Notifier) deliver(ctx context.Context, key windowKey, batch []event) {
 	if len(batch) == 0 {
 		return
 	}
 	first := batch[0]
 	lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	recipientID, _ := util.ParseUUID(first.RecipientID)
 	user, err := n.q.GetUser(lookupCtx, recipientID)
 	if err != nil {
-		cancel()
 		n.logger.Warn("feishu notify: load recipient failed", "recipient_id", first.RecipientID, "error", err)
 		return
 	}
-	receiveIDType, receiveID, ok := Recipient(user)
-	if !ok {
-		cancel()
-		n.logger.Debug("feishu notify: recipient has no Feishu identity; skipping", "recipient_id", first.RecipientID)
-		return
-	}
 	card, err := n.render(lookupCtx, batch)
-	cancel()
 	if err != nil {
 		n.logger.Warn("feishu notify: render card failed", "issue_id", first.IssueID, "error", err)
 		return
 	}
 
+	if key.agentID != "" {
+		if n.sendViaAgentBot(ctx, lookupCtx, key, user, card, len(batch)) {
+			return
+		}
+	}
+
+	receiveIDType, receiveID, ok := Recipient(user)
+	if !ok {
+		n.logger.Debug("feishu notify: recipient has no Feishu identity; skipping", "recipient_id", first.RecipientID)
+		return
+	}
+	err = n.send(ctx, lark.SendUserCardParams{
+		Credentials:   n.cfg.Credentials,
+		ReceiveIDType: receiveIDType,
+		ReceiveID:     receiveID,
+		CardJSON:      card,
+	})
+	if err != nil {
+		n.logger.Warn("feishu notify: send failed",
+			"recipient_id", first.RecipientID, "issue_id", first.IssueID, "notifications", len(batch), "error", err)
+	}
+}
+
+// sendViaAgentBot tries the assigned agent's bot and reports whether it
+// delivered. Every miss is logged with the reason the login app takes over.
+func (n *Notifier) sendViaAgentBot(ctx, lookupCtx context.Context, key windowKey, user db.User, card string, count int) bool {
+	workspaceID, err := util.ParseUUID(key.workspaceID)
+	if err != nil {
+		return false
+	}
+	agentID, err := util.ParseUUID(key.agentID)
+	if err != nil {
+		return false
+	}
+	logArgs := []any{"recipient_id", key.recipientID, "issue_id", key.issueID, "agent_id", key.agentID}
+	route, err := n.cfg.Bots.Route(lookupCtx, workspaceID, agentID, user)
+	if err != nil {
+		reason := "bot lookup failed"
+		if errors.Is(err, lark.ErrNoAgentBot) || errors.Is(err, lark.ErrAgentBotRecipientUnreachable) {
+			reason = err.Error()
+		}
+		n.logger.Info("feishu notify: falling back to login app", append(logArgs, "reason", reason, "error", err)...)
+		return false
+	}
+	logArgs = append(logArgs, "installation_id", util.UUIDToString(route.InstallationID), "receive_id_type", route.ReceiveIDType)
+	err = n.send(ctx, lark.SendUserCardParams{
+		Credentials:   route.Credentials,
+		ReceiveIDType: route.ReceiveIDType,
+		ReceiveID:     route.ReceiveID,
+		CardJSON:      card,
+	})
+	if err != nil {
+		n.logger.Info("feishu notify: falling back to login app",
+			append(logArgs, "reason", lark.ErrAgentBotRecipientUnreachable.Error(), "error", err)...)
+		return false
+	}
+	n.logger.Info("feishu notify: sent via agent bot", append(logArgs, "notifications", count)...)
+	return true
+}
+
+// send posts one card, retrying transient failures with backoff.
+func (n *Notifier) send(ctx context.Context, p lark.SendUserCardParams) error {
+	var err error
 	backoff := n.cfg.RetryBackoff
 	for attempt := 1; attempt <= n.cfg.MaxAttempts; attempt++ {
 		sendCtx, sendCancel := context.WithTimeout(ctx, 15*time.Second)
-		_, err = n.sender.SendUserCard(sendCtx, lark.SendUserCardParams{
-			Credentials:   n.cfg.Credentials,
-			ReceiveIDType: receiveIDType,
-			ReceiveID:     receiveID,
-			CardJSON:      card,
-		})
+		_, err = n.sender.SendUserCard(sendCtx, p)
 		sendCancel()
 		if err == nil {
-			return
+			return nil
 		}
 		if attempt == n.cfg.MaxAttempts || !retryable(err) {
-			break
+			return err
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-time.After(backoff):
 		}
 		backoff *= 2
 	}
-	n.logger.Warn("feishu notify: send failed",
-		"recipient_id", first.RecipientID, "issue_id", first.IssueID, "notifications", len(batch), "error", err)
+	return err
 }
 
 // retryable rejects Lark business errors that a retry cannot fix, such as

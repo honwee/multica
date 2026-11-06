@@ -16,6 +16,9 @@ import (
 // excerptRunes caps the comment or result text quoted in a message.
 const excerptRunes = 200
 
+// CardTitle heads every notification card.
+const CardTitle = "Issue 更新"
+
 // maxMergedLines caps how many merged notifications one message lists.
 const maxMergedLines = 10
 
@@ -98,8 +101,11 @@ func (n *Notifier) render(ctx context.Context, batch []event) (string, error) {
 		"config": map[string]any{
 			"summary": map[string]any{"content": truncateRunes(header+" · "+n.describe(ctx, batch[len(batch)-1], names), 100)},
 		},
+		// The fixed title tells a notification apart from the agent's chat
+		// replies when the agent's bot sends it.
 		"header": map[string]any{
-			"title":    map[string]any{"tag": "plain_text", "content": truncateRunes(header, 120)},
+			"title":    map[string]any{"tag": "plain_text", "content": CardTitle},
+			"subtitle": map[string]any{"tag": "plain_text", "content": truncateRunes(header, 120)},
 			"template": "blue",
 		},
 		"body": map[string]any{"elements": elements},
