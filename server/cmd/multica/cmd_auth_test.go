@@ -16,17 +16,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	for _, key := range []string{
-		"MULTICA_AGENT_ID",
-		"MULTICA_TASK_ID",
-		"MULTICA_TOKEN",
-		"MULTICA_DAEMON_PORT",
-		"MULTICA_WORKSPACE_ID",
-		"MULTICA_SERVER_URL",
-		"MULTICA_TASK_CONFIG_ROOT",
-	} {
-		os.Unsetenv(key)
-	}
+	// Clear every MULTICA_* variable, not a fixed list. A daemon-managed task
+	// injects more of them than the CLI's identity checks name (task slot,
+	// workspaces root, CLI path, agent name, ...), and any one a command reads
+	// as a default turns an agent-run `go test` into a different test than the
+	// one CI runs. Tests that need a value set it themselves with t.Setenv.
+	// MULTICA_TEST_* is kept: it is how tests hand instructions to the helper
+	// processes they re-exec from this binary, and those children run this
+	// TestMain too.
+	unsetMulticaEnv()
 
 	// Redirect both home environment variables to one scratch directory for the
 	// whole binary. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so a
@@ -41,9 +39,57 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Leave a daemon task tree before any test runs. The CLI treats a daemon
+	// task marker (.multica/daemon_task_context.json) found by walking up from
+	// the working directory as proof it runs inside an agent task, and then
+	// refuses the test's own token and workspace flags. `go test` starts in the
+	// package directory, so a checkout inside a daemon task workdir — every
+	// agent running this suite — found the daemon's real marker above it and
+	// failed most command tests. Only the starting directory is checked: a
+	// helper process this binary re-execs starts in the directory its test
+	// chose, possibly one with a marker the test planted on purpose, but such a
+	// directory is always under os.TempDir, never under the package directory.
+	if markerPath := daemonTaskContextMarkerPath(); markerPath != "" && !isUnderTempDir(markerPath) {
+		if err := os.Chdir(scratchHome); err != nil {
+			fmt.Fprintf(os.Stderr, "leave daemon task tree for cmd/multica tests: %v\n", err)
+			_ = os.RemoveAll(scratchHome)
+			os.Exit(1)
+		}
+		if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
+			fmt.Fprintf(os.Stderr, "cmd/multica tests need a temp directory outside any daemon task tree; found %s above %s (point TMPDIR elsewhere)\n", markerPath, scratchHome)
+			_ = os.RemoveAll(scratchHome)
+			os.Exit(1)
+		}
+	}
+
 	code := m.Run()
 	_ = os.RemoveAll(scratchHome)
 	os.Exit(code)
+}
+
+// isUnderTempDir reports whether path lies under os.TempDir, where tests
+// create every marker they plant.
+func isUnderTempDir(path string) bool {
+	tmp := os.TempDir()
+	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
+		tmp = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	rel, err := filepath.Rel(tmp, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// unsetMulticaEnv removes every MULTICA_* variable from the test process
+// except the MULTICA_TEST_* helper-process protocol.
+func unsetMulticaEnv() {
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(key, "MULTICA_") && !strings.HasPrefix(key, "MULTICA_TEST_") {
+			os.Unsetenv(key)
+		}
+	}
 }
 
 var redirectTestHome = testutil.RedirectUserHome
