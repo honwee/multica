@@ -686,6 +686,13 @@
       "title": "Notifications système",
       "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
+    "feishu": {
+      "title": "Notifications Feishu",
+      "label": "Recevoir les notifications de la boîte de réception en messages directs Feishu",
+      "hint": "Suit les groupes de la boîte de réception ci-dessus. Les mises à jour d'une même tâche en une minute arrivent en un seul message.",
+      "not_linked": "Votre compte n'est pas lié à Feishu. Connectez-vous une fois avec Feishu pour l'activer.",
+      "not_configured": "Feishu n'est pas configuré sur ce déploiement."
+    },
     "browser": {
       "label": "Notifications du navigateur",
       "hint": "Autoriser ce navigateur à afficher des bannières de notification pour les nouveaux éléments de la boîte de réception.",

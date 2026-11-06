@@ -4,6 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
+import {
+  defaultNotificationPreference,
+  notificationPreferenceValue,
+} from "@multica/core/notification-preferences/patch";
 import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
@@ -16,8 +20,8 @@ import {
   SettingsTab,
 } from "./settings-layout";
 
-// Inbox event groups rendered in the per-event toggle list. `system_notifications`
-// is a sibling preference key but lives in its own section below.
+// Inbox event groups rendered in the per-event toggle list. The channel keys
+// `system_notifications` and `feishu_notifications` live in their own sections.
 const INBOX_GROUP_KEYS = [
   "assignments",
   "status_changes",
@@ -37,12 +41,10 @@ export function NotificationsTab() {
   const preferences = data?.preferences ?? {};
 
   const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const updated: NotificationPreferences = {
-      ...preferences,
-      [key]: enabled ? "all" : "muted",
-    };
-    // Remove keys set to "all" (default) to keep the object clean
-    if (enabled) {
+    const value = enabled ? "all" : "muted";
+    const updated: NotificationPreferences = { ...preferences, [key]: value };
+    // Keep the object sparse: a key at its default value is omitted.
+    if (value === defaultNotificationPreference(key)) {
       delete updated[key];
     }
     mutation.mutate(updated, {
@@ -56,6 +58,16 @@ export function NotificationsTab() {
   };
 
   const systemEnabled = preferences.system_notifications !== "muted";
+  const feishuAvailable = data?.feishu?.available === true;
+  const feishuEnabled =
+    feishuAvailable &&
+    notificationPreferenceValue(preferences, "feishu_notifications") === "all";
+  const feishuReason = data?.feishu?.reason;
+  const feishuDescription = feishuAvailable
+    ? t(($) => $.notifications.feishu.hint)
+    : feishuReason === "not_configured"
+      ? t(($) => $.notifications.feishu.not_configured)
+      : t(($) => $.notifications.feishu.not_linked);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">
@@ -104,6 +116,23 @@ export function NotificationsTab() {
         {/* Web-only: the browser permission banners require. Renders nothing on
             desktop (OS-native delivery) or where the Notification API is absent. */}
         <BrowserNotificationSetting />
+      </SettingsSection>
+
+      <SettingsSection title={t(($) => $.notifications.feishu.title)}>
+        <SettingsCard>
+          <SettingsRow
+            anchor="feishu"
+            label={t(($) => $.notifications.feishu.label)}
+            description={data ? feishuDescription : undefined}
+          >
+            <Switch
+              checked={feishuEnabled}
+              disabled={!feishuAvailable}
+              aria-label={t(($) => $.notifications.feishu.label)}
+              onCheckedChange={(checked) => handleToggle("feishu_notifications", checked)}
+            />
+          </SettingsRow>
+        </SettingsCard>
       </SettingsSection>
     </SettingsTab>
   );

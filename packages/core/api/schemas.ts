@@ -1233,6 +1233,13 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
 export const NotificationPreferenceResponseSchema = z.object({
   workspace_id: z.string(),
   preferences: z.record(z.string(), z.string()).default({}),
+  feishu: z
+    .object({
+      available: z.boolean().catch(false),
+      reason: z.string().catch(""),
+    })
+    .optional()
+    .catch(undefined),
 }).loose();
 
 export const EMPTY_NOTIFICATION_PREFERENCE_RESPONSE: NotificationPreferenceResponse = {

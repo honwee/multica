@@ -16,7 +16,8 @@ import (
 // not an inbox event group — it's a delivery-channel toggle controlling
 // whether native OS notification banners fire — but it shares the same
 // preferences map so a single endpoint covers all user notification
-// preferences.
+// preferences. `feishu_notifications` is likewise a channel toggle, for
+// Feishu direct messages, and is off unless set to "all".
 var validNotifGroups = map[string]bool{
 	"assignments":          true,
 	"status_changes":       true,
@@ -25,6 +26,35 @@ var validNotifGroups = map[string]bool{
 	"updates":              true,
 	"agent_activity":       true,
 	"system_notifications": true,
+	"feishu_notifications": true,
+}
+
+// Reasons Feishu notifications are unavailable to the caller.
+const (
+	feishuNotifUnavailableNotConfigured = "not_configured"
+	feishuNotifUnavailableNotLinked     = "not_linked"
+)
+
+// feishuNotificationStatus tells the settings UI whether the caller can
+// receive Feishu direct messages. Reason is empty when Available is true.
+type feishuNotificationStatus struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason"`
+}
+
+func (h *Handler) feishuNotificationStatus(r *http.Request, userID string) feishuNotificationStatus {
+	if _, ok := feishuLoginApp(); !ok {
+		return feishuNotificationStatus{Reason: feishuNotifUnavailableNotConfigured}
+	}
+	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		slog.Warn("GetUser for feishu notification status failed", append(logger.RequestAttrs(r), "error", err)...)
+		return feishuNotificationStatus{Reason: feishuNotifUnavailableNotLinked}
+	}
+	if (user.FeishuOpenID.Valid && user.FeishuOpenID.String != "") || (user.FeishuUnionID.Valid && user.FeishuUnionID.String != "") {
+		return feishuNotificationStatus{Available: true}
+	}
+	return feishuNotificationStatus{Reason: feishuNotifUnavailableNotLinked}
 }
 
 // validNotifValues is the set of allowed preference values per group.
@@ -49,6 +79,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 			writeJSON(w, http.StatusOK, map[string]any{
 				"workspace_id": workspaceID,
 				"preferences":  map[string]any{},
+				"feishu":       h.feishuNotificationStatus(r, userID),
 			})
 			return
 		}
@@ -65,6 +96,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
 		"preferences":  prefs,
+		"feishu":       h.feishuNotificationStatus(r, userID),
 	})
 }
 

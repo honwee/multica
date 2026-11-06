@@ -176,3 +176,72 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestNotificationPreferencesFeishuToggleAndStatus(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	reset := func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+		_, _ = testPool.Exec(context.Background(), `
+			UPDATE "user" SET feishu_open_id = NULL, feishu_union_id = NULL WHERE id = $1
+		`, testUserID)
+	}
+	reset()
+	t.Cleanup(reset)
+
+	type statusResponse struct {
+		Preferences map[string]string `json:"preferences"`
+		Feishu      struct {
+			Available bool   `json:"available"`
+			Reason    string `json:"reason"`
+		} `json:"feishu"`
+	}
+	get := func() statusResponse {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		testHandler.GetNotificationPreferences(recorder, notificationPreferenceRequest(t, http.MethodGet, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("get: status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var out statusResponse
+		if err := json.NewDecoder(recorder.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out
+	}
+
+	t.Setenv("FEISHU_APP_ID", "")
+	t.Setenv("FEISHU_APP_SECRET", "")
+	if got := get().Feishu; got.Available || got.Reason != "not_configured" {
+		t.Fatalf("without login app: %+v", got)
+	}
+
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+	if got := get().Feishu; got.Available || got.Reason != "not_linked" {
+		t.Fatalf("unlinked user: %+v", got)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE "user" SET feishu_open_id = 'ou_pref_test' WHERE id = $1`, testUserID); err != nil {
+		t.Fatalf("link user: %v", err)
+	}
+	if got := get().Feishu; !got.Available || got.Reason != "" {
+		t.Fatalf("linked user: %+v", got)
+	}
+
+	recorder := httptest.NewRecorder()
+	testHandler.PatchNotificationPreferences(recorder, notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+		"feishu_notifications": "all",
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("patch: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := get().Preferences["feishu_notifications"]; got != "all" {
+		t.Fatalf("feishu_notifications = %q, want all", got)
+	}
+}

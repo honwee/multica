@@ -12,18 +12,29 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "updates",
   "agent_activity",
   "system_notifications",
+  "feishu_notifications",
 ];
 
-function preferenceValue(
+/**
+ * The value a missing key means. Feishu direct messages are opt-in, so their
+ * key defaults to "muted"; every other key defaults to "all".
+ */
+export function defaultNotificationPreference(
+  key: NotificationGroupKey,
+): NotificationGroupValue {
+  return key === "feishu_notifications" ? "muted" : "all";
+}
+
+export function notificationPreferenceValue(
   preferences: NotificationPreferences,
   key: NotificationGroupKey,
 ): NotificationGroupValue {
-  return preferences[key] ?? "all";
+  return preferences[key] ?? defaultNotificationPreference(key);
 }
 
 /**
  * Convert the full preference object produced by the settings UI into the
- * smallest atomic patch. Missing keys mean the default value ("all").
+ * smallest atomic patch. Missing keys mean the key's default value.
  */
 export function deriveNotificationPreferencePatch(
   previous: NotificationPreferences,
@@ -32,8 +43,8 @@ export function deriveNotificationPreferencePatch(
   const patch: NotificationPreferences = {};
 
   for (const key of NOTIFICATION_GROUP_KEYS) {
-    const previousValue = preferenceValue(previous, key);
-    const nextValue = preferenceValue(next, key);
+    const previousValue = notificationPreferenceValue(previous, key);
+    const nextValue = notificationPreferenceValue(next, key);
     if (previousValue !== nextValue) {
       patch[key] = nextValue;
     }
@@ -42,7 +53,7 @@ export function deriveNotificationPreferencePatch(
   return patch;
 }
 
-/** Apply a preference patch while keeping default "all" values sparse. */
+/** Apply a preference patch while keeping default values sparse. */
 export function applyNotificationPreferencePatch(
   current: NotificationPreferences,
   patch: NotificationPreferences,
@@ -51,10 +62,11 @@ export function applyNotificationPreferencePatch(
 
   for (const key of NOTIFICATION_GROUP_KEYS) {
     const value = patch[key];
-    if (value === "muted") {
-      next[key] = value;
-    } else if (value === "all") {
+    if (value === undefined) continue;
+    if (value === defaultNotificationPreference(key)) {
       delete next[key];
+    } else {
+      next[key] = value;
     }
   }
 
@@ -76,13 +88,13 @@ export function rollbackNotificationPreferencePatch(
     const patchedValue = patch[key];
     if (
       patchedValue === undefined ||
-      preferenceValue(current, key) !== patchedValue
+      notificationPreferenceValue(current, key) !== patchedValue
     ) {
       continue;
     }
 
-    const previousValue = preferenceValue(previous, key);
-    if (previousValue === "all") {
+    const previousValue = notificationPreferenceValue(previous, key);
+    if (previousValue === defaultNotificationPreference(key)) {
       delete next[key];
     } else {
       next[key] = previousValue;
