@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyNotificationPreferencePatch,
   deriveNotificationPreferencePatch,
+  notificationPreferenceValue,
   rollbackNotificationPreferencePatch,
 } from "./patch";
 
@@ -69,6 +70,44 @@ describe("notification preference patches", () => {
       rollbackNotificationPreferencePatch(
         {},
         { comments: "muted" },
+        {},
+      ),
+    ).toEqual({});
+  });
+});
+
+describe("feishu_notifications defaults to off", () => {
+  it("reads a missing key as muted", () => {
+    expect(notificationPreferenceValue({}, "feishu_notifications")).toBe("muted");
+    expect(notificationPreferenceValue({}, "comments")).toBe("all");
+  });
+
+  it("sends all when turning it on and muted when turning it off", () => {
+    expect(
+      deriveNotificationPreferencePatch({}, { feishu_notifications: "all" }),
+    ).toEqual({ feishu_notifications: "all" });
+    expect(
+      deriveNotificationPreferencePatch({ feishu_notifications: "all" }, {}),
+    ).toEqual({ feishu_notifications: "muted" });
+  });
+
+  it("keeps the opt-in sparse in the optimistic cache", () => {
+    expect(
+      applyNotificationPreferencePatch({}, { feishu_notifications: "all" }),
+    ).toEqual({ feishu_notifications: "all" });
+    expect(
+      applyNotificationPreferencePatch(
+        { feishu_notifications: "all", comments: "muted" },
+        { feishu_notifications: "muted" },
+      ),
+    ).toEqual({ comments: "muted" });
+  });
+
+  it("rolls a failed opt-in back to off", () => {
+    expect(
+      rollbackNotificationPreferencePatch(
+        { feishu_notifications: "all" },
+        { feishu_notifications: "all" },
         {},
       ),
     ).toEqual({});

@@ -902,6 +902,50 @@ describe("ApiClient notification preferences", () => {
       preferences: {},
     });
   });
+
+  it("parses the Feishu availability status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            workspace_id: "workspace-1",
+            preferences: { feishu_notifications: "all" },
+            feishu: { available: false, reason: "not_linked" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.getNotificationPreferences()).resolves.toEqual({
+      workspace_id: "workspace-1",
+      preferences: { feishu_notifications: "all" },
+      feishu: { available: false, reason: "not_linked" },
+    });
+  });
+
+  it("keeps preferences when the Feishu status is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            workspace_id: "workspace-1",
+            preferences: { comments: "muted" },
+            feishu: "yes",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const parsed = await client.getNotificationPreferences();
+    expect(parsed.preferences).toEqual({ comments: "muted" });
+    expect(parsed.feishu).toBeUndefined();
+  });
 });
 
 describe("ApiClient Inbox response schemas", () => {

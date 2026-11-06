@@ -668,6 +668,13 @@
       "title": "Notificaciones del sistema",
       "label": "Mostrar notificaciones del sistema"
     },
+    "feishu": {
+      "title": "Notificaciones de Feishu",
+      "label": "Recibir las notificaciones de la bandeja como mensajes directos de Feishu",
+      "hint": "Sigue los grupos de la bandeja de arriba. Las actualizaciones de una misma tarea en un minuto llegan en un solo mensaje.",
+      "not_linked": "Tu cuenta no está vinculada a Feishu. Inicia sesión con Feishu una vez para activarlo.",
+      "not_configured": "Feishu no está configurado en esta implementación."
+    },
     "browser": {
       "label": "Notificaciones del navegador",
       "hint": "Permite que este navegador muestre avisos de notificación para nuevos elementos de la bandeja.",
