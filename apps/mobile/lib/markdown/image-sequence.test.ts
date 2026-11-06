@@ -30,6 +30,7 @@ import { splitMarkdown } from "./split-markdown";
 import { ImageSequenceProvider } from "./image-sequence";
 import { MarkdownImage } from "./markdown-image";
 import { LightboxProvider } from "./lightbox-provider";
+import { useServerStore } from "@/data/server-store";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const attachment: Attachment = {
@@ -45,6 +46,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.contexts.clear();
   state.setters.length = 0;
+  // The fork's server store defaults to the hosted origin; these expectations
+  // assume no API origin, matching an unset EXPO_PUBLIC_API_URL upstream.
+  useServerStore.setState({ apiUrl: "" });
 });
 
 // Follow real parsing, provider values and press/open callbacks. Native leaves
