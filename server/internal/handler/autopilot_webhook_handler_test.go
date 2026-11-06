@@ -490,11 +490,47 @@ func processQueuedWebhookDelivery(t *testing.T, deliveryID string) db.WebhookDel
 			t.Fatalf("process queued delivery: %v", err)
 		}
 		if !worked {
-			t.Fatalf("delivery %s remained queued with no claimable work", deliveryID)
+			return awaitLeasedWebhookDelivery(t, deliveryID)
 		}
 	}
 	t.Fatalf("delivery %s did not reach a terminal state", deliveryID)
 	return db.WebhookDelivery{}
+}
+
+// awaitLeasedWebhookDelivery handles a queued delivery this test could not
+// claim. The test database is shared with any locally running server (the
+// `make up` API runs its own WebhookDeliveryWorker sweeper), so another worker
+// can legitimately lease the row first. That is only acceptable while a live
+// lease exists; then wait for the lease holder to finish the delivery.
+func awaitLeasedWebhookDelivery(t *testing.T, deliveryID string) db.WebhookDelivery {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		delivery, err := testHandler.Queries.GetWebhookDelivery(ctx, parseUUID(deliveryID))
+		if err != nil {
+			t.Fatalf("load queued delivery: %v", err)
+		}
+		if delivery.Status != deliveryStatusQueued {
+			return delivery
+		}
+		leased := delivery.LeaseExpiresAt.Valid && delivery.LeaseExpiresAt.Time.After(time.Now())
+		if !leased {
+			// The other worker released or deferred the claim; take it over.
+			worked, err := testHandler.WebhookDeliveryWorker.ProcessNext(ctx)
+			if err != nil {
+				t.Fatalf("process queued delivery: %v", err)
+			}
+			if !worked {
+				t.Fatalf("delivery %s remained queued with no claimable work and no lease", deliveryID)
+			}
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("delivery %s stayed leased by another worker without reaching a terminal state", deliveryID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
