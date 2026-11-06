@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { onlineManager } from "@tanstack/react-query";
@@ -16,6 +17,21 @@ beforeEach(() => {
     apiUrl: "https://api.example.test",
     webUrl: "https://api.example.test",
     isInitialized: true,
+  });
+});
+
+describe("api.listAgents", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    [undefined, "/api/agents"],
+    [{ includeArchived: false }, "/api/agents"],
+    [{ includeArchived: true }, "/api/agents?include_archived=true"],
+  ])("with %j requests %s", async (opts, path) => {
+    const fetchMock = vi.fn(async () => Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.listAgents(opts)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`https://api.example.test${path}`, expect.any(Object));
   });
 });
 

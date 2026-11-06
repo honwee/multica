@@ -14,11 +14,12 @@ export const agentDetailOptions = (id: string | null) =>
     enabled: !!id,
   });
 
-export const agentListOptions = (wsId: string | null) =>
+export const agentListOptions = (wsId: string | null, opts?: { includeArchived?: boolean }) =>
   queryOptions({
-    queryKey: agentKeys.all(wsId),
-    queryFn: ({ signal }) =>
-      api.listAgents({ signal, includeArchived: true }),
+    queryKey: opts?.includeArchived
+      ? [...agentKeys.all(wsId), { includeArchived: true }] as const
+      : agentKeys.all(wsId),
+    queryFn: ({ signal }) => api.listAgents({ signal, includeArchived: opts?.includeArchived }),
     enabled: !!wsId,
     // Mirrors Web/Desktop: projected unstable ages offline without an event,
     // while offline recovery is covered by lifecycle events and reconnect.

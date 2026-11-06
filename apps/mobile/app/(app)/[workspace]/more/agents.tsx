@@ -38,7 +38,7 @@ export default function AgentsPage() {
     isRefetching: agentsRefetching,
     error: agentsError,
     refetch: refetchAgents,
-  } = useQuery(agentListOptions(wsId));
+  } = useQuery(agentListOptions(wsId, { includeArchived: true }));
   const {
     data: members = [],
     isLoading: membersLoading,
