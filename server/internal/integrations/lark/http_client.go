@@ -1248,16 +1248,19 @@ var botUnionIDUnavailableCodes = map[int]struct{}{
 	41050: {},
 }
 
-// isBotUnionIDUnavailable reports whether err is a contact-lookup
-// APIError whose code is in botUnionIDUnavailableCodes. Transport
-// errors, 5xx and every other code return false and stay WARN.
+// isBotUnionIDUnavailable reports whether err carries a Lark business
+// code in botUnionIDUnavailableCodes. Feishu delivers 41050 as an HTTP
+// 400 with the code in the body (larkAPIStatusError), while a 2xx
+// envelope with a non-zero code surfaces as APIError; larkErrorCodeMsg
+// reads both. Transport errors, codeless 5xx and every other code
+// return false and stay WARN.
 func isBotUnionIDUnavailable(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
+	code, _, ok := larkErrorCodeMsg(err)
+	if !ok {
 		return false
 	}
-	_, ok := botUnionIDUnavailableCodes[apiErr.Code]
-	return ok
+	_, expected := botUnionIDUnavailableCodes[code]
+	return expected
 }
 
 // doJSON encapsulates the verb + URL + auth-header + JSON
