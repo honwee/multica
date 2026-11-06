@@ -616,6 +616,7 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 	registerIssueUnreadListeners(bus, queries)
+	feishuNotifier := registerFeishuNotifier(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -800,6 +801,9 @@ func main() {
 
 	if h.LarkTyping != nil {
 		go h.LarkTyping.Run(sweepCtx)
+	}
+	if feishuNotifier != nil {
+		go feishuNotifier.Run(sweepCtx)
 	}
 
 	// Media intent-ledger reconciler (PR #5580): settles uploaded-but-unbound
