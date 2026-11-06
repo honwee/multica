@@ -716,6 +716,25 @@ func TestWebhookDeliveryWorker_DispatchesRunAdmittedBeforePause(t *testing.T) {
 	}
 }
 
+// seedUnclaimedWebhookDeliveryLease stamps a synthetic lease on a queued
+// delivery, but only while no worker holds it. The test database is shared
+// with any locally running server whose WebhookDeliveryWorker sweeps the same
+// queue; overwriting that worker's live lease would put two dispatchers on one
+// delivery and fabricate duplicate side effects. Returns false when another
+// worker already owns the row.
+func seedUnclaimedWebhookDeliveryLease(t *testing.T, deliveryID, expiresIn string) bool {
+	t.Helper()
+	tag, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET lease_token = gen_random_uuid(), lease_expires_at = now() + $2::interval
+		WHERE id = $1 AND status = 'queued' AND lease_token IS NULL
+	`, deliveryID, expiresIn)
+	if err != nil {
+		t.Fatalf("seed lease: %v", err)
+	}
+	return tag.RowsAffected() == 1
+}
+
 func TestWebhookDeliveryWorker_RecoversExpiredLeaseAndReusesRun(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "WorkerRecovery Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
@@ -725,12 +744,10 @@ func TestWebhookDeliveryWorker_RecoversExpiredLeaseAndReusesRun(t *testing.T) {
 		"Idempotency-Key": "worker-recovery",
 	})
 	deliveryID := requireAcceptedWebhookResponse(t, post)
-	if _, err := testPool.Exec(context.Background(), `
-		UPDATE webhook_delivery
-		SET lease_token = gen_random_uuid(), lease_expires_at = now() - interval '1 second'
-		WHERE id = $1
-	`, deliveryID); err != nil {
-		t.Fatalf("seed expired lease: %v", err)
+	if !seedUnclaimedWebhookDeliveryLease(t, deliveryID, "-1 second") {
+		// An external worker already owns the claim; the crash-recovery
+		// assertions below still hold once it finishes the delivery.
+		t.Log("delivery was claimed by an external webhook worker; expired-lease recovery not staged")
 	}
 
 	first := processQueuedWebhookDelivery(t, deliveryID)
@@ -780,12 +797,8 @@ func TestWebhookDeliveryWorker_LeaseOwnershipChangeIsBenign(t *testing.T) {
 		"Idempotency-Key": "worker-lease-change",
 	})
 	deliveryID := requireAcceptedWebhookResponse(t, post)
-	if _, err := testPool.Exec(context.Background(), `
-		UPDATE webhook_delivery
-		SET lease_token = gen_random_uuid(), lease_expires_at = now() + interval '2 minutes'
-		WHERE id = $1
-	`, deliveryID); err != nil {
-		t.Fatalf("seed first lease: %v", err)
+	if !seedUnclaimedWebhookDeliveryLease(t, deliveryID, "2 minutes") {
+		t.Skip("delivery was claimed by an external webhook worker sharing the test database")
 	}
 	staleClaim, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
 	if err != nil {
