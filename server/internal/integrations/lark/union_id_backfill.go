@@ -22,9 +22,11 @@ import (
 //     coverage after a deploy.
 //
 //   - Soft-fails on union_id absence (Lark returns code=0 with empty
-//     union_id when the app's contact scope is restricted): we log
-//     and move on; the decoder transitional open_id fallback keeps
-//     the install usable in single-bot deployments.
+//     union_id when the app's contact scope is restricted, or the
+//     contact lookup answers 41050 / 41012 because a bot is not a
+//     directory user): we log at INFO and move on; the decoder's
+//     open_id fallback keeps the install usable. Real lookup failures
+//     are already WARNed inside GetBotInfo.
 //
 //   - Callers should fire this from a separate goroutine at boot so
 //     a slow Lark round-trip cannot block HTTP listener startup. The
@@ -36,7 +38,7 @@ import (
 // already overwrites both identifiers via UpsertLarkInstallation.
 func BackfillBotUnionIDs(
 	ctx context.Context,
-	queries *ChannelStore,
+	queries unionIDBackfillStore,
 	api APIClient,
 	creds CredentialsDecrypter,
 	log *slog.Logger,
@@ -91,7 +93,7 @@ func BackfillBotUnionIDs(
 			continue
 		}
 		if info.UnionID == "" {
-			log.Warn("lark backfill: union_id absent in Lark response; leaving NULL",
+			log.Info("lark backfill: bot is outside contact scope; skipping union_id, group @-mention matching uses open_id",
 				"installation_id", uuidString(row.ID),
 				"app_id", row.AppID,
 				"bot_open_id", string(info.OpenID))
@@ -119,6 +121,14 @@ func BackfillBotUnionIDs(
 		"filled", filled,
 		"missed", missed,
 		"errored", errored)
+}
+
+// unionIDBackfillStore is the narrow DB surface BackfillBotUnionIDs
+// needs; *ChannelStore satisfies it. Kept as an interface so the
+// backfill loop can be unit-tested without a database.
+type unionIDBackfillStore interface {
+	ListActiveLarkInstallations(ctx context.Context) ([]Installation, error)
+	SetLarkInstallationBotUnionID(ctx context.Context, arg SetInstallationBotUnionIDParams) error
 }
 
 // CredentialsDecrypter is the narrow surface BackfillBotUnionIDs needs

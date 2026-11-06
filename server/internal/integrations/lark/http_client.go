@@ -610,7 +610,15 @@ func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCreden
 	// Service.finishSuccess) accept the gap and persist what they
 	// have.
 	unionID, lookupErr := c.fetchBotUnionID(ctx, creds, botResp.Bot.OpenID)
-	if lookupErr != nil {
+	if isBotUnionIDUnavailable(lookupErr) {
+		// Expected: a bot is not a contact-directory user, so the
+		// contact lookup answers "no user authority" on every call.
+		// Keep it out of WARN so post-deploy log checks stay clean.
+		c.cfg.Logger.Info("lark http client: bot is outside contact scope; skipping union_id, group @-mention matching uses open_id",
+			"app_id", creds.AppID,
+			"bot_open_id", botResp.Bot.OpenID,
+			"err", lookupErr)
+	} else if lookupErr != nil {
 		c.cfg.Logger.Warn("lark http client: bot union_id lookup failed; continuing without it",
 			"app_id", creds.AppID,
 			"bot_open_id", botResp.Bot.OpenID,
@@ -1225,9 +1233,31 @@ func (c *httpAPIClient) fetchBotUnionID(ctx context.Context, creds InstallationC
 		if isTokenError(resp.Code) {
 			c.invalidateToken(creds.AppID)
 		}
-		return "", fmt.Errorf("contact users: code=%d msg=%q", resp.Code, resp.Msg)
+		return "", &APIError{Op: "contact users", Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.User.UnionID, nil
+}
+
+// botUnionIDUnavailableCodes are the contact-lookup business codes that
+// mean "this open_id is not a user visible to the app" rather than a
+// real failure. A bot is never a contact-directory user, so Feishu
+// answers 41050 (no user authority) on every lookup and older login
+// apps answer 41012. These are expected outcomes, not incidents.
+var botUnionIDUnavailableCodes = map[int]struct{}{
+	41012: {},
+	41050: {},
+}
+
+// isBotUnionIDUnavailable reports whether err is a contact-lookup
+// APIError whose code is in botUnionIDUnavailableCodes. Transport
+// errors, 5xx and every other code return false and stay WARN.
+func isBotUnionIDUnavailable(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	_, ok := botUnionIDUnavailableCodes[apiErr.Code]
+	return ok
 }
 
 // doJSON encapsulates the verb + URL + auth-header + JSON
