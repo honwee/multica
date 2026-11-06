@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -53,10 +54,35 @@ func TestGetBotInfo_UnionIDExpectedCodesLogInfo(t *testing.T) {
 	}
 }
 
+// Production Feishu returns 41050 as HTTP 400 with the code in the
+// body, not as a 2xx envelope; that shape must also log at INFO.
+func TestGetBotInfo_UnionIDExpectedCodeOverHTTP400LogsInfo(t *testing.T) {
+	for _, code := range []int{41050, 41012} {
+		var buf bytes.Buffer
+		fake := newBotInfoFake(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"code":%d,"msg":"no user authority error"}`, code)
+		})
+		c := NewHTTPAPIClient(HTTPClientConfig{BaseURL: fake.URL(), Logger: captureLogger(&buf)})
+		if _, err := c.GetBotInfo(context.Background(), testCreds()); err != nil {
+			t.Fatalf("code %d: GetBotInfo errored: %v", code, err)
+		}
+		out := buf.String()
+		if strings.Contains(out, "level=WARN") || !strings.Contains(out, "outside contact scope") {
+			t.Errorf("code %d over HTTP 400: want INFO only, got %s", code, out)
+		}
+	}
+}
+
 func TestGetBotInfo_UnionIDOtherFailuresStayWarn(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
 		"other code": func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"code": 99991002, "msg": "no permission"})
+		},
+		"other code over HTTP 400": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":40001,"msg":"bad request"}`))
 		},
 		"5xx": func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "boom", http.StatusInternalServerError)
@@ -94,6 +120,9 @@ func TestIsBotUnionIDUnavailable(t *testing.T) {
 		{&APIError{Op: "contact users", Code: 41050}, true},
 		{&APIError{Op: "contact users", Code: 41012}, true},
 		{&APIError{Op: "contact users", Code: 99991002}, false},
+		{fmt.Errorf("contact users: %w", &larkAPIStatusError{StatusCode: 400, Code: 41050}), true},
+		{fmt.Errorf("contact users: %w", &larkAPIStatusError{StatusCode: 400, Code: 40001}), false},
+		{fmt.Errorf("contact users: %w", &larkAPIStatusError{StatusCode: 502}), false},
 		{errors.New("contact users: http do: connection reset"), false},
 		{nil, false},
 	} {
@@ -126,7 +155,9 @@ func TestBackfillBotUnionIDs_ExpectedCodesContinueWithoutWarn(t *testing.T) {
 	logger := captureLogger(&buf)
 	clientFor := func(code int) APIClient {
 		fake := newBotInfoFake(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, map[string]any{"code": code, "msg": "no user authority"})
+			// Mirror production: Feishu answers these codes with HTTP 400.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"code":%d,"msg":"no user authority error"}`, code)
 		})
 		return NewHTTPAPIClient(HTTPClientConfig{BaseURL: fake.URL(), Logger: logger})
 	}
