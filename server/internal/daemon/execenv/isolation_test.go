@@ -18,9 +18,14 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 const preparationHelperTestMode = "execenv-preparation-helper"
+
+// execenvTestEnvIsolatedEnv marks a process whose environment TestMain has
+// already isolated; see TestMain.
+const execenvTestEnvIsolatedEnv = "MULTICA_TEST_EXECENV_ENV_ISOLATED"
 
 // TestMain drops the race runtime's exit delay for the children these tests
 // re-exec from the test binary itself (the preparation helper, the git lock
@@ -41,14 +46,64 @@ const preparationHelperTestMode = "execenv-preparation-helper"
 // and keeps working for parallel tests, which cannot call t.Setenv. A test
 // that wants the task-local branch sets the variable itself.
 //
+// It applies the same reasoning to the rest of the caller's environment: the
+// agent-home and Multica tuning variables this package reads are cleared, and
+// HOME plus Git's global and system config are replaced with empty scratch
+// state. A developer's ~/.gitconfig (identity, init.defaultBranch, hooks,
+// signing) or ~/.codex otherwise decides what the code under test sees, so a
+// run on a machine without a global Git identity behaved differently from one
+// with it. Per-test t.Setenv overrides still take precedence, and the template
+// repository keeps its own repo-local identity.
+//
 // It also removes the template repository newTestRepo copies from.
 func TestMain(m *testing.M) {
 	os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	os.Unsetenv(cli.TaskConfigRootEnv)
+	// Helper processes re-exec'd from this binary inherit the parent's already
+	// isolated environment plus whatever a test set for them (CODEX_HOME,
+	// HOME, ...). Isolating again there would erase exactly those settings.
+	if os.Getenv(execenvTestEnvIsolatedEnv) != "" {
+		os.Exit(m.Run())
+	}
+	os.Setenv(execenvTestEnvIsolatedEnv, "1")
+	for _, key := range []string{
+		"CODEX_HOME",
+		"HERMES_HOME",
+		"OPENCLAW_HOME",
+		"OPENCLAW_CONFIG_PATH",
+		"OPENCLAW_INCLUDE_ROOTS",
+		MulticaCodexMemoryEnv,
+		MulticaCodexMultiAgentEnv,
+		OpenclawCLITimeoutEnv,
+		"GIT_DIR",
+		"GIT_WORK_TREE",
+		"GIT_INDEX_FILE",
+		"GIT_AUTHOR_NAME",
+		"GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME",
+		"GIT_COMMITTER_EMAIL",
+	} {
+		os.Unsetenv(key)
+	}
+	scratchHome, err := testutil.IsolateUserHome("multica-execenv-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate execenv test home: %v\n", err)
+		os.Exit(1)
+	}
+	emptyGitConfig := filepath.Join(scratchHome, ".gitconfig")
+	if err := os.WriteFile(emptyGitConfig, nil, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "create empty git config: %v\n", err)
+		os.RemoveAll(scratchHome)
+		os.Exit(1)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", emptyGitConfig)
+	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
 	code := m.Run()
 	if testRepoTemplate.dir != "" {
 		os.RemoveAll(testRepoTemplate.dir)
 	}
+	os.RemoveAll(scratchHome)
 	os.Exit(code)
 }
 

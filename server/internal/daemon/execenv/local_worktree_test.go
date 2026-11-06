@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -99,6 +100,48 @@ func requireGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git is not available: %v", err)
 	}
+}
+
+// requireGitMergeTreeMergeBase skips a test that drives normalizeReplayBaseline
+// through `git merge-tree --write-tree --merge-base=<commit>`, which Git added
+// in 2.40. Production reports that requirement in its error; the skip keeps a
+// documented toolchain prerequisite (macOS's bundled Apple Git is 2.39) from
+// reading as a regression. CI and any Git >= 2.40 still run these tests. Like
+// requireGit, nothing after this check may skip.
+func requireGitMergeTreeMergeBase(t *testing.T) {
+	t.Helper()
+	requireGit(t)
+	out, err := exec.Command("git", "version").Output()
+	if err != nil {
+		t.Fatalf("git version: %v", err)
+	}
+	major, minor, ok := parseGitVersion(string(out))
+	if !ok {
+		t.Fatalf("could not parse %q", strings.TrimSpace(string(out)))
+	}
+	if major < 2 || (major == 2 && minor < 40) {
+		t.Skipf("git merge-tree --merge-base needs Git 2.40 or later; have %s", strings.TrimSpace(string(out)))
+	}
+}
+
+// parseGitVersion reads the major and minor numbers from `git version`
+// output such as "git version 2.39.5 (Apple Git-154)" or
+// "git version 2.45.1.windows.1".
+func parseGitVersion(out string) (major, minor int, ok bool) {
+	fields := strings.Fields(out)
+	if len(fields) < 3 || fields[0] != "git" || fields[1] != "version" {
+		return 0, 0, false
+	}
+	parts := strings.SplitN(fields[2], ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, errMajor := strconv.Atoi(parts[0])
+	minor, errMinor := strconv.Atoi(parts[1])
+	if errMajor != nil || errMinor != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
 
 func gitRun(t *testing.T, dir string, args ...string) string {
@@ -934,6 +977,7 @@ func TestPrepareLocalWorktreeDoesNotReplayCleanHEADAdvance(t *testing.T) {
 }
 
 func TestPrepareLocalWorktreeExcludesHEADAdvanceWithExistingUserEdits(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	for _, kind := range []string{"untracked", "tracked", "deleted"} {
 		for _, newEdits := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/new_edits_%t", kind, newEdits), func(t *testing.T) {
@@ -1021,6 +1065,7 @@ func TestPrepareLocalWorktreeExcludesHEADAdvanceWithExistingUserEdits(t *testing
 }
 
 func TestPrepareLocalWorktreeNormalizesEditsAcrossChangesInTheSameFile(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	repo := newTestRepo(t)
 	base := "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
 	writeFile(t, filepath.Join(repo, "tracked.txt"), base)
@@ -1050,6 +1095,7 @@ func TestPrepareLocalWorktreeNormalizesEditsAcrossChangesInTheSameFile(t *testin
 }
 
 func TestPrepareLocalWorktreeExcludesHEADAdvanceAfterUncommittedConflictResolution(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user A\n")
 	first := prepareTurn(t, repo, "MUL-7488", turnOneTask)
@@ -1090,6 +1136,7 @@ func TestPrepareLocalWorktreeExcludesHEADAdvanceAfterUncommittedConflictResoluti
 }
 
 func TestPrepareLocalWorktreeContinuesAfterUserCommitsConflictingDraft(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	for _, kind := range []string{"untracked", "tracked"} {
 		for _, newEdits := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/new_edits_%t", kind, newEdits), func(t *testing.T) {
@@ -1160,6 +1207,7 @@ func TestPrepareLocalWorktreeContinuesAfterUserCommitsConflictingDraft(t *testin
 }
 
 func TestPrepareLocalWorktreeHandsCurrentEditsToAgentAfterHEADNormalizationConflict(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "previous user draft\n")
 	first := prepareTurn(t, repo, "MUL-7488", turnOneTask)
@@ -1195,6 +1243,7 @@ func TestPrepareLocalWorktreeHandsCurrentEditsToAgentAfterHEADNormalizationConfl
 }
 
 func TestPrepareLocalWorktreePreservesOtherDraftsWhenNormalizationConflicts(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	for _, committedChange := range []string{"finish", "delete", "directory"} {
 		for _, newEdit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/new_edit_%t", committedChange, newEdit), func(t *testing.T) {
@@ -1266,6 +1315,7 @@ func TestPrepareLocalWorktreePreservesOtherDraftsWhenNormalizationConflicts(t *t
 }
 
 func TestPrepareLocalWorktreeNormalizesConflictPathsLiterally(t *testing.T) {
+	requireGitMergeTreeMergeBase(t)
 	repo := newTestRepo(t)
 	// Brackets are valid filenames on every platform but are also Git glob
 	// syntax. Restoring the first path must not reset the second draft's WIP.
@@ -2422,5 +2472,25 @@ func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
 	}
 	if _, err := gitTry(t, repo, "rev-parse", "--verify", "agent/j/mul-6881"); err == nil {
 		t.Error("a turn that changed nothing left its branch behind")
+	}
+}
+
+func TestParseGitVersion(t *testing.T) {
+	for _, tc := range []struct {
+		in           string
+		major, minor int
+		ok           bool
+	}{
+		{"git version 2.39.5 (Apple Git-154)\n", 2, 39, true},
+		{"git version 2.45.1.windows.1\n", 2, 45, true},
+		{"git version 2.40.0\n", 2, 40, true},
+		{"git version 3.0\n", 3, 0, true},
+		{"usage: git\n", 0, 0, false},
+		{"git version two.40\n", 0, 0, false},
+	} {
+		major, minor, ok := parseGitVersion(tc.in)
+		if major != tc.major || minor != tc.minor || ok != tc.ok {
+			t.Errorf("parseGitVersion(%q) = %d, %d, %t; want %d, %d, %t", tc.in, major, minor, ok, tc.major, tc.minor, tc.ok)
+		}
 	}
 }
