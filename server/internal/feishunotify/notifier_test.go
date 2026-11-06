@@ -30,7 +30,9 @@ const (
 type fakeQueries struct {
 	prefs map[string]string // nil means no row
 	users map[string]db.User
-	// assignee is the issue's assigned agent; "" leaves it unassigned.
+	// assignee is the issue's assignee; "" leaves it unassigned. Guard
+	// changes made while sends are in flight with mu.
+	mu           sync.Mutex
 	assignee     string
 	assigneeType string
 }
@@ -57,6 +59,8 @@ func (f *fakeQueries) GetAgent(_ context.Context, _ pgtype.UUID) (db.Agent, erro
 
 func (f *fakeQueries) GetIssue(_ context.Context, id pgtype.UUID) (db.Issue, error) {
 	issue := db.Issue{ID: id, WorkspaceID: util.MustParseUUID(testWorkspaceID), Title: "修复登录", Number: 30}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.assignee != "" {
 		issue.AssigneeType = pgtype.Text{String: f.assigneeType, Valid: true}
 		issue.AssigneeID = util.MustParseUUID(f.assignee)
@@ -524,7 +528,9 @@ func TestNotifier_WindowIsPerSender(t *testing.T) {
 	}}
 	n := newBotNotifier(q, s, bots, 100*time.Millisecond)
 	process(n, inboxEvent(testIssueID, "new_comment", "第一条", nil))
+	q.mu.Lock()
 	q.assignee = otherAgentID
+	q.mu.Unlock()
 	process(n, inboxEvent(testIssueID, "assignee_changed", "", nil))
 	n.Wait()
 	apps := map[string]int{}
