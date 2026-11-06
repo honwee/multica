@@ -636,3 +636,24 @@ func TestPeekEventType(t *testing.T) {
 		})
 	}
 }
+
+// An inbox notification the agent's bot sends lands in the same p2p chat the
+// member talks to the agent in; if Lark echoes it, it must not be decoded as
+// user input.
+func TestLarkJSONFrameDecoderDropsAppSentMessages(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"header":{"event_id":"evt-app","event_type":"im.message.receive_v1","app_id":"cli_bot"},
+		"event":{
+			"sender":{"sender_id":{"open_id":"ou_bot"},"sender_type":"app"},
+			"message":{
+				"message_id":"om_card","chat_id":"oc_1","chat_type":"p2p",
+				"message_type":"interactive","content":"{\"header\":{\"title\":{\"content\":\"Issue 更新\"}}}"
+			}
+		}
+	}`)
+	_, ok, err := NewLarkJSONFrameDecoder().Decode(raw, Installation{BotOpenID: "ou_bot"})
+	if err != nil || ok {
+		t.Fatalf("Decode ok=%v err=%v, want the app-sent message dropped", ok, err)
+	}
+}
