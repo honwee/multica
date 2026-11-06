@@ -30,6 +30,9 @@ const (
 type fakeQueries struct {
 	prefs map[string]string // nil means no row
 	users map[string]db.User
+	// assignee is the issue's assigned agent; "" leaves it unassigned.
+	assignee     string
+	assigneeType string
 }
 
 func (f *fakeQueries) GetNotificationPreference(_ context.Context, _ db.GetNotificationPreferenceParams) (db.NotificationPreference, error) {
@@ -53,7 +56,12 @@ func (f *fakeQueries) GetAgent(_ context.Context, _ pgtype.UUID) (db.Agent, erro
 }
 
 func (f *fakeQueries) GetIssue(_ context.Context, id pgtype.UUID) (db.Issue, error) {
-	return db.Issue{ID: id, WorkspaceID: util.MustParseUUID(testWorkspaceID), Title: "修复登录", Number: 30}, nil
+	issue := db.Issue{ID: id, WorkspaceID: util.MustParseUUID(testWorkspaceID), Title: "修复登录", Number: 30}
+	if f.assignee != "" {
+		issue.AssigneeType = pgtype.Text{String: f.assigneeType, Valid: true}
+		issue.AssigneeID = util.MustParseUUID(f.assignee)
+	}
+	return issue, nil
 }
 
 func (f *fakeQueries) GetWorkspace(_ context.Context, id pgtype.UUID) (db.Workspace, error) {
@@ -71,7 +79,9 @@ type fakeSender struct {
 	mu    sync.Mutex
 	calls []lark.SendUserCardParams
 	fail  error
-	block chan struct{}
+	// failApps fails sends made with one app's credentials.
+	failApps map[string]error
+	block    chan struct{}
 }
 
 func (s *fakeSender) SendUserCard(_ context.Context, p lark.SendUserCardParams) (string, error) {
@@ -83,6 +93,9 @@ func (s *fakeSender) SendUserCard(_ context.Context, p lark.SendUserCardParams) 
 	s.calls = append(s.calls, p)
 	if s.fail != nil {
 		return "", s.fail
+	}
+	if err := s.failApps[p.Credentials.AppID]; err != nil {
+		return "", err
 	}
 	return "om_x", nil
 }
@@ -344,5 +357,181 @@ func TestNotifier_IgnoresAgentRecipientsAndIssuelessItems(t *testing.T) {
 	n.handle(issueless)
 	if len(n.queue) != 0 {
 		t.Fatalf("queued %d events, want 0", len(n.queue))
+	}
+}
+
+const (
+	testAgentID   = "77777777-7777-7777-7777-777777777777"
+	otherAgentID  = "88888888-8888-8888-8888-888888888888"
+	testBotAppID  = "cli_agent_bot"
+	testBotOpenID = "ou_honwee_under_bot"
+)
+
+type fakeBots struct {
+	mu    sync.Mutex
+	calls []string
+	// routes maps agent id to its route; a missing agent has no bot.
+	routes map[string]lark.AgentBotRoute
+	err    error
+}
+
+func (b *fakeBots) Route(_ context.Context, _, agentID pgtype.UUID, _ db.User) (lark.AgentBotRoute, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	id := util.UUIDToString(agentID)
+	b.calls = append(b.calls, id)
+	if b.err != nil {
+		return lark.AgentBotRoute{}, b.err
+	}
+	route, ok := b.routes[id]
+	if !ok {
+		return lark.AgentBotRoute{}, lark.ErrNoAgentBot
+	}
+	return route, nil
+}
+
+func botRoute(appID, receiveIDType, receiveID string) lark.AgentBotRoute {
+	return lark.AgentBotRoute{
+		Credentials:   lark.InstallationCredentials{AppID: appID},
+		ReceiveIDType: receiveIDType,
+		ReceiveID:     receiveID,
+	}
+}
+
+func newBotNotifier(q *fakeQueries, s *fakeSender, bots *fakeBots, window time.Duration) *Notifier {
+	return New(q, s, Config{
+		Credentials:  lark.InstallationCredentials{AppID: "cli_login"},
+		Bots:         bots,
+		AppURL:       "https://fde.lumistedu.com",
+		Window:       window,
+		MaxAttempts:  2,
+		RetryBackoff: time.Millisecond,
+	})
+}
+
+func agentAssigned(agentID string) *fakeQueries {
+	q := enabledQueries(nil)
+	q.assignee, q.assigneeType = agentID, "agent"
+	return q
+}
+
+func TestNotifier_AssignedAgentBotSends(t *testing.T) {
+	s := &fakeSender{}
+	bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
+		testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeOpenID, testBotOpenID),
+	}}
+	n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
+	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+	n.Wait()
+	sent := s.sent()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d, want 1", len(sent))
+	}
+	if sent[0].Credentials.AppID != testBotAppID || sent[0].ReceiveIDType != lark.ReceiveIDTypeOpenID || sent[0].ReceiveID != testBotOpenID {
+		t.Fatalf("not sent through the agent bot: %+v", sent[0])
+	}
+	if !strings.Contains(sent[0].CardJSON, CardTitle) || !strings.Contains(sent[0].CardJSON, "在 Multica 中查看") {
+		t.Errorf("card lacks the notification title or link: %s", sent[0].CardJSON)
+	}
+}
+
+func TestNotifier_AgentBotByUnionIDWhenNoChat(t *testing.T) {
+	s := &fakeSender{}
+	bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
+		testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeUnionID, "on_honwee"),
+	}}
+	n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
+	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+	n.Wait()
+	sent := s.sent()
+	if len(sent) != 1 || sent[0].Credentials.AppID != testBotAppID || sent[0].ReceiveIDType != lark.ReceiveIDTypeUnionID || sent[0].ReceiveID != "on_honwee" {
+		t.Fatalf("unexpected sends: %+v", sent)
+	}
+}
+
+func TestNotifier_AgentBotFailureFallsBackToLoginApp(t *testing.T) {
+	s := &fakeSender{failApps: map[string]error{
+		testBotAppID: &lark.APIError{Op: "send user card", Code: 230013, Msg: "no availability"},
+	}}
+	bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
+		testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeUnionID, "on_honwee"),
+	}}
+	n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
+	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+	n.Wait()
+	sent := s.sent()
+	if len(sent) != 2 {
+		t.Fatalf("sent %d, want bot attempt then login app: %+v", len(sent), sent)
+	}
+	if sent[0].Credentials.AppID != testBotAppID {
+		t.Errorf("first attempt app = %q, want the bot", sent[0].Credentials.AppID)
+	}
+	if sent[1].Credentials.AppID != "cli_login" || sent[1].ReceiveIDType != lark.ReceiveIDTypeOpenID || sent[1].ReceiveID != "ou_honwee" {
+		t.Errorf("fallback not addressed through the login app: %+v", sent[1])
+	}
+}
+
+func TestNotifier_AgentWithoutBotUsesLoginApp(t *testing.T) {
+	for name, bots := range map[string]*fakeBots{
+		"no bot":       {},
+		"unreachable":  {err: lark.ErrAgentBotRecipientUnreachable},
+		"lookup error": {err: errors.New("db down")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &fakeSender{}
+			n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
+			process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+			n.Wait()
+			sent := s.sent()
+			if len(sent) != 1 || sent[0].Credentials.AppID != "cli_login" {
+				t.Fatalf("unexpected sends: %+v", sent)
+			}
+		})
+	}
+}
+
+func TestNotifier_MemberOrUnassignedIssueUsesLoginApp(t *testing.T) {
+	member := enabledQueries(nil)
+	member.assignee, member.assigneeType = testActorID, "member"
+	for name, q := range map[string]*fakeQueries{"member": member, "unassigned": enabledQueries(nil)} {
+		t.Run(name, func(t *testing.T) {
+			s := &fakeSender{}
+			bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
+				testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeOpenID, testBotOpenID),
+			}}
+			n := newBotNotifier(q, s, bots, 20*time.Millisecond)
+			process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+			n.Wait()
+			sent := s.sent()
+			if len(sent) != 1 || sent[0].Credentials.AppID != "cli_login" {
+				t.Fatalf("unexpected sends: %+v", sent)
+			}
+			if len(bots.calls) != 0 {
+				t.Errorf("bot router consulted for a non-agent assignee: %v", bots.calls)
+			}
+		})
+	}
+}
+
+// A reassignment inside an open window must not fold the new sender's
+// notification into the old sender's window.
+func TestNotifier_WindowIsPerSender(t *testing.T) {
+	q := agentAssigned(testAgentID)
+	s := &fakeSender{}
+	bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
+		testAgentID:  botRoute(testBotAppID, lark.ReceiveIDTypeOpenID, testBotOpenID),
+		otherAgentID: botRoute("cli_other_bot", lark.ReceiveIDTypeOpenID, "ou_other"),
+	}}
+	n := newBotNotifier(q, s, bots, 100*time.Millisecond)
+	process(n, inboxEvent(testIssueID, "new_comment", "第一条", nil))
+	q.assignee = otherAgentID
+	process(n, inboxEvent(testIssueID, "assignee_changed", "", nil))
+	n.Wait()
+	apps := map[string]int{}
+	for _, c := range s.sent() {
+		apps[c.Credentials.AppID]++
+	}
+	if apps[testBotAppID] != 1 || apps["cli_other_bot"] != 1 {
+		t.Fatalf("sends per app = %v, want one through each bot", apps)
 	}
 }
