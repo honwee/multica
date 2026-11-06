@@ -275,7 +275,7 @@ function LoginPageContent() {
           className="flex items-center justify-center gap-3 text-caption"
         >
           <a
-            href="https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.5/multica-desktop-0.8.5-mac-arm64.dmg"
+            href="https://lumist-fde-report.oss-cn-shanghai.aliyuncs.com/downloads/0.8.6/multica-desktop-0.8.6-mac-arm64.dmg"
             className="inline-flex min-h-11 items-center rounded px-1 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {t(($) => $.web.download_macos)}
