@@ -37,6 +37,9 @@ import {
   projectDetailOptions,
   projectResourcesOptions,
 } from "@/data/queries/projects";
+import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
+import { agentListOptions } from "@/data/queries/agents";
+import { memberListOptions } from "@/data/queries/members";
 import { issueKeys } from "@/data/queries/issue-keys";
 import { useDeleteProject } from "@/data/mutations/projects";
 import { pinListOptions } from "@/data/queries/pins";
@@ -77,6 +80,10 @@ export default function ProjectDetail() {
   const projectMissing = !project || project.id === "";
 
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId, { includeArchived: true }));
+  const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  const canDelete = !!project && canDeleteProject(project, userId, role, agents);
   const { data: pins } = useQuery(pinListOptions(wsId, userId));
   const isPinned =
     !!project &&
@@ -92,7 +99,7 @@ export default function ProjectDetail() {
     const wsUrl = getCurrentServerConfig().webUrl;
     const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
     if (wsUrl) actions.push("open_web");
-    actions.push("delete");
+    if (canDelete) actions.push("delete");
     const options = actions.map((action) =>
       action === "cancel"
         ? t("common:actions.cancel")
@@ -106,12 +113,12 @@ export default function ProjectDetail() {
                 ? t("menu.open_web")
                 : t("common:actions.delete"),
     );
-    const destructiveIndex = options.length - 1;
+    const destructiveIndex = actions.indexOf("delete");
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
-        destructiveButtonIndex: destructiveIndex,
+        destructiveButtonIndex: destructiveIndex >= 0 ? destructiveIndex : undefined,
       },
       (i) => {
         const action = actions[i];
@@ -131,7 +138,7 @@ export default function ProjectDetail() {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }
-        if (i === destructiveIndex) {
+        if (action === "delete" && canDelete) {
           onDelete();
         }
       },

@@ -232,7 +232,7 @@ const disableFeishuOrgMember = `-- name: DisableFeishuOrgMember :one
 UPDATE member
 SET disabled_at = COALESCE(disabled_at, now())
 WHERE workspace_id = $1 AND user_id = $2
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type DisableFeishuOrgMemberParams struct {
@@ -251,6 +251,7 @@ func (q *Queries) DisableFeishuOrgMember(ctx context.Context, arg DisableFeishuO
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -881,7 +882,7 @@ const restoreFeishuOrgMember = `-- name: RestoreFeishuOrgMember :one
 UPDATE member
 SET disabled_at = NULL
 WHERE workspace_id = $1 AND user_id = $2
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type RestoreFeishuOrgMemberParams struct {
@@ -900,6 +901,7 @@ func (q *Queries) RestoreFeishuOrgMember(ctx context.Context, arg RestoreFeishuO
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -908,7 +910,7 @@ const setFeishuOrgManagedRole = `-- name: SetFeishuOrgManagedRole :one
 UPDATE member
 SET feishu_managed_role = $1
 WHERE workspace_id = $2 AND user_id = $3
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type SetFeishuOrgManagedRoleParams struct {
@@ -928,6 +930,7 @@ func (q *Queries) SetFeishuOrgManagedRole(ctx context.Context, arg SetFeishuOrgM
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -978,7 +981,7 @@ const updateFeishuOrgMemberRole = `-- name: UpdateFeishuOrgMemberRole :one
 UPDATE member
 SET role = $1, feishu_managed_role = $1
 WHERE workspace_id = $2 AND user_id = $3
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type UpdateFeishuOrgMemberRoleParams struct {
@@ -998,6 +1001,7 @@ func (q *Queries) UpdateFeishuOrgMemberRole(ctx context.Context, arg UpdateFeish
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }

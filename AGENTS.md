@@ -6,6 +6,7 @@ Multica is a task management platform where people and agents collaborate on iss
 
 - Before changing `apps/mobile/`, also read [apps/mobile/AGENTS.md](apps/mobile/AGENTS.md), even if your tool does not load nested instructions automatically. Platform-specific sections below apply only to the named platform.
 - For naming, translations, or Chinese UI/docs copy, read [conventions.mdx](apps/docs/content/docs/developers/conventions.mdx) and [conventions.zh.mdx](apps/docs/content/docs/developers/conventions.zh.mdx).
+- This repository is the Lumist fork; read [FORK.md](FORK.md) for where fork changes go, fork migration numbering (9000+), and the weekly upstream merge.
 - Maintain shared rules here and mobile-specific rules in the mobile file. `CLAUDE.md` files only import them. Update instructions in the same change that alters the referenced workflow or boundary; do not add incident timelines, dependency version lists, or duplicate rules.
 
 ## Sharing Rules and Package Boundaries

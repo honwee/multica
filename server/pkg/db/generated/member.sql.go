@@ -14,7 +14,7 @@ import (
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type CreateMemberParams struct {
@@ -34,6 +34,7 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -48,7 +49,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getDisabledMemberByUserAndWorkspace = `-- name: GetDisabledMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at FROM member
 WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NOT NULL
 `
 
@@ -71,12 +72,13 @@ func (q *Queries) GetDisabledMemberByUserAndWorkspace(ctx context.Context, arg G
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at FROM member
 WHERE id = $1
 `
 
@@ -91,12 +93,13 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at FROM member
 WHERE user_id = $1 AND workspace_id = $2 AND disabled_at IS NULL
 `
 
@@ -116,6 +119,7 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -162,7 +166,7 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role FROM member
+SELECT id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at FROM member
 WHERE workspace_id = $1 AND disabled_at IS NULL
 ORDER BY created_at ASC
 `
@@ -184,6 +188,7 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 			&i.CreatedAt,
 			&i.DisabledAt,
 			&i.FeishuManagedRole,
+			&i.PinnedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -274,7 +279,7 @@ const reactivateMember = `-- name: ReactivateMember :one
 UPDATE member
 SET disabled_at = NULL, role = $1, feishu_managed_role = NULL
 WHERE id = $2 AND disabled_at IS NOT NULL
-RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role
+RETURNING id, workspace_id, user_id, role, created_at, disabled_at, feishu_managed_role, pinned_at
 `
 
 type ReactivateMemberParams struct {
@@ -293,6 +298,7 @@ func (q *Queries) ReactivateMember(ctx context.Context, arg ReactivateMemberPara
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -331,7 +337,7 @@ WHERE member.id = $1
       WHERE r.role = 'owner'
          OR (r.role = 'admin' AND t.role <> 'owner' AND $2 <> 'owner')
   )
-RETURNING member.id, member.workspace_id, member.user_id, member.role, member.created_at, member.disabled_at, member.feishu_managed_role
+RETURNING member.id, member.workspace_id, member.user_id, member.role, member.created_at, member.disabled_at, member.feishu_managed_role, member.pinned_at
 `
 
 type UpdateMemberRoleParams struct {
@@ -351,6 +357,7 @@ func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRolePara
 		&i.CreatedAt,
 		&i.DisabledAt,
 		&i.FeishuManagedRole,
+		&i.PinnedAt,
 	)
 	return i, err
 }

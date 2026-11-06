@@ -27,7 +27,7 @@ func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
 			continue
 		}
 		number, err := strconv.Atoi(prefix)
-		if err != nil || number < firstUniqueMigrationNumber {
+		if err != nil || number < firstUniqueMigrationNumber || forkLegacyMigrationStems[stem] {
 			continue
 		}
 		if previous, exists := stemByNumber[number]; exists {

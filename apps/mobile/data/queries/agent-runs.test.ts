@@ -17,7 +17,7 @@ beforeEach(() => {
 describe("agent queries", () => {
   it("loads archived agents so the lifecycle filter can show them", async () => {
     mocks.listAgents.mockResolvedValue([]);
-    await agentListOptions("ws-1").queryFn!({ signal: undefined } as never);
+    await agentListOptions("ws-1", { includeArchived: true }).queryFn!({ signal: undefined } as never);
     expect(mocks.listAgents).toHaveBeenCalledWith({
       signal: undefined,
       includeArchived: true,
