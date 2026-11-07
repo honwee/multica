@@ -578,6 +578,14 @@ deleted_invocations AS (
     DELETE FROM plugin_invocation
     WHERE workspace_id = $1
 ),
+deleted_card_actions AS (
+    DELETE FROM plugin_card_action
+    WHERE workspace_id = $1
+),
+deleted_batch_actions AS (
+    DELETE FROM plugin_batch_action
+    WHERE workspace_id = $1
+),
 versions AS MATERIALIZED (
     SELECT plugin_package_version.id
     FROM plugin_package_version
@@ -604,6 +612,7 @@ DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations)
 // Hook call records are workspace-scoped in their own right, so this deletes by
 // workspace rather than through the installation ids: a row whose installation
 // was already uninstalled would otherwise survive the workspace it described.
+// Fork extension tables (FORK.md), both workspace-scoped.
 // Published artifacts are workspace-scoped too, and independent of whether
 // anything installed them. Deleting the workspace without these would leave the
 // stored bundles as the largest orphan the plugin surface can produce.

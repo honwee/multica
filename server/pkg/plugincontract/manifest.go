@@ -196,6 +196,8 @@ type Contributes struct {
 	Surfaces  []Surface  `json:"surfaces,omitempty"`
 	Hooks     []Hook     `json:"hooks,omitempty"`
 	Resources []Resource `json:"resources,omitempty"`
+	// CardButtons is a fork extension point; see manifest_fork.go.
+	CardButtons []CardButtonRule `json:"card_buttons,omitempty"`
 }
 
 // Surface is a host-mounted iframe. The host owns where it appears; the plugin
@@ -565,7 +567,7 @@ func (m Manifest) validateContributions() error {
 		}
 		surfaceKeys[surface.Key] = true
 		switch surface.Type {
-		case SurfaceIssuePanel, SurfaceSidebarPanel, SurfaceModal:
+		case SurfaceIssuePanel, SurfaceSidebarPanel, SurfaceModal, SurfaceWorkspacePage:
 		default:
 			return fmt.Errorf("%s.type is unsupported: %q", field, surface.Type)
 		}
@@ -628,7 +630,7 @@ func (m Manifest) validateContributions() error {
 		triggerSeen := map[string]bool{}
 		for _, trigger := range hook.Triggers {
 			switch trigger {
-			case TriggerUI, TriggerManual, TriggerAgent, TriggerEvent, TriggerSchedule:
+			case TriggerUI, TriggerManual, TriggerAgent, TriggerEvent, TriggerSchedule, TriggerCardAction:
 			default:
 				return fmt.Errorf("%s.triggers contains unsupported trigger %q", field, trigger)
 			}
@@ -704,7 +706,7 @@ func (m Manifest) validateContributions() error {
 			return fmt.Errorf("%s.entry must be %q", field, want)
 		}
 	}
-	return nil
+	return m.validateCardButtons()
 }
 
 func validateHookSchedule(field string, schedule HookSchedule) error {

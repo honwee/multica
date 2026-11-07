@@ -85,6 +85,9 @@ function workspaceScoped(slug: string) {
       `${ws}/runtimes/${encode(machineId)}/runtime/${encode(runtimeId)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
+    // Fork: a plugin's workspace_page surface (FORK.md).
+    pluginPage: (installationId: string, surfaceKey: string) =>
+      `${ws}/plugins/${encode(installationId)}/${encode(surfaceKey)}`,
     settings: () => `${ws}/settings`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };

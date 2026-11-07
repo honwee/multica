@@ -516,6 +516,12 @@
       "installed_version": "使用中",
       "review_install": "檢視並安裝",
       "review_upgrade": "檢視並升級"
+    },
+    "extensions": {
+      "title": "工作區擴充",
+      "workspace_pages": "在側邊欄顯示外掛頁面",
+      "card_buttons": "在飛書通知卡片上顯示外掛按鈕",
+      "card_buttons_description": "只有 agent 飛書機器人發送的通知會帶按鈕。機器人應用需要用長連線訂閱「卡片回傳互動」（card.action.trigger）。"
     }
   },
   "properties": {

@@ -139,7 +139,9 @@
       "view_remove": "サイドバーから削除",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "plugin_pages": "プラグイン",
+      "plugin_page_unavailable": "このプラグインページは利用できません。このワークスペースで無効になっているか、プラグインが無効化またはアンインストールされている可能性があります。"
     },
     "team": {
       "new_agent": "新規エージェント",

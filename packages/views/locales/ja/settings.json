@@ -516,6 +516,12 @@
       "installed_version": "使用中",
       "review_install": "確認してインストール",
       "review_upgrade": "確認してアップグレード"
+    },
+    "extensions": {
+      "title": "ワークスペース拡張",
+      "workspace_pages": "サイドバーにプラグインページを表示",
+      "card_buttons": "Feishu 通知カードにプラグインのボタンを表示",
+      "card_buttons_description": "ボタンが付くのはエージェントの Feishu ボットが送る通知だけです。ボットアプリで長期接続によるカードコールバック（card.action.trigger）を購読する必要があります。"
     }
   },
   "properties": {

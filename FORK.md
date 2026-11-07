@@ -11,6 +11,14 @@
    - 接入点越少，每周合并上游时冲突越少。
 3. **扩展点不往上游提 PR。** 通用扩展点只留在 fork。
 
+## 已有的通用扩展点
+
+都由 `workspace.settings.plugin_extensions` 按工作区开关，默认关闭；关闭时行为与上游一致。管理员在「设置 → 插件 → 工作区扩展」里开关。
+
+- **工作区页面**（`workspace_page` 界面）：插件页面出现在 Work 侧边栏的「插件」分组，路由 `/{slug}/plugins/{installationId}/{surfaceKey}`。页面通过 bridge 可以调用 `GET /issues`、`POST /issue-batches/comments`、`POST /issue-batches/status`，都以当前用户身份逐条校验执行，每一条写入 `plugin_batch_action`（含 `via_plugin_id`）。代码：`server/internal/handler/plugin_extensions_fork.go`、`packages/views/plugins/plugin-workspace-pages.tsx`。
+- **飞书通知卡片按钮**（manifest 的 `card_buttons` + `card_action` 触发）：只出现在 agent 机器人发送的通知卡片上。点击经机器人长连接回调（`card.action.trigger`），平台校验签名、点击者身份和 issue 权限，每张卡片只执行一次（`plugin_card_action`），再调用插件钩子并以点击者身份执行它返回的动作。机器人应用需要在飞书开放平台用长连接订阅「卡片回传交互」。代码：`server/internal/handler/plugin_card_action_fork.go`、`server/internal/feishunotify/buttons_fork.go`、`server/internal/integrations/lark/ws_card_action_fork.go`。
+- 最小示例：`examples/plugins/workspace-review/`。
+
 ## 数据库迁移编号
 
 - fork 自己的新迁移从 **`90000_`** 开始编号（`90000_xxx.up.sql`、`90001_xxx.up.sql`……），和上游的编号段永远分开。编号固定 5 位，保证按文件名排序与按数字排序一致。

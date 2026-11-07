@@ -104,6 +104,8 @@ type Notifier struct {
 	windows map[windowKey]*window
 	// inflight tracks sends and timers so tests and shutdown can wait.
 	inflight sync.WaitGroup
+	// buttons supplies plugin card buttons; see buttons_fork.go.
+	buttons buttonProviderSlot
 }
 
 // windowKey includes the sending agent so a reassignment inside a window

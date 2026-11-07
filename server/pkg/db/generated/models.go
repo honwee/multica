@@ -1337,6 +1337,35 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PluginBatchAction struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ViaPluginID pgtype.UUID        `json:"via_plugin_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	IssueRef    string             `json:"issue_ref"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Action      string             `json:"action"`
+	Status      string             `json:"status"`
+	Error       pgtype.Text        `json:"error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginCardAction struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	MessageID      string             `json:"message_id"`
+	RuleKey        string             `json:"rule_key"`
+	ButtonKey      string             `json:"button_key"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Status         string             `json:"status"`
+	ResultText     pgtype.Text        `json:"result_text"`
+	Error          pgtype.Text        `json:"error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PluginHookSchedule struct {
 	ID             pgtype.UUID        `json:"id"`
 	InstallationID pgtype.UUID        `json:"installation_id"`

@@ -95,12 +95,20 @@ func (n *Notifier) render(ctx context.Context, batch []event) (string, error) {
 		})
 	}
 
+	buttons := n.cardButtonElements(ctx, first)
+	elements = append(elements, buttons...)
+
 	header := identifier + " " + issue.Title
+	config := map[string]any{
+		"summary": map[string]any{"content": truncateRunes(header+" · "+n.describe(ctx, batch[len(batch)-1], names), 100)},
+	}
+	if len(buttons) > 0 {
+		// The button callback replaces this card with the decision.
+		config["update_multi"] = true
+	}
 	card := map[string]any{
 		"schema": "2.0",
-		"config": map[string]any{
-			"summary": map[string]any{"content": truncateRunes(header+" · "+n.describe(ctx, batch[len(batch)-1], names), 100)},
-		},
+		"config": config,
 		// The fixed title tells a notification apart from the agent's chat
 		// replies when the agent's bot sends it.
 		"header": map[string]any{

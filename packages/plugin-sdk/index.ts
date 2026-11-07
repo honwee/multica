@@ -52,6 +52,50 @@ export interface Comment {
   created_at: string;
 }
 
+/** One row of `multica.issues.list` — a summary, without the description. */
+export interface IssueSummary {
+  id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  status_category?: string;
+  status_name: string;
+  priority: string;
+  assignee_type: string | null;
+  assignee_id: string | null;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueListFilter {
+  project_id?: string;
+  status?: string;
+  assignee_id?: string;
+  /** 1–200, default 50. */
+  limit?: number;
+  offset?: number;
+}
+
+export interface IssueListPage {
+  issues: IssueSummary[];
+  /** Pass back as `offset` for the next page; null on the last page. */
+  next_offset: number | null;
+}
+
+/** Per-issue outcome of a batch call. One failure never stops the rest. */
+export interface BatchItemResult {
+  issue_id: string;
+  status: "ok" | "forbidden" | "not_found" | "invalid" | "failed";
+  error?: string;
+}
+
+export interface BatchResult {
+  results: BatchItemResult[];
+  succeeded: number;
+  failed: number;
+}
+
 /** One completed hook call. `status` is the host's verdict, not the endpoint's. */
 export interface HookResult {
   status: string;
@@ -227,6 +271,35 @@ export const multica = {
         content: input.body,
         parent_id: input.parentId,
       });
+    },
+  },
+
+  /**
+   * Workspace-wide issue access for `workspace_page` surfaces. Available only
+   * while the workspace has plugin pages switched on; otherwise every call
+   * fails with 403 `plugin_extension_disabled`.
+   *
+   * Batch calls run as the signed-in user: each issue is checked against
+   * what that user may do, and every write is recorded as made through this
+   * plugin. Status changes follow the same rules as changing status by hand.
+   */
+  issues: {
+    async list(filter: IssueListFilter = {}): Promise<IssueListPage> {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(filter)) {
+        if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+      }
+      const suffix = query.toString();
+      const page = await bridge.request<IssueListPage>("GET", suffix ? `/issues?${suffix}` : "/issues");
+      return { issues: page.issues ?? [], next_offset: page.next_offset ?? null };
+    },
+    /** Posts the same comment on up to 100 issues. */
+    async batchComment(issueIds: string[], body: string): Promise<BatchResult> {
+      return bridge.request<BatchResult>("POST", "/issue-batches/comments", { issue_ids: issueIds, content: body });
+    },
+    /** Moves up to 100 issues to one status key. */
+    async batchSetStatus(issueIds: string[], status: string): Promise<BatchResult> {
+      return bridge.request<BatchResult>("POST", "/issue-batches/status", { issue_ids: issueIds, status });
     },
   },
 

@@ -73,6 +73,11 @@ type WSConnectorConfig struct {
 	// the unhandled path.
 	ContactEvents ContactEventSink
 
+	// CardActions answers card callbacks inside the ACK (fork extension
+	// point, see ws_card_action_fork.go). Nil leaves them on the unhandled
+	// path.
+	CardActions CardActionHandler
+
 	// EnrichTimeout caps a single message's enrichment (at most two
 	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
 	// ACK window, since enrichment runs before the frame is ACKed.
@@ -365,6 +370,13 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 				"chunks", sum,
 				"bytes", len(payload),
 			)
+		}
+
+		if c.cfg.CardActions != nil && isCardActionFrame(frame, payload) {
+			if werr := c.writeFrame(&writeMu, conn, c.cardActionAck(ctx, frame, inst, payload)); werr != nil {
+				return fmt.Errorf("write ack: %w", werr)
+			}
+			continue
 		}
 
 		// Data frames: hand the (possibly reassembled) JSON payload to

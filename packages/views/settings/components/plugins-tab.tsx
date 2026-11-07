@@ -39,6 +39,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
+import { PluginExtensionsSection } from "./plugin-extensions-section";
 import { useLocale, useT } from "../../i18n";
 import {
   SettingsCard,
@@ -689,6 +690,8 @@ export function PluginsTab() {
       {role && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
 
       {canManage ? <PublishAndInstall wsId={wsId} canManage={canManage} /> : null}
+
+      {workspace ? <PluginExtensionsSection workspace={workspace} canManage={canManage} /> : null}
 
       <SettingsSection title={t(($) => $.plugins.installed.title)}>
         {isLoading ? (

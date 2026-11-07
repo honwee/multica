@@ -1,0 +1,55 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.workspace-review",
+  "name": "Workspace Review",
+  "description": "Minimal example of the fork extension points: a workspace page that lists issues and acts on several at once, and buttons on Feishu notification cards.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lumist",
+    "url": "https://fde.lumistedu.com"
+  },
+  "scopes": [
+    "issues:read",
+    "issues:write",
+    "comments:write",
+    "net:review.example.com"
+  ],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "review_board",
+        "type": "workspace_page",
+        "name": "Review board",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "decide",
+        "name": "Record a card decision",
+        "description": "Receives a click on an approval card and tells Multica which comment to post and which status to set, as the person who clicked.",
+        "triggers": ["card_action"],
+        "transport": {
+          "type": "http",
+          "url": "https://review.example.com/hooks/decide"
+        },
+        "timeout_ms": 1500
+      }
+    ],
+    "card_buttons": [
+      {
+        "key": "approval",
+        "hook": "decide",
+        "match": {
+          "title_prefixes": ["[审批]"]
+        },
+        "buttons": [
+          { "key": "approve", "label": "同意", "style": "primary" },
+          { "key": "revise", "label": "修改", "input": { "placeholder": "修改意见", "required": true } },
+          { "key": "reject", "label": "不要", "style": "danger" }
+        ]
+      }
+    ]
+  }
+}

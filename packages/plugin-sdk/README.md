@@ -78,3 +78,58 @@ surface will look native without shipping a stylesheet.
 
 The frame does not auto-size. Call `multica.ui.resize(px)` after your content
 settles; the host clamps the value.
+
+## Workspace pages (Lumist fork)
+
+A surface of type `workspace_page` is listed in the workspace sidebar and
+opens as a full page. It runs in the same sandbox, with the same bridge,
+scopes and CSP as an `issue_panel`; it is just not mounted on an issue, so
+`context.issue` is absent.
+
+Pages appear only after a workspace admin turns on **Settings → Plugins →
+Plugin pages in the sidebar**. A page gets three extra calls:
+
+```js
+const { issues, next_offset } = await multica.issues.list({ status: "in_review", limit: 50 });
+await multica.issues.batchComment(issues.map((i) => i.id), "已收到");   // comments:write
+await multica.issues.batchSetStatus(["LUM-12", "LUM-13"], "done");     // issues:write
+```
+
+Batch calls act as the signed-in user, check every issue on its own, and
+return one result per issue. Each write is recorded with the plugin's id.
+
+## Feishu card buttons (Lumist fork)
+
+A manifest can put buttons on the Feishu notification cards that agent bots
+send, and handle the click in a hook with the `card_action` trigger:
+
+```json
+"card_buttons": [{
+  "key": "approval",
+  "hook": "decide",
+  "match": { "projects": ["教务"], "title_prefixes": ["[审批]"], "labels": ["需审批"] },
+  "buttons": [
+    { "key": "approve", "label": "同意", "style": "primary" },
+    { "key": "revise", "label": "修改", "input": { "placeholder": "修改意见", "required": true } },
+    { "key": "reject", "label": "不要", "style": "danger" }
+  ]
+}]
+```
+
+`match` fields are ANDed and values inside one field are ORed; `projects`
+matches a project id or exact title. Buttons render only after an admin turns
+on **Plugin buttons on Feishu notification cards**.
+
+On a click, Multica maps the clicker's Feishu account to a workspace member
+with access to the issue, runs the decision once per card, and calls the hook
+as that member with `input: { rule, button, input, message_id }`. The hook
+must answer within 1.5 seconds with what Multica should do:
+
+```json
+{ "effects": [{ "type": "comment", "content": "同意" }, { "type": "set_status", "status": "done" }],
+  "status_text": "已同意" }
+```
+
+Effects run as the clicker and are marked as made through the plugin
+(`comments:write` / `issues:write` required). The card is then replaced with
+"已同意 · <name> · <time>".

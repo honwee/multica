@@ -696,6 +696,10 @@ func main() {
 		LLMMaxRetries:       llmMaxRetries,
 		LLMDisableThinking:  llmDisableThinking,
 	})
+	if feishuNotifier != nil {
+		// Fork: plugin card buttons; renders nothing unless a workspace enables them.
+		feishuNotifier.SetCardButtons(h.PluginCardActions())
+	}
 	// member_delegation_day exists only for self-host telemetry; DO_NOT_TRACK
 	// stops writing it as well as sending the snapshot.
 	h.TaskService.RecordMemberActivity = telemetryConfig.Enabled

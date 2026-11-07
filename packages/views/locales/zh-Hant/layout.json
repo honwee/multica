@@ -139,7 +139,9 @@
       "view_remove": "從側欄移除",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
-      "view_delete": "刪除檢視"
+      "view_delete": "刪除檢視",
+      "plugin_pages": "外掛",
+      "plugin_page_unavailable": "這個外掛頁面無法使用。可能本工作區未開啟外掛頁面，或外掛已停用、已解除安裝。"
     },
     "team": {
       "new_agent": "新建 AI 代理",
