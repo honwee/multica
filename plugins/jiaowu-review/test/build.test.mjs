@@ -22,3 +22,13 @@ test("card buttons match by title prefix only, never by project", () => {
     ask: { title_prefixes: ["Q"] },
   });
 });
+
+test("the page styles give every token newer than desktop 0.8.8 a fallback", () => {
+  const page = readFileSync(new URL("../ui/page.mjs", import.meta.url), "utf8");
+  const legacy = new Set([
+    "--background", "--foreground", "--muted", "--muted-foreground", "--border", "--primary",
+    "--primary-foreground", "--destructive", "--radius", "--text-caption", "--text-body",
+  ]);
+  const bare = [...page.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)].map((match) => match[1]).filter((name) => !name.startsWith("--jr-") && !legacy.has(name));
+  assert.deepEqual(bare, []);
+});
