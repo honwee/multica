@@ -1,7 +1,8 @@
 // 审批队列 — the plugin's workspace page.
 //
-// Source of ui/main.js; `node build.mjs` inlines lib/protocol.mjs and writes the
-// single-file entry Multica serves. Edit this file, not ui/main.js.
+// Source of ui/main.js; `node build.mjs` inlines lib/protocol.mjs and
+// ui/view.mjs and writes the single-file entry Multica serves. Edit this file,
+// not ui/main.js.
 //
 // Every call goes through the host bridge and runs as the signed-in member;
 // batch calls are checked issue by issue on the server.
@@ -9,9 +10,11 @@
 import {
   CARD_ASK,
   CARD_DRAFT,
+  CARD_OTHER,
   CARD_PROPOSAL,
   DECISION_APPROVE,
   DECISION_REJECT,
+  DECISION_REVISE,
   askAnswerComment,
   classifyCard,
   closeoutComment,
@@ -33,10 +36,303 @@ import {
   wenkeEnding,
   wenkeOrderId,
 } from "../lib/protocol.mjs";
+import { QUEUE_TABS, cardNumber, displayTitle, matchesQuery, rejectLabel, resultToast } from "./view.mjs";
 
 const BATCH_LIMIT = 100;
 const PAGE_LIMIT = 200;
 const DETAIL_CONCURRENCY = 8;
+const TOAST_MS = 3000;
+const ARM_MS = 4000;
+
+// ---- styles ---------------------------------------------------------------
+//
+// Every value comes from the host's forwarded design tokens. Desktop 0.8.8 and
+// older forward only background / foreground / muted / muted-foreground /
+// border / primary / primary-foreground / destructive / radius / text-caption /
+// text-body, so every other token carries a fallback built from those. The
+// --jr-* aliases are where the fallbacks live; rules below only use aliases.
+
+const STYLE = `
+:root {
+  --jr-bg: var(--background, #fff);
+  --jr-fg: var(--foreground, #18181b);
+  --jr-muted: var(--muted, #f4f4f5);
+  --jr-muted-fg: var(--muted-foreground, #71717a);
+  --jr-faint-fg: var(--faint-foreground, color-mix(in srgb, var(--jr-muted-fg) 75%, transparent));
+  --jr-border: var(--surface-border, var(--border, #e4e4e7));
+  --jr-input: var(--input, var(--jr-border));
+  --jr-ring: var(--ring, var(--jr-muted-fg));
+  --jr-primary: var(--primary, #18181b);
+  --jr-primary-fg: var(--primary-foreground, #fafafa);
+  --jr-secondary: var(--secondary, var(--jr-muted));
+  --jr-secondary-fg: var(--secondary-foreground, var(--jr-fg));
+  --jr-accent: var(--accent, var(--jr-muted));
+  --jr-accent-fg: var(--accent-foreground, var(--jr-fg));
+  --jr-destructive: var(--destructive, #dc2626);
+  --jr-success: var(--success, #16a34a);
+  --jr-warning: var(--warning, #d97706);
+  --jr-info: var(--info, #2563eb);
+  --jr-card: var(--card, var(--surface, var(--jr-bg)));
+  --jr-card-fg: var(--card-foreground, var(--jr-fg));
+  --jr-raised: var(--popover, var(--surface-raised, var(--jr-bg)));
+  --jr-raised-fg: var(--popover-foreground, var(--jr-fg));
+  --jr-hover: var(--surface-hover, color-mix(in srgb, var(--jr-muted) 60%, transparent));
+  --jr-selected: var(--surface-selected, color-mix(in srgb, var(--jr-primary) 8%, transparent));
+  --jr-selected-fg: var(--surface-selected-foreground, var(--jr-fg));
+  --jr-radius: var(--radius, 0.625rem);
+  --jr-radius-sm: var(--radius-sm, calc(var(--jr-radius) * 0.5));
+  --jr-radius-md: var(--radius-md, calc(var(--jr-radius) * 0.75));
+  --jr-radius-lg: var(--radius-lg, var(--jr-radius));
+  --jr-row: var(--issue-row-height, 36px);
+  --jr-btn-sm: var(--button-height-sm, 1.75rem);
+  --jr-btn: var(--button-height-default, 2rem);
+  --jr-font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif);
+  --jr-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --jr-micro: var(--text-micro, 11px);
+  --jr-micro-lh: var(--text-micro--line-height, 15px);
+  --jr-caption: var(--text-caption, 12px);
+  --jr-caption-lh: var(--text-caption--line-height, 16px);
+  --jr-label: var(--text-label, 13px);
+  --jr-label-lh: var(--text-label--line-height, 18px);
+  --jr-body: var(--text-body, 14px);
+  --jr-body-lh: var(--text-body--line-height, 20px);
+  --jr-title-sm: var(--text-title-sm, 16px);
+  --jr-title-sm-lh: var(--text-title-sm--line-height, 24px);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--jr-bg); color: var(--jr-fg);
+  font-family: var(--jr-font); font-size: var(--jr-body); line-height: var(--jr-body-lh);
+  -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+#root { height: 100%; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.5; }
+:focus-visible { outline: 2px solid var(--jr-ring); outline-offset: 1px; }
+
+.app { position: relative; display: flex; flex-direction: column; height: 100%; }
+
+/* toolbar */
+.toolbar {
+  position: relative; flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid var(--jr-border); background: var(--jr-bg);
+}
+.segmented {
+  flex: none; display: inline-flex; gap: 2px; padding: 2px;
+  border-radius: var(--jr-radius-lg); background: var(--jr-muted);
+}
+.segment {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--jr-btn-sm); padding: 0 10px;
+  border: 0; border-radius: var(--jr-radius-md); background: transparent; color: var(--jr-muted-fg);
+  font-size: var(--jr-label); line-height: var(--jr-label-lh); font-weight: 500;
+}
+.segment:hover { color: var(--jr-fg); }
+.segment[aria-selected="true"] {
+  background: var(--jr-bg); color: var(--jr-fg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--jr-fg) 10%, transparent);
+}
+.count { font-size: var(--jr-micro); line-height: var(--jr-micro-lh); color: var(--jr-muted-fg); font-variant-numeric: tabular-nums; }
+.search {
+  flex: 1 1 200px; min-width: 120px; max-width: 360px; height: var(--jr-btn-sm); padding: 0 10px;
+  border: 1px solid var(--jr-input); border-radius: var(--jr-radius-md); background: transparent;
+  font-size: var(--jr-label);
+}
+.search::placeholder, .field::placeholder { color: var(--jr-faint-fg); }
+.chips { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; justify-content: flex-end; overflow-x: auto; scrollbar-width: none; }
+.chip {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px;
+  border: 1px solid var(--jr-border); border-radius: 999px; background: transparent; color: var(--jr-muted-fg);
+  font-size: var(--jr-caption); line-height: var(--jr-caption-lh);
+}
+.chip:hover { background: var(--jr-hover); color: var(--jr-fg); }
+.chip[aria-pressed="true"] { background: var(--jr-selected); color: var(--jr-selected-fg); border-color: var(--jr-ring); }
+.progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--jr-primary); transition: width 160ms ease; }
+.progress.indeterminate > span { width: 30%; animation: jr-slide 1.1s ease-in-out infinite; }
+@keyframes jr-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
+  height: var(--jr-btn-sm); padding: 0 10px; border: 1px solid transparent; border-radius: var(--jr-radius-md);
+  background: transparent; color: var(--jr-fg); font-size: var(--jr-label); line-height: var(--jr-label-lh); font-weight: 500;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--jr-hover); }
+.btn.outline { border-color: var(--jr-border); }
+.btn.primary { background: var(--jr-primary); color: var(--jr-primary-fg); }
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--jr-primary) 88%, var(--jr-bg)); }
+.btn.secondary { background: var(--jr-secondary); color: var(--jr-secondary-fg); }
+.btn.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--jr-secondary) 80%, var(--jr-fg) 8%); }
+.btn.danger { background: color-mix(in srgb, var(--jr-destructive) 12%, transparent); color: var(--jr-destructive); }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--jr-destructive) 20%, transparent); }
+.btn.armed { outline: 2px solid currentColor; outline-offset: 1px; }
+.btn.danger.armed { background: var(--jr-destructive); color: #fff; outline-color: var(--jr-destructive); }
+
+/* list */
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 8px 24px; }
+.scroll.with-bar { padding-bottom: 96px; }
+.notice {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+  margin: 4px 8px 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--jr-warning) 35%, var(--jr-border));
+  border-radius: var(--jr-radius-lg); background: color-mix(in srgb, var(--jr-warning) 8%, var(--jr-card));
+}
+.notice-title { font-weight: 500; }
+.notice-text { grid-column: 1; color: var(--jr-muted-fg); font-size: var(--jr-caption); line-height: var(--jr-caption-lh); }
+.link { padding: 0; border: 0; background: none; color: var(--jr-fg); text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
+.notice .btn { grid-row: 1 / span 2; grid-column: 2; }
+.notice .rows { grid-column: 1 / -1; margin-top: 4px; }
+
+.group-head {
+  display: grid; grid-template-columns: 28px 16px minmax(0, 1fr) auto; align-items: center; gap: 6px;
+  height: var(--jr-row); padding: 0 12px; border-radius: var(--jr-radius-md); user-select: none; cursor: pointer;
+  font-size: var(--jr-label); line-height: var(--jr-label-lh); font-weight: 500;
+}
+.group-head:hover { background: var(--jr-hover); }
+.group-head .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-hint { padding: 0 12px 6px 62px; color: var(--jr-muted-fg); font-size: var(--jr-caption); line-height: var(--jr-caption-lh); }
+.chevron {
+  width: 6px; height: 6px; margin-left: 4px; border-right: 1.5px solid var(--jr-muted-fg); border-bottom: 1.5px solid var(--jr-muted-fg);
+  transform: rotate(-45deg); transition: transform 120ms ease;
+}
+.group-head[aria-expanded="true"] .chevron { transform: rotate(45deg); }
+.group-body { padding-left: 16px; }
+
+.row {
+  display: grid; grid-template-columns: 28px 64px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+  height: var(--jr-row); padding: 0 12px; border-radius: var(--jr-radius-md); cursor: pointer;
+}
+.row:hover { background: var(--jr-hover); }
+.row[aria-selected="true"] { background: var(--jr-selected); color: var(--jr-selected-fg); }
+.row[aria-selected="true"]:hover { background: color-mix(in srgb, var(--jr-selected) 100%, var(--jr-fg) 5%); }
+.row.flash { animation: jr-flash 1.6s ease; }
+@keyframes jr-flash { 0%, 40% { background: var(--jr-accent); box-shadow: inset 0 0 0 1px var(--jr-ring); } }
+.num {
+  font-family: var(--jr-mono); font-size: var(--jr-caption); line-height: var(--jr-caption-lh);
+  color: var(--jr-muted-fg); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badges { display: flex; gap: 4px; justify-content: flex-end; min-width: 0; overflow: hidden; }
+.wait {
+  min-width: 56px; text-align: right; color: var(--jr-muted-fg); white-space: nowrap;
+  font-size: var(--jr-caption); line-height: var(--jr-caption-lh); font-variant-numeric: tabular-nums;
+}
+.badge {
+  flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--jr-radius-sm);
+  background: var(--jr-muted); color: var(--jr-muted-fg); white-space: nowrap;
+  font-size: var(--jr-micro); line-height: var(--jr-micro-lh); font-weight: 500;
+}
+.badge.info { background: color-mix(in srgb, var(--jr-info) 12%, transparent); color: var(--jr-info); }
+.badge.warning { background: color-mix(in srgb, var(--jr-warning) 14%, transparent); color: color-mix(in srgb, var(--jr-warning) 70%, var(--jr-fg)); }
+.badge.success { background: color-mix(in srgb, var(--jr-success) 12%, transparent); color: var(--jr-success); }
+.badge.danger { background: color-mix(in srgb, var(--jr-destructive) 12%, transparent); color: var(--jr-destructive); }
+
+.check {
+  appearance: none; -webkit-appearance: none; display: grid; place-content: center; margin: 0;
+  width: 16px; height: 16px; border: 1px solid var(--jr-input); border-radius: var(--jr-radius-sm);
+  background: var(--jr-bg); cursor: pointer;
+}
+.check:hover { border-color: var(--jr-ring); }
+.check:checked, .check:indeterminate { background: var(--jr-primary); border-color: var(--jr-primary); }
+.check:checked::after {
+  content: ""; width: 8px; height: 4px; margin-top: -2px; border-left: 1.5px solid var(--jr-primary-fg); border-bottom: 1.5px solid var(--jr-primary-fg);
+  transform: rotate(-45deg);
+}
+.check:indeterminate::after { content: ""; width: 8px; height: 1.5px; background: var(--jr-primary-fg); }
+.check:disabled { opacity: 0.5; cursor: default; }
+
+/* expanded details and asks: indented to the title column */
+.detail, .ask { margin: 2px 12px 8px 112px; }
+.card {
+  padding: 10px 12px; border: 1px solid var(--jr-border); border-radius: var(--jr-radius-md);
+  background: var(--jr-card); color: var(--jr-card-fg);
+}
+.fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; }
+.field-label { color: var(--jr-muted-fg); font-size: var(--jr-caption); line-height: var(--jr-body-lh); white-space: nowrap; }
+.field-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fulltext {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--jr-border); max-height: 320px; overflow-y: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--jr-muted-fg); font-size: var(--jr-label); line-height: var(--jr-label-lh);
+}
+.fields + .fulltext { margin-top: 10px; }
+.card > .fulltext:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+.ask { display: grid; gap: 8px; }
+.options { display: flex; flex-wrap: wrap; gap: 6px; }
+.option {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: var(--jr-btn); padding: 4px 10px 4px 4px;
+  border: 1px solid var(--jr-border); border-radius: var(--jr-radius-md); background: var(--jr-card); text-align: left;
+  font-size: var(--jr-label); line-height: var(--jr-label-lh);
+}
+.option:hover:not(:disabled) { background: var(--jr-hover); border-color: var(--jr-ring); }
+.option.armed { background: var(--jr-selected); border-color: var(--jr-primary); }
+.option-key {
+  flex: none; display: grid; place-content: center; width: 22px; height: 22px; border-radius: var(--jr-radius-sm);
+  background: var(--jr-muted); font-family: var(--jr-mono); font-size: var(--jr-caption); font-weight: 600;
+}
+.option.armed .option-key { background: var(--jr-primary); color: var(--jr-primary-fg); }
+.option-text { overflow-wrap: anywhere; }
+.option-confirm { color: var(--jr-muted-fg); font-size: var(--jr-caption); white-space: nowrap; }
+.reply { display: flex; gap: 6px; }
+.field {
+  flex: 1; min-width: 0; height: var(--jr-btn-sm); padding: 0 10px; border: 1px solid var(--jr-input);
+  border-radius: var(--jr-radius-md); background: transparent; font-size: var(--jr-label);
+}
+.refs { display: grid; gap: 4px; }
+.ref {
+  display: grid; grid-template-columns: 52px auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--jr-border); border-radius: var(--jr-radius-md); background: var(--jr-card);
+  font-size: var(--jr-label); line-height: var(--jr-label-lh);
+}
+.ref .title { color: var(--jr-card-fg); }
+.ref .decision { grid-column: 3 / -1; color: var(--jr-muted-fg); font-size: var(--jr-caption); line-height: var(--jr-caption-lh); }
+.ref .btn { height: 24px; padding: 0 8px; font-size: var(--jr-caption); }
+
+/* states */
+.skeleton { display: grid; grid-template-columns: 28px 64px minmax(0, 1fr) 56px; align-items: center; gap: 8px; height: var(--jr-row); padding: 0 12px; }
+.skeleton > span { height: 10px; border-radius: var(--jr-radius-sm); background: var(--jr-muted); animation: jr-pulse 1.4s ease-in-out infinite; }
+.skeleton > span:first-child { width: 16px; height: 16px; }
+@keyframes jr-pulse { 50% { opacity: 0.45; } }
+.empty { display: grid; justify-items: center; gap: 8px; padding: 64px 16px; color: var(--jr-muted-fg); text-align: center; }
+.empty-title { color: var(--jr-fg); font-size: var(--jr-title-sm); line-height: var(--jr-title-sm-lh); font-weight: 500; }
+.empty.error .empty-title { color: var(--jr-destructive); }
+
+/* batch bar */
+.bar {
+  position: absolute; left: 50%; bottom: 16px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  width: min(760px, calc(100% - 32px)); padding: 8px 8px 8px 14px; transform: translate(-50%, 0);
+  border: 1px solid var(--jr-border); border-radius: var(--jr-radius-lg); background: var(--jr-raised); color: var(--jr-raised-fg);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--jr-fg) 14%, transparent), 0 1px 3px color-mix(in srgb, var(--jr-fg) 8%, transparent);
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.bar[hidden] { display: flex; opacity: 0; pointer-events: none; transform: translate(-50%, 16px); }
+.bar-count { flex: none; font-size: var(--jr-label); font-weight: 500; font-variant-numeric: tabular-nums; }
+.bar .field { flex: 1 1 160px; }
+.bar-actions { display: flex; gap: 6px; flex: none; }
+
+/* toasts */
+.toasts { position: absolute; right: 16px; bottom: 16px; z-index: 3; display: grid; gap: 8px; width: min(360px, calc(100% - 32px)); }
+.app.has-bar .toasts { bottom: 80px; }
+.toast {
+  display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 10px 10px 10px 12px;
+  border: 1px solid var(--jr-border); border-radius: var(--jr-radius-lg); background: var(--jr-raised); color: var(--jr-raised-fg);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--jr-fg) 14%, transparent); animation: jr-in 160ms ease;
+  font-size: var(--jr-label); line-height: var(--jr-label-lh);
+}
+@keyframes jr-in { from { opacity: 0; transform: translateY(8px); } }
+.toast-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 999px; background: var(--jr-success); }
+.toast.partial .toast-dot { background: var(--jr-warning); }
+.toast.error .toast-dot { background: var(--jr-destructive); }
+.toast-actions { display: flex; gap: 2px; }
+.toast-actions .btn { height: 22px; padding: 0 6px; font-size: var(--jr-caption); color: var(--jr-muted-fg); }
+.toast-details {
+  grid-column: 2 / -1; margin: 2px 0 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto;
+  color: var(--jr-muted-fg); font-size: var(--jr-caption); line-height: var(--jr-caption-lh);
+}
+.toast-details li { overflow-wrap: anywhere; }
+`;
 
 // ---- bridge ---------------------------------------------------------------
 
@@ -69,8 +365,12 @@ function call(method, path, body) {
   });
 }
 
-function resize() {
-  port.postMessage({ id: `r${++sequence}`, kind: "ui.resize", height: document.documentElement.scrollHeight + 16 });
+// The page scrolls inside its own frame. Hosts from 0.8.9 make the frame fill
+// the page and ignore this; older hosts size the frame from it, so ask for
+// roughly a screen instead of the 640px default.
+function requestHeight() {
+  const screenHeight = Number(globalThis.screen?.availHeight) || 0;
+  port.postMessage({ id: `r${++sequence}`, kind: "ui.resize", height: Math.max(640, screenHeight - 200) });
 }
 
 // ---- data -----------------------------------------------------------------
@@ -104,13 +404,20 @@ async function mapLimited(items, limit, fn) {
 }
 
 const state = {
+  loaded: false,
+  loading: false,
+  error: "",
+  progress: null,
+  tab: CARD_PROPOSAL,
   groups: [],
+  byId: new Map(),
   stale: [],
+  staleOpen: false,
   selected: new Map(),
   details: new Map(),
-  message: "",
   busy: false,
   armed: null,
+  toasts: [],
   // 经验提案
   tagFilter: new Set(),
   query: "",
@@ -118,18 +425,44 @@ const state = {
   expanded: new Set(),
   // 草稿
   superseded: [],
-  supersededOff: new Set(),
+  supersededKept: new Map(),
+  supersededOpen: false,
   olderCount: new Map(),
   // 请教 ↔ 草稿
   askLinks: new Map(),
   citedBy: new Map(),
+  askReplies: new Map(),
 };
 
 const STATUS_TEXT = { in_review: "等待中", done: "已完成", cancelled: "已取消", in_progress: "进行中" };
+const STATUS_TONE = { in_review: "warning", done: "success", cancelled: "", in_progress: "info" };
+
+function setProgress(progress) {
+  state.progress = progress;
+  scheduleProgress();
+}
 
 async function load() {
-  state.message = "加载中…";
+  state.loading = true;
+  state.error = "";
+  setProgress({ indeterminate: true });
   render();
+  try {
+    await loadQueue();
+    state.loaded = true;
+  } catch (error) {
+    // 403 plugin_extension_disabled: an admin has not switched pages on.
+    const message = String(error?.message ?? error);
+    if (state.loaded) toast({ kind: "error", title: `刷新失败：${message}`, details: [], sticky: true });
+    else state.error = message;
+  } finally {
+    state.loading = false;
+    setProgress(null);
+    render();
+  }
+}
+
+async function loadQueue() {
   const [waiting, cancelled, done, inProgress] = await Promise.all([
     listAll("in_review"),
     listAll("cancelled"),
@@ -146,17 +479,20 @@ async function load() {
   // Bodies: drafts for the 问课单 reference and the recipient, asks for their
   // options, proposals for the changed file. A body that fails to load leaves
   // the card ungrouped rather than failing the page.
-  const needBody = waiting.filter((issue) => classifyCard(issue.title) !== "other");
+  const needBody = waiting.filter((issue) => classifyCard(issue.title) !== CARD_OTHER);
   let loaded = 0;
+  setProgress({ done: 0, total: needBody.length });
   const bodies = await mapLimited(needBody, DETAIL_CONCURRENCY, async (issue) => {
-    const detail = await call("GET", `/issues/${issue.id}`);
-    if (++loaded % 50 === 0) {
-      state.message = `加载正文 ${loaded}/${needBody.length}…`;
-      render();
+    try {
+      return await call("GET", `/issues/${issue.id}`);
+    } finally {
+      setProgress({ done: ++loaded, total: needBody.length });
     }
-    return detail;
   });
-  state.details = new Map(bodies.filter(Boolean).map((issue) => [issue.id, issue]));
+  const details = new Map(bodies.filter(Boolean).map((issue) => [issue.id, issue]));
+  for (const [id, issue] of state.details) if (!details.has(id) && classifyCard(issue.title) === CARD_OTHER) details.set(id, issue);
+  state.details = details;
+  setProgress({ indeterminate: true });
 
   const now = Date.now();
   state.groups = groupQueue(
@@ -168,7 +504,8 @@ async function load() {
     }),
     now,
   );
-  const drafts = state.groups.find((group) => group.type === CARD_DRAFT).items;
+  state.byId = new Map(state.groups.flatMap((group) => group.items.map((item) => [item.id, item])));
+  const drafts = groupItems(CARD_DRAFT);
 
   state.stale = [];
   for (const item of drafts) {
@@ -182,14 +519,20 @@ async function load() {
 
   const { current, superseded } = findSupersededDrafts(drafts);
   state.superseded = superseded;
-  state.supersededOff.clear();
+  state.supersededKept = new Map(superseded.map(({ item, kept }) => [item.id, kept]));
   state.olderCount = new Map([...current].map(([id, older]) => [id, older.length]));
 
   await linkAsks(drafts, [...done, ...cancelled, ...inProgress]);
 
   state.selected.clear();
-  state.message = "";
-  render();
+  state.armed = null;
+  if (!state.loaded && !groupItems(state.tab).length) {
+    state.tab = QUEUE_TABS.find(({ type }) => groupItems(type).length)?.type ?? state.tab;
+  }
+}
+
+function groupItems(type) {
+  return state.groups.find((group) => group.type === type)?.items ?? [];
 }
 
 // Each ask lists the drafts it names; drafts that already left the queue get
@@ -204,7 +547,7 @@ async function linkAsks(waitingDrafts, otherIssues) {
   state.askLinks = new Map();
   state.citedBy = new Map();
   const decided = new Map();
-  for (const ask of state.groups.find((group) => group.type === CARD_ASK).items) {
+  for (const ask of groupItems(CARD_ASK)) {
     const askNumber = ask.title.match(/^(Q\d+)/)?.[1] ?? ask.identifier;
     const links = referencedDrafts(ask.title, ask.description).map((number) => {
       const draft = byNumber.get(number) ?? null;
@@ -227,6 +570,18 @@ async function linkAsks(waitingDrafts, otherIssues) {
   }
 }
 
+// "Other" cards are not read on load; their body is fetched when a row opens.
+async function ensureDetail(item) {
+  if (state.details.has(item.id)) return;
+  try {
+    const detail = await call("GET", `/issues/${item.id}`);
+    state.details.set(item.id, detail);
+  } catch {
+    state.details.set(item.id, { description: null });
+  }
+  renderList();
+}
+
 // ---- actions --------------------------------------------------------------
 
 async function postBatch(issueIds, content) {
@@ -242,36 +597,56 @@ async function postBatch(issueIds, content) {
 async function run(label, work) {
   if (state.busy) return;
   state.busy = true;
-  state.armed = null;
-  state.message = `${label}中…`;
+  disarm();
   render();
   try {
     const { ok, failed } = await work();
-    state.message = `${label}：成功 ${ok} 条` + (failed.length ? `，失败 ${failed.length} 条（${failed.join("；")}）` : "");
+    toast(resultToast(label, ok, failed));
+    state.busy = false;
     await load();
   } catch (error) {
-    state.message = `${label}失败：${error.message ?? error}`;
-    render();
+    toast({ kind: "error", title: `${label}失败：${error?.message ?? error}`, details: [], sticky: true });
   } finally {
     state.busy = false;
     render();
   }
 }
 
+function cardLabel(id) {
+  const item = state.byId.get(id) ?? state.details.get(id);
+  return item ? cardNumber(item) : id;
+}
+
 function summarize(results, refused = []) {
   const failed = [
-    ...results.filter((item) => item.status !== "ok").map((item) => `${item.issue_id} ${item.error ?? item.status}`),
-    ...refused.map((item) => `${item.issue_id} ${item.error}`),
+    ...results.filter((item) => item.status !== "ok").map((item) => `${cardLabel(item.issue_id)} ${item.error ?? item.status}`),
+    ...refused.map((item) => `${cardLabel(item.issue_id)} ${item.error}`),
   ];
   return { ok: results.filter((item) => item.status === "ok").length, failed };
 }
 
-function batchDecision(decision, reason) {
+const DECISION_LABEL = { [DECISION_APPROVE]: "同意", [DECISION_REVISE]: "修改", [DECISION_REJECT]: "不要" };
+
+function batchDecision(decision) {
   const selected = [...state.selected.values()];
+  const reason = barReason.value;
+  if (decision !== DECISION_APPROVE && !reason.trim()) {
+    disarm();
+    toast({
+      kind: "error",
+      title: decision === DECISION_REVISE ? "批量修改需要先填写修改后的内容" : `批量${rejectLabel(selected)}需要先填写理由`,
+      details: [],
+      sticky: false,
+    });
+    barReason.focus();
+    return;
+  }
   const plan = planBatch(selected, decision, reason);
-  return run(decision === DECISION_APPROVE ? "批量同意" : "批量不要", async () => {
+  const label = `批量${decision === DECISION_REJECT ? rejectLabel(selected) : DECISION_LABEL[decision]}`;
+  return run(label, async () => {
     const results = [];
     for (const { content, issue_ids } of plan.calls) results.push(...(await postBatch(issue_ids, content)));
+    if (results.some((item) => item.status === "ok")) barReason.value = "";
     return summarize(results, plan.refused);
   });
 }
@@ -279,11 +654,14 @@ function batchDecision(decision, reason) {
 function answerAsk(issue, choice, text) {
   const result = text != null ? { content: text.trim() } : askAnswerComment(issue.description, choice);
   if (result.error || !result.content) {
-    state.message = result.error ?? "请先写答案";
-    render();
+    toast({ kind: "error", title: result.error ?? "请先写答案", details: [], sticky: false });
     return;
   }
-  return run(`回复 ${issue.identifier}`, async () => summarize(await postBatch([issue.id], result.content)));
+  return run(`回复 ${cardNumber(issue)}`, async () => {
+    const outcome = summarize(await postBatch([issue.id], result.content));
+    if (outcome.ok) state.askReplies.delete(issue.id);
+    return outcome;
+  });
 }
 
 function closeout(items) {
@@ -295,17 +673,18 @@ function closeout(items) {
 }
 
 // One reject per kept draft: the reason names the draft that replaced them.
-function rejectSuperseded(entries) {
+function rejectSuperseded(items) {
   return run("作废旧版本", async () => {
     const byKept = new Map();
-    for (const { item, kept } of entries) {
+    for (const item of items) {
+      const kept = state.supersededKept.get(item.id);
       if (!byKept.has(kept.id)) byKept.set(kept.id, { kept, items: [] });
       byKept.get(kept.id).items.push(item);
     }
     const results = [];
     const refused = [];
-    for (const { kept, items } of byKept.values()) {
-      const plan = planBatch(items, DECISION_REJECT, supersededReason(kept));
+    for (const { kept, items: older } of byKept.values()) {
+      const plan = planBatch(older, DECISION_REJECT, supersededReason(kept));
       refused.push(...plan.refused);
       for (const { content, issue_ids } of plan.calls) results.push(...(await postBatch(issue_ids, content)));
     }
@@ -313,41 +692,88 @@ function rejectSuperseded(entries) {
   });
 }
 
-// Sandboxed frames cannot open confirm(); a destructive-looking action needs a
-// second click instead.
-function armed(key, label, action) {
-  const button = el("button", { disabled: state.busy }, state.armed === key ? `确认${label}？` : label);
-  button.onclick = () => {
-    if (state.armed !== key) {
-      state.armed = key;
-      render();
-      return;
-    }
-    action();
-  };
-  return button;
+// Sandboxed frames cannot open confirm(); every action that posts a comment
+// for someone else to execute needs a second click instead.
+let armTimer = null;
+function arm(key) {
+  state.armed = key;
+  clearTimeout(armTimer);
+  armTimer = setTimeout(() => {
+    state.armed = null;
+    render();
+  }, ARM_MS);
 }
 
-// ---- view -----------------------------------------------------------------
+function disarm() {
+  clearTimeout(armTimer);
+  state.armed = null;
+}
+
+function armedButton(key, label, action, { variant = "", count } = {}) {
+  const isArmed = state.armed === key;
+  const text = isArmed ? `确认${label}${count ? ` ${count} 条` : ""}？` : label;
+  return el("button", {
+    class: `btn ${variant}${isArmed ? " armed" : ""}`,
+    disabled: state.busy,
+    onclick: (event) => {
+      event.stopPropagation();
+      if (!isArmed) {
+        arm(key);
+        render();
+        return;
+      }
+      disarm();
+      action();
+    },
+  }, text);
+}
+
+// ---- toasts ---------------------------------------------------------------
+
+let toastId = 0;
+function toast({ kind, title, details, sticky }) {
+  const entry = { id: ++toastId, kind, title, details, open: false };
+  state.toasts = [...state.toasts.slice(-3), entry];
+  if (!sticky) setTimeout(() => dismiss(entry.id), TOAST_MS);
+  renderToasts();
+}
+
+function dismiss(id) {
+  state.toasts = state.toasts.filter((entry) => entry.id !== id);
+  renderToasts();
+}
+
+// ---- view helpers ---------------------------------------------------------
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(props)) {
-    if (name === "style") node.style.cssText = value;
-    else if (name in node) node[name] = value;
-    else node.setAttribute(name, value);
+    if (value == null || value === false) continue;
+    if (name in node && !name.includes("-")) node[name] = value;
+    else node.setAttribute(name, value === true ? "" : value);
   }
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child == null || child === false) continue;
     node.append(child instanceof Node ? child : String(child));
   }
   return node;
 }
 
-const muted = "color:var(--muted-foreground)";
+function badge(text, tone = "") {
+  return el("span", { class: `badge ${tone}` }, text);
+}
 
-function checkbox(checked, onchange) {
-  return el("input", { type: "checkbox", checked, disabled: state.busy, onchange: (event) => onchange(event.target.checked) });
+function checkbox(checked, onchange, { indeterminate = false, label } = {}) {
+  return el("input", {
+    type: "checkbox",
+    class: "check",
+    checked,
+    indeterminate: indeterminate && !checked,
+    disabled: state.busy,
+    "aria-label": label,
+    onclick: (event) => event.stopPropagation(),
+    onchange: (event) => onchange(event.target.checked),
+  });
 }
 
 function select(items, on) {
@@ -355,316 +781,491 @@ function select(items, on) {
     if (on) state.selected.set(item.id, item);
     else state.selected.delete(item.id);
   }
+  disarm();
   render();
 }
 
+function toggle(set, key) {
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+}
+
+const INTERACTIVE = "input, button, a, textarea, label";
+
+function row(item, { selectable, badges = [], expandable = true }) {
+  const selected = state.selected.has(item.id);
+  const open = state.expanded.has(item.id);
+  const node = el(
+    "div",
+    {
+      class: "row",
+      id: `row-${item.id}`,
+      role: "row",
+      "aria-selected": selectable ? String(selected) : null,
+      "aria-expanded": expandable ? String(open) : null,
+      onclick: (event) => {
+        if (!expandable || event.target.closest(INTERACTIVE)) return;
+        toggle(state.expanded, item.id);
+        if (state.expanded.has(item.id) && classifyCard(item.title) === CARD_OTHER) ensureDetail(item);
+        renderList();
+      },
+    },
+    el("span", {}, selectable ? checkbox(selected, (on) => select([item], on), { label: `选择 ${cardNumber(item)}` }) : null),
+    el("span", { class: "num", title: item.identifier }, cardNumber(item)),
+    el("span", { class: "title", title: item.title }, displayTitle(item)),
+    el("span", { class: "badges" }, badges.filter(Boolean)),
+    el("span", { class: "wait", title: `等待 ${formatWaiting(item.waiting)}` }, formatWaiting(item.waiting)),
+  );
+  return node;
+}
+
+function detailCard(item) {
+  const info = classifyCard(item.title) === CARD_PROPOSAL ? item.proposal ?? {} : {};
+  const fields = [
+    ["理由", info.reason],
+    ["依据", info.basis],
+    ["内容", info.content],
+  ].filter(([, value]) => value);
+  const pendingBody = classifyCard(item.title) === CARD_OTHER && !state.details.has(item.id);
+  const text = pendingBody ? "正在读取正文…" : (state.details.get(item.id)?.description ?? item.description) || "（没有正文）";
+  return el(
+    "div",
+    { class: "detail" },
+    el(
+      "div",
+      { class: "card" },
+      fields.length
+        ? el("div", { class: "fields" }, fields.map(([label, value]) => [el("span", { class: "field-label" }, label), el("span", { class: "field-value" }, value)]))
+        : null,
+      el("div", { class: "fulltext" }, text),
+    ),
+  );
+}
+
+function withDetail(item, node) {
+  return state.expanded.has(item.id) ? [node, detailCard(item)] : [node];
+}
+
 function jumpTo(id) {
+  state.tab = CARD_DRAFT;
+  state.query = "";
+  searchInput.value = "";
+  if (state.supersededKept.has(id)) state.supersededOpen = true;
+  render();
   const target = document.getElementById(`row-${id}`);
   if (!target) return;
   target.scrollIntoView({ block: "center" });
-  target.style.background = "var(--accent)";
-  setTimeout(() => (target.style.background = ""), 1500);
+  target.classList.remove("flash");
+  void target.offsetWidth;
+  target.classList.add("flash");
 }
 
-function row(item, { selectable, marks = [], anchor = true }) {
-  const box = selectable ? checkbox(state.selected.has(item.id), (on) => select([item], on)) : null;
-  return el(
-    "li",
-    { id: anchor ? `row-${item.id}` : "", style: "display:flex; gap:8px; align-items:baseline; padding:4px 0" },
-    box,
-    el("span", { style: `${muted}; min-width:64px` }, item.identifier),
-    el("span", { style: "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap", title: item.title }, item.title),
-    marks.map((mark) => el("span", { style: `${muted}; white-space:nowrap; font-size:var(--text-xs, 12px)` }, mark)),
-    el("span", { style: `${muted}; white-space:nowrap` }, `等待 ${formatWaiting(item.waiting)}`),
-  );
+// ---- tab bodies -----------------------------------------------------------
+
+function proposalBadges(item) {
+  const info = item.proposal ?? {};
+  return [info.tag ? badge(info.tag, "info") : null, info.change ? badge(info.change) : null];
 }
 
-function draftMarks(item) {
-  const marks = [];
+function groupHead({ label, items, open, onToggle, hint }) {
+  const on = items.filter((item) => state.selected.has(item.id)).length;
+  return [
+    el(
+      "div",
+      { class: "group-head", role: "button", tabindex: "0", "aria-expanded": String(open), onclick: (event) => {
+        if (event.target.closest(INTERACTIVE)) return;
+        onToggle();
+      }, onkeydown: (event) => {
+        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onToggle();
+      } },
+      el("span", {}, checkbox(on === items.length && items.length > 0, (checked) => select(items, checked), { indeterminate: on > 0, label: `全选 ${label}` })),
+      el("span", { class: "chevron", "aria-hidden": "true" }),
+      el("span", { class: "path", title: label }, label),
+      el("span", { class: "count" }, `${items.length} 条`),
+    ),
+    open && hint ? el("div", { class: "group-hint" }, hint) : null,
+  ];
+}
+
+function proposalBody(items) {
+  const visible = visibleSelectable();
+  if (!visible.length) return emptyState(items.length ? "没有符合筛选的提案" : "没有等待中的经验提案");
+  return groupProposals(visible).map(({ path, items: groupItemsList }) => {
+    const open = state.openGroups.has(path);
+    return el(
+      "div",
+      { class: "group" },
+      groupHead({ label: path, items: groupItemsList, open, onToggle: () => {
+        toggle(state.openGroups, path);
+        renderList();
+      } }),
+      open
+        ? el("div", { class: "group-body" }, groupItemsList.flatMap((item) => withDetail(item, row(item, { selectable: true, badges: proposalBadges(item) }))))
+        : null,
+    );
+  });
+}
+
+function draftBadges(item) {
   const older = state.olderCount.get(item.id);
-  if (older) marks.push(`另有 ${older} 条旧版本`);
   const cited = state.citedBy.get(item.id);
-  if (cited) marks.push(`被 ${cited.join("、")} 引用`);
-  return marks;
+  return [cited ? badge(`被 ${cited.join("、")} 引用`, "info") : null, older ? badge(`另有 ${older} 条旧版本`, "warning") : null];
 }
 
-function draftLinks(item) {
-  const links = state.askLinks.get(item.id);
-  if (!links) return null;
+function staleNotice() {
+  if (!state.stale.length) return null;
   return el(
     "div",
-    { style: "display:grid; gap:2px; padding-left:72px" },
-    links.map(({ number, draft, decision }) => {
-      if (!draft) return el("div", { style: muted }, `引用 ${number}：未找到这条草稿`);
-      const waiting = draft.status === "in_review";
-      const label = el(
-        waiting ? "a" : "span",
-        waiting ? { href: "#", onclick: (event) => (event.preventDefault(), jumpTo(draft.id)) } : {},
-        number,
-      );
-      return el(
-        "div",
-        { style: muted },
-        "引用 ",
-        label,
-        ` · ${STATUS_TEXT[draft.status] ?? draft.status_name ?? draft.status} · ${truncateText(draft.title, 80)}`,
-        decision ? ` · 决策：${decision}` : null,
-      );
-    }),
-  );
-}
-
-function proposalRow(item) {
-  const info = item.proposal ?? {};
-  const open = state.expanded.has(item.id);
-  const toggle = el(
-    "button",
-    {
-      style: "font-size:var(--text-xs, 12px)",
-      onclick: () => {
-        if (open) state.expanded.delete(item.id);
-        else state.expanded.add(item.id);
-        render();
-      },
-    },
-    open ? "收起" : "理由 / 依据",
-  );
-  return el(
-    "li",
-    { style: "display:grid; gap:2px; padding:2px 0" },
-    row(item, { selectable: true, marks: [info.tag ? `[${info.tag}]` : null, info.change].filter(Boolean) }),
-    el("div", { style: "padding-left:96px; display:flex; gap:8px; align-items:baseline" }, toggle,
-      open ? null : el("span", { style: `${muted}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap` }, info.reason ? `理由：${truncateText(info.reason, 60)}` : "")),
-    open
-      ? el(
-          "div",
-          { style: "padding-left:96px; display:grid; gap:4px" },
-          info.reason ? el("div", {}, `理由：${info.reason}`) : null,
-          info.basis ? el("div", {}, `依据：${info.basis}`) : null,
-          el("pre", { style: `${muted}; white-space:pre-wrap; margin:0; font:inherit` }, item.description || "（正文未加载）"),
-        )
+    { class: "notice" },
+    el("span", { class: "notice-title" }, `建议收口 ${state.stale.length} 条`),
+    el("span", { class: "notice-text" }, "这些草稿引用的问课单已停止或已确定。收口评论以 // 开头，只留在看板上，不改状态。",
+      " ",
+      el("button", { class: "link", "aria-expanded": String(state.staleOpen), onclick: () => {
+        state.staleOpen = !state.staleOpen;
+        renderList();
+      } }, state.staleOpen ? "收起" : "查看")),
+    armedButton("closeout", "发收口评论", () => closeout(state.stale), { variant: "outline", count: state.stale.length }),
+    state.staleOpen
+      ? el("div", { class: "rows" }, state.stale.map((item) => row(item, { selectable: false, expandable: false, badges: [badge(`${item.order} ${item.ending}`, "warning")] })))
       : null,
   );
 }
 
-function proposalSection(group) {
-  const tags = proposalTags(group.items);
-  const visible = filterProposals(group.items, { tags: state.tagFilter, query: state.query });
-  const allOn = visible.length > 0 && visible.every((item) => state.selected.has(item.id));
-  const search = el("input", { placeholder: "搜索标题", value: state.query, style: "min-width:160px" });
-  search.onchange = () => {
-    state.query = search.value;
-    render();
-  };
-  const chips = tags.map(({ tag, count }) => {
-    const on = state.tagFilter.has(tag);
-    return el(
-      "button",
-      {
-        style: on ? "background:var(--primary); color:var(--primary-foreground)" : "",
-        onclick: () => {
-          if (on) state.tagFilter.delete(tag);
-          else state.tagFilter.add(tag);
-          render();
-        },
-      },
-      `[${tag}] ${count}`,
-    );
-  });
-  const filters = el(
-    "div",
-    { style: "display:flex; gap:6px; align-items:center; flex-wrap:wrap" },
-    checkbox(allOn, (on) => select(visible, on)),
-    el("span", { style: muted }, `筛选结果 ${visible.length} 条`),
-    chips,
-    search,
-  );
-  const groups = groupProposals(visible).map(({ path, items }) => {
-    const open = state.openGroups.has(path);
-    const groupOn = items.every((item) => state.selected.has(item.id));
-    return el(
-      "li",
-      { style: "padding:4px 0; border-bottom:1px solid var(--border)" },
+function draftBody(items) {
+  const current = visibleSelectable();
+  const superseded = state.superseded.map(({ item }) => item).filter((item) => matchesQuery(item, state.query));
+  const nodes = [staleNotice()];
+  if (!current.length && !superseded.length) {
+    nodes.push(emptyState(items.length ? "没有符合筛选的草稿" : "没有等待中的草稿"));
+    return nodes;
+  }
+  nodes.push(...current.flatMap((item) => withDetail(item, row(item, { selectable: true, badges: draftBadges(item) }))));
+  if (superseded.length) {
+    const open = state.supersededOpen;
+    nodes.push(
       el(
         "div",
-        { style: "display:flex; gap:8px; align-items:center" },
-        checkbox(groupOn, (on) => select(items, on)),
-        el(
-          "button",
-          {
-            style: "flex:1; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit",
-            onclick: () => {
-              if (open) state.openGroups.delete(path);
-              else state.openGroups.add(path);
-              render();
-            },
+        { class: "group", style: "margin-top:8px" },
+        groupHead({
+          label: "疑似被覆盖",
+          items: superseded,
+          open,
+          onToggle: () => {
+            state.supersededOpen = !open;
+            renderList();
           },
-          `${open ? "▾" : "▸"} ${path}`,
-        ),
-        el("span", { style: muted }, `${items.length} 条`),
+          hint: "同一收件人、同一 REQ/WK 单号（或 10 分钟内）的旧版本。勾选后用底部的「作废旧版本」发「不要 已被新草稿 Dxxx 替代」。",
+        }),
+        open
+          ? el("div", { class: "group-body" }, superseded.flatMap((item) => {
+              const kept = state.supersededKept.get(item.id);
+              return withDetail(item, row(item, { selectable: true, badges: [badge(`→ ${draftNumber(kept.title) ?? kept.identifier}`), ...draftBadges(item)] }));
+            }))
+          : null,
       ),
-      open ? el("ul", { style: "list-style:none; margin:0; padding:0 0 0 24px" }, items.map(proposalRow)) : null,
     );
+  }
+  return nodes;
+}
+
+function askBlock(item) {
+  const options = parseAskOptions(item.description);
+  const links = state.askLinks.get(item.id) ?? [];
+  const reply = el("input", {
+    class: "field",
+    placeholder: options.length ? "或直接写答案" : "直接写答案",
+    value: state.askReplies.get(item.id) ?? "",
+    disabled: state.busy,
+    oninput: (event) => state.askReplies.set(item.id, event.target.value),
+    onkeydown: (event) => {
+      if (event.key === "Enter" && !event.isComposing) answerAsk(item, null, reply.value);
+    },
   });
   return el(
-    "section",
-    {},
-    el("h3", {}, `${group.label}（${group.items.length}）`),
-    filters,
-    el("ul", { style: "list-style:none; margin:0; padding:0" }, groups),
+    "div",
+    { class: "ask" },
+    options.length
+      ? el("div", { class: "options", role: "group", "aria-label": "选项" }, options.map((option) => {
+          const key = `ask:${item.id}:${option.letter}`;
+          const isArmed = state.armed === key;
+          return el(
+            "button",
+            {
+              class: `option${isArmed ? " armed" : ""}`,
+              disabled: state.busy,
+              title: isArmed ? "再点一次发出" : `回复 ${option.letter}`,
+              onclick: () => {
+                if (!isArmed) {
+                  arm(key);
+                  renderList();
+                  return;
+                }
+                disarm();
+                answerAsk(item, option.letter);
+              },
+            },
+            el("span", { class: "option-key" }, option.letter),
+            el("span", { class: "option-text" }, option.text),
+            isArmed ? el("span", { class: "option-confirm" }, "再点一次发出") : null,
+          );
+        }))
+      : null,
+    el("div", { class: "reply" }, reply, el("button", { class: "btn outline", disabled: state.busy, onclick: () => answerAsk(item, null, reply.value) }, "回复")),
+    links.length
+      ? el("div", { class: "refs" }, links.map(({ number, draft, decision }) => {
+          if (!draft) {
+            return el("div", { class: "ref" }, el("span", { class: "num" }, number), badge("未找到"), el("span", { class: "title" }, "队列和近期卡片里没有这条草稿"), null);
+          }
+          const waiting = draft.status === "in_review";
+          return el(
+            "div",
+            { class: "ref" },
+            el("span", { class: "num" }, number),
+            badge(STATUS_TEXT[draft.status] ?? draft.status_name ?? draft.status, STATUS_TONE[draft.status] ?? ""),
+            el("span", { class: "title", title: draft.title }, truncateText(displayTitle(draft), 80)),
+            waiting ? el("button", { class: "btn", onclick: () => jumpTo(draft.id) }, "跳转") : el("span"),
+            decision ? el("span", { class: "decision" }, `决策：${decision}`) : null,
+          );
+        }))
+      : null,
   );
 }
 
-function draftSection(group) {
-  const supersededIds = new Set(state.superseded.map(({ item }) => item.id));
-  const current = group.items.filter((item) => !supersededIds.has(item.id));
-  const chosen = state.superseded.filter(({ item }) => !state.supersededOff.has(item.id));
-  const sub = state.superseded.length
-    ? el(
-        "div",
-        { style: "padding:8px 0 0 16px" },
-        el(
-          "h4",
-          { style: "display:flex; gap:8px; align-items:center; margin:0" },
-          `疑似被覆盖（${state.superseded.length}）`,
-          armed("superseded", `作废选中的 ${chosen.length} 条`, () => rejectSuperseded(chosen)),
-        ),
-        el("p", { style: `${muted}; margin:4px 0` }, "同一收件人、同一 REQ/WK 单号（或 10 分钟内）的旧版本。发出「不要 已被新草稿 Dxxx 替代」。"),
-        el(
-          "ul",
-          { style: "list-style:none; margin:0; padding:0" },
-          state.superseded.map(({ item, kept }) =>
-            el(
-              "li",
-              { style: "display:flex; gap:8px; align-items:baseline" },
-              checkbox(!state.supersededOff.has(item.id), (on) => {
-                if (on) state.supersededOff.delete(item.id);
-                else state.supersededOff.add(item.id);
-                render();
-              }),
-              el("div", { style: "flex:1; min-width:0" }, row(item, { selectable: false, marks: [`→ ${draftNumber(kept.title) ?? kept.identifier}`] })),
-            ),
-          ),
-        ),
-      )
-    : null;
-  return el(
-    "section",
-    {},
-    el("h3", {}, `${group.label}（${group.items.length}）`),
-    el("ul", { style: "list-style:none; margin:0; padding:0" }, current.map((item) => row(item, { selectable: true, marks: draftMarks(item) }))),
-    sub,
-  );
+function askBody(items) {
+  const visible = items.filter((item) => matchesQuery(item, state.query));
+  if (!visible.length) return emptyState(items.length ? "没有符合筛选的请教" : "没有等待回复的请教");
+  return visible.flatMap((item) => [row(item, { selectable: false, expandable: false }), askBlock(item)]);
 }
 
-function askRow(item) {
-  const options = parseAskOptions(item.description);
-  const reply = el("input", { placeholder: "直接写答案", style: "flex:1; min-width:120px" });
-  return el(
-    "li",
-    { id: `row-${item.id}`, style: "display:grid; gap:4px; padding:6px 0; border-bottom:1px solid var(--border)" },
-    row(item, { selectable: false, anchor: false }),
-    draftLinks(item),
-    options.map((option) =>
-      el("div", { style: `${muted}; padding-left:72px` }, `${option.letter}. ${option.text}`),
+function otherBody(items) {
+  const visible = items.filter((item) => matchesQuery(item, state.query));
+  if (!visible.length) return emptyState(items.length ? "没有符合筛选的卡片" : "没有其他等待中的卡片");
+  return visible.flatMap((item) => withDetail(item, row(item, { selectable: false })));
+}
+
+function emptyState(title, extra) {
+  return el("div", { class: `empty${extra ? " error" : ""}` }, el("div", { class: "empty-title" }, title), extra);
+}
+
+function skeleton() {
+  return Array.from({ length: 10 }, (_, index) =>
+    el("div", { class: "skeleton", "aria-hidden": "true" },
+      el("span"),
+      el("span", { style: "width:40px" }),
+      el("span", { style: `width:${40 + ((index * 37) % 45)}%` }),
+      el("span", { style: "width:40px; justify-self:end" }),
     ),
-    el(
-      "div",
-      { style: "display:flex; gap:6px; padding-left:72px; flex-wrap:wrap" },
-      options.map((option) =>
-        el("button", { disabled: state.busy, onclick: () => answerAsk(item, option.letter) }, `选 ${option.letter}`),
+  );
+}
+
+// Rows the keyboard shortcut and the "全选" checkboxes act on: the current
+// tab's selectable rows that pass the search and tag filters. Collapsed
+// proposal groups count; the 疑似被覆盖 group has its own checkbox and is never
+// swept in by ⌘A.
+function visibleSelectable() {
+  if (state.tab === CARD_PROPOSAL) {
+    return filterProposals(groupItems(CARD_PROPOSAL), { tags: state.tagFilter, query: state.query });
+  }
+  if (state.tab === CARD_DRAFT) {
+    return groupItems(CARD_DRAFT).filter((item) => !state.supersededKept.has(item.id) && matchesQuery(item, state.query));
+  }
+  return [];
+}
+
+// ---- shell ----------------------------------------------------------------
+
+const style = el("style", {}, STYLE);
+const tabsNode = el("div", { class: "segmented", role: "tablist", "aria-label": "卡片类型" });
+const searchInput = el("input", {
+  class: "search",
+  type: "search",
+  placeholder: "搜索编号或标题",
+  "aria-label": "搜索",
+  oninput: () => {
+    state.query = searchInput.value;
+    renderList();
+    renderBar();
+  },
+});
+const chipsNode = el("div", { class: "chips" });
+const refreshButton = el("button", { class: "btn outline", onclick: () => load() }, "刷新");
+const progressNode = el("div", { class: "progress", hidden: true }, el("span"));
+const listNode = el("div", { class: "scroll", role: "grid", "aria-label": "审批队列" });
+const barCount = el("span", { class: "bar-count" });
+const barReason = el("input", { class: "field", placeholder: "修改后的内容 / 不要的理由", "aria-label": "修改内容或理由" });
+const barActions = el("div", { class: "bar-actions" });
+const barNode = el("div", { class: "bar", hidden: true, role: "toolbar", "aria-label": "批量操作" }, barCount, barReason, barActions);
+const toastsNode = el("div", { class: "toasts", "aria-live": "polite" });
+const appNode = el(
+  "div",
+  { class: "app" },
+  el("div", { class: "toolbar" }, tabsNode, searchInput, chipsNode, refreshButton, progressNode),
+  listNode,
+  barNode,
+  toastsNode,
+);
+
+document.head.append(style);
+document.getElementById("root").replaceChildren(appNode);
+
+function renderTabs() {
+  tabsNode.replaceChildren(
+    ...QUEUE_TABS.map(({ type, label }) =>
+      el(
+        "button",
+        {
+          class: "segment",
+          role: "tab",
+          "aria-selected": String(state.tab === type),
+          onclick: () => {
+            if (state.tab === type) return;
+            state.tab = type;
+            disarm();
+            render();
+            listNode.scrollTop = 0;
+          },
+        },
+        label,
+        state.loaded ? el("span", { class: "count" }, String(groupItems(type).length)) : null,
       ),
-      reply,
-      el("button", { disabled: state.busy, onclick: () => answerAsk(item, null, reply.value) }, "回复"),
     ),
   );
+}
+
+function renderChips() {
+  if (state.tab !== CARD_PROPOSAL) {
+    chipsNode.replaceChildren();
+    return;
+  }
+  const tags = proposalTags(groupItems(CARD_PROPOSAL));
+  chipsNode.replaceChildren(
+    ...tags.map(({ tag, count }) =>
+      el(
+        "button",
+        {
+          class: "chip",
+          "aria-pressed": String(state.tagFilter.has(tag)),
+          onclick: () => {
+            toggle(state.tagFilter, tag);
+            render();
+          },
+        },
+        tag,
+        el("span", { class: "count" }, String(count)),
+      ),
+    ),
+  );
+}
+
+function renderList() {
+  let body;
+  if (!state.loaded && state.error) {
+    body = emptyState(`加载失败：${state.error}`, el("button", { class: "btn outline", onclick: () => load() }, "重试"));
+  } else if (!state.loaded) {
+    body = skeleton();
+  } else {
+    const items = groupItems(state.tab);
+    if (state.tab === CARD_PROPOSAL) body = proposalBody(items);
+    else if (state.tab === CARD_DRAFT) body = draftBody(items);
+    else if (state.tab === CARD_ASK) body = askBody(items);
+    else body = otherBody(items);
+  }
+  const scroll = listNode.scrollTop;
+  listNode.replaceChildren(...[body].flat(Infinity).filter(Boolean));
+  listNode.scrollTop = scroll;
+}
+
+function renderBar() {
+  const selected = [...state.selected.values()];
+  const visible = selected.length > 0;
+  barNode.hidden = !visible;
+  appNode.classList.toggle("has-bar", visible);
+  listNode.classList.toggle("with-bar", visible);
+  barReason.disabled = state.busy;
+  if (!visible) {
+    barActions.replaceChildren();
+    return;
+  }
+  barCount.textContent = `已选 ${selected.length} 条`;
+  const older = selected.filter((item) => state.supersededKept.has(item.id));
+  const actions = [
+    armedButton("approve", "同意", () => batchDecision(DECISION_APPROVE), { variant: "primary", count: selected.length }),
+    armedButton("revise", "修改", () => batchDecision(DECISION_REVISE), { variant: "secondary", count: selected.length }),
+    armedButton("reject", rejectLabel(selected), () => batchDecision(DECISION_REJECT), { variant: "danger", count: selected.length }),
+    older.length ? armedButton("superseded", `作废旧版本 ${older.length} 条`, () => rejectSuperseded(older), { variant: "danger" }) : null,
+    el("button", { class: "btn", title: "Esc", disabled: state.busy, onclick: () => select(selected, false) }, "取消"),
+  ];
+  barActions.replaceChildren(...actions.filter(Boolean));
+}
+
+function renderToasts() {
+  toastsNode.replaceChildren(
+    ...state.toasts.map((entry) =>
+      el(
+        "div",
+        { class: `toast ${entry.kind}`, role: entry.kind === "success" ? "status" : "alert" },
+        el("span", { class: "toast-dot", "aria-hidden": "true" }),
+        el("span", {}, entry.title),
+        el(
+          "span",
+          { class: "toast-actions" },
+          entry.details.length
+            ? el("button", { class: "btn", onclick: () => {
+                entry.open = !entry.open;
+                renderToasts();
+              } }, entry.open ? "收起" : "明细")
+            : null,
+          el("button", { class: "btn", "aria-label": "关闭", onclick: () => dismiss(entry.id) }, "×"),
+        ),
+        entry.open ? el("ul", { class: "toast-details" }, entry.details.map((line) => el("li", {}, line))) : null,
+      ),
+    ),
+  );
+}
+
+let progressFrame = 0;
+function scheduleProgress() {
+  if (progressFrame) return;
+  progressFrame = requestAnimationFrame(() => {
+    progressFrame = 0;
+    const progress = state.progress;
+    progressNode.hidden = !progress;
+    progressNode.classList.toggle("indeterminate", Boolean(progress?.indeterminate));
+    const bar = progressNode.firstChild;
+    bar.style.width = progress && !progress.indeterminate && progress.total ? `${Math.round((progress.done / progress.total) * 100)}%` : "";
+  });
 }
 
 function render() {
-  const root = document.getElementById("root");
-  const reason = el("input", { placeholder: "不要 / 拒绝的统一理由", style: "min-width:200px", value: state.reason ?? "" });
-  reason.oninput = () => (state.reason = reason.value);
-  const selectedCount = state.selected.size;
-
-  const toolbar = el(
-    "div",
-    { style: "display:flex; gap:8px; align-items:center; flex-wrap:wrap; position:sticky; top:0; background:var(--background); padding:8px 0" },
-    el("strong", { style: "flex:1" }, "审批队列"),
-    el("span", { style: muted }, `已选 ${selectedCount} 条`),
-    armed("approve", "同意", () => batchDecision(DECISION_APPROVE, "")),
-    reason,
-    armed("reject", "不要 / 拒绝", () => {
-      if (!String(state.reason ?? "").trim()) {
-        state.armed = null;
-        state.message = "批量不要需要填写统一理由";
-        render();
-        return;
-      }
-      batchDecision(DECISION_REJECT, state.reason);
-    }),
-    el("button", { disabled: state.busy, onclick: () => load() }, "刷新"),
-  );
-
-  const sections = [];
-  if (state.stale.length) {
-    sections.push(
-      el(
-        "section",
-        {},
-        el(
-          "h3",
-          { style: "display:flex; gap:8px; align-items:center" },
-          `建议收口（${state.stale.length}）`,
-          armed("closeout", "全部发收口评论", () => closeout(state.stale)),
-        ),
-        el("p", { style: muted }, "这些草稿引用的问课单已停止或已确定。收口评论以 // 开头，只留在看板上，不改状态。"),
-        el(
-          "ul",
-          { style: "list-style:none; margin:0; padding:0" },
-          state.stale.map((item) => row({ ...item, title: `${item.title}（${item.order} ${item.ending}）` }, { selectable: false, anchor: false })),
-        ),
-      ),
-    );
-  }
-  for (const group of state.groups) {
-    if (group.type === CARD_DRAFT) {
-      sections.push(draftSection(group));
-      continue;
-    }
-    if (group.type === CARD_PROPOSAL) {
-      sections.push(proposalSection(group));
-      continue;
-    }
-    sections.push(
-      el(
-        "section",
-        {},
-        el("h3", {}, `${group.label}（${group.items.length}）`, group.type === CARD_ASK ? el("span", { style: muted }, " 逐条回复，不能批量") : null),
-        el(
-          "ul",
-          { style: "list-style:none; margin:0; padding:0" },
-          group.type === CARD_ASK
-            ? group.items.map(askRow)
-            : group.items.map((item) => row(item, { selectable: group.batch })),
-        ),
-      ),
-    );
-  }
-
-  root.replaceChildren(
-    el(
-      "div",
-      { style: "padding:16px; display:grid; gap:12px" },
-      toolbar,
-      state.message ? el("div", { style: muted }, state.message) : null,
-      sections,
-    ),
-  );
-  resize();
+  refreshButton.disabled = state.loading || state.busy;
+  renderTabs();
+  renderChips();
+  renderList();
+  renderBar();
+  renderToasts();
 }
 
-load().catch((error) => {
-  // 403 plugin_extension_disabled: an admin has not switched pages on.
-  state.message = `加载失败：${error.message ?? error}`;
-  render();
+// ---- keyboard -------------------------------------------------------------
+
+document.addEventListener("keydown", (event) => {
+  const inField = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && !inField) {
+    const visible = visibleSelectable();
+    if (!visible.length) return;
+    event.preventDefault();
+    select(visible, true);
+    return;
+  }
+  if (event.key === "Escape") {
+    if (inField) event.target.blur();
+    if (state.armed) disarm();
+    if (state.selected.size) state.selected.clear();
+    render();
+  }
 });
+
+requestHeight();
+render();
+load();

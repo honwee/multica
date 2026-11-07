@@ -133,6 +133,22 @@ describe("surface bridge", () => {
     bridge.close();
   });
 
+  it("sends the theme it was connected with as the first message", async () => {
+    const bridge = createSurfaceBridge({ installationId: "installation-1", bridgeToken: TOKEN });
+    const frame = { contentWindow: {} } as unknown as HTMLIFrameElement;
+    const channel = new MessageChannel();
+    const received: unknown[] = [];
+    channel.port2.onmessage = (event) => received.push(event.data);
+    channel.port2.start();
+    const theme = { "--surface-hover": "oklch(0.967 0.001 286.375)", "--issue-row-height": "36px" };
+    bridge.connect(frame, theme);
+    connectMessage(frame.contentWindow, channel.port1);
+
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toEqual({ kind: "theme", theme });
+    bridge.close();
+  });
+
   it("stops answering once closed", async () => {
     const { bridge, port } = connectedBridge();
     port.postMessage({ id: "r1", kind: "action", method: "GET", path: "/context" });
