@@ -225,6 +225,190 @@ function planBatch(selected, decision, input) {
   };
 }
 
+// ---- 经验提案 grouping ------------------------------------------------------
+//
+// A proposal body starts with "#924 [能力] 【缺信息】…" and then indented lines
+// 改动：<path>（追加）/ 内容：… / 理由：… / 依据：…, ending in the footer. Live
+// bodies are multi-line, but a body flattened onto one line still parses: each
+// field runs until the next field label or the footer.
+
+const PROPOSAL_FIELD_STOP = String.raw`(?=\s*(?:改动|内容|理由|依据)[:：]|\s*_评论|$)`;
+
+function proposalField(text, label) {
+  const match = text.match(new RegExp(`${label}[:：]\\s*([\\s\\S]*?)${PROPOSAL_FIELD_STOP}`));
+  const value = match ? match[1].trim() : "";
+  return value || null;
+}
+
+function parseProposal(title, description) {
+  const head = String(title ?? "");
+  const body = String(description ?? "");
+  const firstLine = body.split("\n", 1)[0];
+  const tag = (head.match(/\[([^\[\]\s]{1,12})\]/) ?? firstLine.match(/\[([^\[\]\s]{1,12})\]/))?.[1] ?? null;
+  const change = body.match(/改动[:：]\s*([^\s（(]+)\s*(?:[（(]([^）)\n]+)[）)])?/);
+  return {
+    tag,
+    path: change ? change[1] : null,
+    change: change?.[2] ?? null,
+    content: proposalField(body, "内容"),
+    reason: proposalField(body, "理由"),
+    basis: proposalField(body, "依据"),
+  };
+}
+
+const UNGROUPED = "未分组";
+
+// Proposals (already carrying `.proposal` from parseProposal) grouped by the
+// file they change, largest group first; proposals without a readable body or
+// path go last under 未分组.
+function groupProposals(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = item.proposal?.path ?? UNGROUPED;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups]
+    .map(([path, list]) => ({ path, items: list }))
+    .sort((a, b) => {
+      if ((a.path === UNGROUPED) !== (b.path === UNGROUPED)) return a.path === UNGROUPED ? 1 : -1;
+      return b.items.length - a.items.length || a.path.localeCompare(b.path);
+    });
+}
+
+// Tags present on the proposals with their counts, most frequent first.
+function proposalTags(items) {
+  const counts = new Map();
+  for (const item of items) {
+    const tag = item.proposal?.tag;
+    if (tag) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+// tags: a Set of selected tags (empty = all); query: substring of the title.
+function filterProposals(items, { tags, query } = {}) {
+  const needle = String(query ?? "").trim().toLowerCase();
+  return items.filter((item) => {
+    if (tags?.size && !tags.has(item.proposal?.tag)) return false;
+    if (needle && !String(item.title ?? "").toLowerCase().includes(needle)) return false;
+    return true;
+  });
+}
+
+// ---- superseded drafts ------------------------------------------------------
+//
+// Hermes often rewrites a draft before the first one is decided: D176–D181 are
+// six replies to the same person within a minute, D184/D188/D190 chase the
+// same REQ field three times. Only the newest is "current"; the others are
+// offered for a bulk 「不要 已被新草稿 Dxxx 替代」.
+
+const SUPERSEDE_WINDOW_MINUTES = 10;
+
+const REF_ID = /REQ-\d{8}-[0-9A-F]{8}|WK-\d{8}-[0-9A-F]{6}/;
+
+// "D190 待确认：…" → "D190".
+function draftNumber(title) {
+  const match = String(title ?? "").match(/^(D\d+)\s/);
+  return match ? match[1] : null;
+}
+
+// Who a draft is addressed to. `explicit` is false for 当前会话, whose
+// conversation the title does not name.
+//   发给 dm:gabby：…         → dm:gabby
+//   回复 Lumist.Grace（私聊） → dm:Lumist.Grace
+//   发给 当前会话：…          → 当前会话 (not explicit)
+function draftRecipient(title) {
+  const text = String(title ?? "").replace(/^D\d+\s*待确认[:：]\s*/, "");
+  const reply = text.match(/^回复\s+(.+?)\s*[（(]私聊[）)]/);
+  if (reply) return { key: `dm:${reply[1]}`, explicit: true };
+  const send = text.match(/^发给\s+(.+?)：/);
+  if (!send) return null;
+  const name = send[1].trim();
+  if (name === "当前会话") return { key: name, explicit: false };
+  return { key: name, explicit: true };
+}
+
+// The REQ-/WK- order a draft is about: the title wins over the body.
+function draftReference(title, description) {
+  return String(title ?? "").match(REF_ID)?.[0] ?? String(description ?? "").match(REF_ID)?.[0] ?? null;
+}
+
+// Waiting drafts → { current: Map(keptId → older[]), superseded: [{ item, kept }] }.
+// Same recipient AND (same REQ/WK reference, or neither has one and the older
+// was created within the window of the kept one). A 当前会话 draft only merges
+// on a shared reference.
+function findSupersededDrafts(drafts, windowMinutes = SUPERSEDE_WINDOW_MINUTES) {
+  const buckets = new Map();
+  for (const item of drafts) {
+    const recipient = draftRecipient(item.title);
+    if (!recipient) continue;
+    const ref = draftReference(item.title, item.description);
+    if (!ref && !recipient.explicit) continue;
+    const key = `${recipient.key}\u0000${ref ?? ""}`;
+    if (!buckets.has(key)) buckets.set(key, { ref, items: [] });
+    buckets.get(key).items.push(item);
+  }
+  const current = new Map();
+  const superseded = [];
+  const windowMs = windowMinutes * 60000;
+  for (const { ref, items } of buckets.values()) {
+    const sorted = [...items].sort((a, b) => newestFirst(a, b));
+    let rest = sorted;
+    while (rest.length) {
+      const [kept, ...older] = rest;
+      const keptAt = Date.parse(kept.created_at);
+      const covered = ref ? older : older.filter((item) => keptAt - Date.parse(item.created_at) <= windowMs);
+      if (covered.length) {
+        current.set(kept.id, covered);
+        for (const item of covered) superseded.push({ item, kept });
+      }
+      rest = older.filter((item) => !covered.includes(item));
+    }
+  }
+  return { current, superseded };
+}
+
+function newestFirst(a, b) {
+  const delta = Date.parse(b.created_at) - Date.parse(a.created_at);
+  if (delta) return delta;
+  return (Number(draftNumber(b.title)?.slice(1)) || 0) - (Number(draftNumber(a.title)?.slice(1)) || 0);
+}
+
+function supersededReason(kept) {
+  return `已被新草稿 ${draftNumber(kept.title) ?? kept.identifier} 替代`;
+}
+
+// ---- asks that reference drafts ---------------------------------------------
+
+// "Q30 分身请教：D165 待确认：…" / "B. B 继续用本单，批准 D187 催销售补三样" →
+// ["D165"], ["D187"]. A D inside an id like REQ-…-D1234567 does not count.
+function referencedDrafts(title, description) {
+  const text = `${title ?? ""}\n${description ?? ""}`;
+  const found = [];
+  for (const match of text.matchAll(/(?<![\w-])(D\d+)(?![\w-])/g)) {
+    if (!found.includes(match[1])) found.push(match[1]);
+  }
+  return found;
+}
+
+// First line of the newest comment that carries a protocol decision on a
+// draft, e.g. "同意" or "不要 已被新草稿 D190 替代"; null if none.
+function draftDecisionLine(comments, description) {
+  const verbs = protocolVerbs(CARD_DRAFT, description);
+  const sorted = [...(comments ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const comment of sorted) {
+    const line = String(comment.content ?? "").trim().split("\n", 1)[0].trim();
+    if (line === verbs.approve || line.startsWith(`${verbs.revise} `) || line.startsWith(`${verbs.reject} `)) return line;
+  }
+  return null;
+}
+
+function truncateText(text, max) {
+  const chars = [...String(text ?? "")];
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : chars.join("");
+}
+
 // 审批队列 — the plugin's workspace page.
 //
 // Source of ui/main.js; `node build.mjs` inlines lib/protocol.mjs and writes the
@@ -236,7 +420,7 @@ function planBatch(selected, decision, input) {
 
 const BATCH_LIMIT = 100;
 const PAGE_LIMIT = 200;
-const DETAIL_CONCURRENCY = 5;
+const DETAIL_CONCURRENCY = 8;
 
 // ---- bridge ---------------------------------------------------------------
 
@@ -311,15 +495,30 @@ const state = {
   message: "",
   busy: false,
   armed: null,
+  // 经验提案
+  tagFilter: new Set(),
+  query: "",
+  openGroups: new Set(),
+  expanded: new Set(),
+  // 草稿
+  superseded: [],
+  supersededOff: new Set(),
+  olderCount: new Map(),
+  // 请教 ↔ 草稿
+  askLinks: new Map(),
+  citedBy: new Map(),
 };
+
+const STATUS_TEXT = { in_review: "等待中", done: "已完成", cancelled: "已取消", in_progress: "进行中" };
 
 async function load() {
   state.message = "加载中…";
   render();
-  const [waiting, cancelled, done] = await Promise.all([
+  const [waiting, cancelled, done, inProgress] = await Promise.all([
     listAll("in_review"),
     listAll("cancelled"),
     listAll("done"),
+    listAll("in_progress"),
   ]);
 
   const orders = new Map();
@@ -328,18 +527,35 @@ async function load() {
     if (order) orders.set(order, issue);
   }
 
-  // Drafts need their body for the 问课单 reference; asks for their options.
-  const needBody = waiting.filter((issue) => /^(D|Q)\d+\s/.test(issue.title));
-  const bodies = await mapLimited(needBody, DETAIL_CONCURRENCY, (issue) => call("GET", `/issues/${issue.id}`));
+  // Bodies: drafts for the 问课单 reference and the recipient, asks for their
+  // options, proposals for the changed file. A body that fails to load leaves
+  // the card ungrouped rather than failing the page.
+  const needBody = waiting.filter((issue) => classifyCard(issue.title) !== "other");
+  let loaded = 0;
+  const bodies = await mapLimited(needBody, DETAIL_CONCURRENCY, async (issue) => {
+    const detail = await call("GET", `/issues/${issue.id}`);
+    if (++loaded % 50 === 0) {
+      state.message = `加载正文 ${loaded}/${needBody.length}…`;
+      render();
+    }
+    return detail;
+  });
   state.details = new Map(bodies.filter(Boolean).map((issue) => [issue.id, issue]));
 
   const now = Date.now();
   state.groups = groupQueue(
-    waiting.map((issue) => ({ ...issue, description: state.details.get(issue.id)?.description ?? "" })),
+    waiting.map((issue) => {
+      const description = state.details.get(issue.id)?.description ?? "";
+      const item = { ...issue, description };
+      if (classifyCard(issue.title) === CARD_PROPOSAL) item.proposal = parseProposal(issue.title, description);
+      return item;
+    }),
     now,
   );
+  const drafts = state.groups.find((group) => group.type === CARD_DRAFT).items;
+
   state.stale = [];
-  for (const item of state.groups.find((group) => group.type === CARD_DRAFT).items) {
+  for (const item of drafts) {
     const order = referencedWenkeId(item.title, item.description);
     const orderIssue = order ? orders.get(order) : null;
     const ending = orderIssue ? wenkeEnding(orderIssue.status) : null;
@@ -347,9 +563,52 @@ async function load() {
     if (Date.parse(item.created_at) > Date.parse(orderIssue.updated_at)) continue;
     state.stale.push({ ...item, order, ending });
   }
+
+  const { current, superseded } = findSupersededDrafts(drafts);
+  state.superseded = superseded;
+  state.supersededOff.clear();
+  state.olderCount = new Map([...current].map(([id, older]) => [id, older.length]));
+
+  await linkAsks(drafts, [...done, ...cancelled, ...inProgress]);
+
   state.selected.clear();
   state.message = "";
   render();
+}
+
+// Each ask lists the drafts it names; drafts that already left the queue get
+// their decision comment read so the ask shows what was decided.
+async function linkAsks(waitingDrafts, otherIssues) {
+  const byNumber = new Map();
+  for (const issue of [...otherIssues, ...waitingDrafts]) {
+    const number = draftNumber(issue.title);
+    const known = number ? byNumber.get(number) : null;
+    if (number && (!known || Date.parse(issue.created_at) >= Date.parse(known.created_at))) byNumber.set(number, issue);
+  }
+  state.askLinks = new Map();
+  state.citedBy = new Map();
+  const decided = new Map();
+  for (const ask of state.groups.find((group) => group.type === CARD_ASK).items) {
+    const askNumber = ask.title.match(/^(Q\d+)/)?.[1] ?? ask.identifier;
+    const links = referencedDrafts(ask.title, ask.description).map((number) => {
+      const draft = byNumber.get(number) ?? null;
+      if (draft) {
+        state.citedBy.set(draft.id, [...(state.citedBy.get(draft.id) ?? []), askNumber]);
+        if (draft.status !== "in_review") decided.set(draft.id, draft);
+      }
+      return { number, draft };
+    });
+    if (links.length) state.askLinks.set(ask.id, links);
+  }
+  const ids = [...decided.keys()];
+  const answers = await mapLimited(ids, DETAIL_CONCURRENCY, async (id) => {
+    const [detail, list] = await Promise.all([call("GET", `/issues/${id}`), call("GET", `/issues/${id}/comments`)]);
+    return draftDecisionLine(list?.comments ?? [], detail?.description ?? "");
+  });
+  const decision = new Map(ids.map((id, index) => [id, answers[index]]));
+  for (const links of state.askLinks.values()) {
+    for (const link of links) if (link.draft) link.decision = decision.get(link.draft.id) ?? null;
+  }
 }
 
 // ---- actions --------------------------------------------------------------
@@ -419,6 +678,25 @@ function closeout(items) {
   });
 }
 
+// One reject per kept draft: the reason names the draft that replaced them.
+function rejectSuperseded(entries) {
+  return run("作废旧版本", async () => {
+    const byKept = new Map();
+    for (const { item, kept } of entries) {
+      if (!byKept.has(kept.id)) byKept.set(kept.id, { kept, items: [] });
+      byKept.get(kept.id).items.push(item);
+    }
+    const results = [];
+    const refused = [];
+    for (const { kept, items } of byKept.values()) {
+      const plan = planBatch(items, DECISION_REJECT, supersededReason(kept));
+      refused.push(...plan.refused);
+      for (const { content, issue_ids } of plan.calls) results.push(...(await postBatch(issue_ids, content)));
+    }
+    return summarize(results, refused);
+  });
+}
+
 // Sandboxed frames cannot open confirm(); a destructive-looking action needs a
 // second click instead.
 function armed(key, label, action) {
@@ -452,26 +730,214 @@ function el(tag, props = {}, ...children) {
 
 const muted = "color:var(--muted-foreground)";
 
-function row(item, { selectable }) {
-  const box = selectable
-    ? el("input", {
-        type: "checkbox",
-        checked: state.selected.has(item.id),
-        disabled: state.busy,
-        onchange: (event) => {
-          if (event.target.checked) state.selected.set(item.id, item);
-          else state.selected.delete(item.id);
-          render();
-        },
-      })
-    : null;
+function checkbox(checked, onchange) {
+  return el("input", { type: "checkbox", checked, disabled: state.busy, onchange: (event) => onchange(event.target.checked) });
+}
+
+function select(items, on) {
+  for (const item of items) {
+    if (on) state.selected.set(item.id, item);
+    else state.selected.delete(item.id);
+  }
+  render();
+}
+
+function jumpTo(id) {
+  const target = document.getElementById(`row-${id}`);
+  if (!target) return;
+  target.scrollIntoView({ block: "center" });
+  target.style.background = "var(--accent)";
+  setTimeout(() => (target.style.background = ""), 1500);
+}
+
+function row(item, { selectable, marks = [], anchor = true }) {
+  const box = selectable ? checkbox(state.selected.has(item.id), (on) => select([item], on)) : null;
   return el(
     "li",
-    { style: "display:flex; gap:8px; align-items:baseline; padding:4px 0" },
+    { id: anchor ? `row-${item.id}` : "", style: "display:flex; gap:8px; align-items:baseline; padding:4px 0" },
     box,
     el("span", { style: `${muted}; min-width:64px` }, item.identifier),
     el("span", { style: "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap", title: item.title }, item.title),
+    marks.map((mark) => el("span", { style: `${muted}; white-space:nowrap; font-size:var(--text-xs, 12px)` }, mark)),
     el("span", { style: `${muted}; white-space:nowrap` }, `等待 ${formatWaiting(item.waiting)}`),
+  );
+}
+
+function draftMarks(item) {
+  const marks = [];
+  const older = state.olderCount.get(item.id);
+  if (older) marks.push(`另有 ${older} 条旧版本`);
+  const cited = state.citedBy.get(item.id);
+  if (cited) marks.push(`被 ${cited.join("、")} 引用`);
+  return marks;
+}
+
+function draftLinks(item) {
+  const links = state.askLinks.get(item.id);
+  if (!links) return null;
+  return el(
+    "div",
+    { style: "display:grid; gap:2px; padding-left:72px" },
+    links.map(({ number, draft, decision }) => {
+      if (!draft) return el("div", { style: muted }, `引用 ${number}：未找到这条草稿`);
+      const waiting = draft.status === "in_review";
+      const label = el(
+        waiting ? "a" : "span",
+        waiting ? { href: "#", onclick: (event) => (event.preventDefault(), jumpTo(draft.id)) } : {},
+        number,
+      );
+      return el(
+        "div",
+        { style: muted },
+        "引用 ",
+        label,
+        ` · ${STATUS_TEXT[draft.status] ?? draft.status_name ?? draft.status} · ${truncateText(draft.title, 80)}`,
+        decision ? ` · 决策：${decision}` : null,
+      );
+    }),
+  );
+}
+
+function proposalRow(item) {
+  const info = item.proposal ?? {};
+  const open = state.expanded.has(item.id);
+  const toggle = el(
+    "button",
+    {
+      style: "font-size:var(--text-xs, 12px)",
+      onclick: () => {
+        if (open) state.expanded.delete(item.id);
+        else state.expanded.add(item.id);
+        render();
+      },
+    },
+    open ? "收起" : "理由 / 依据",
+  );
+  return el(
+    "li",
+    { style: "display:grid; gap:2px; padding:2px 0" },
+    row(item, { selectable: true, marks: [info.tag ? `[${info.tag}]` : null, info.change].filter(Boolean) }),
+    el("div", { style: "padding-left:96px; display:flex; gap:8px; align-items:baseline" }, toggle,
+      open ? null : el("span", { style: `${muted}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap` }, info.reason ? `理由：${truncateText(info.reason, 60)}` : "")),
+    open
+      ? el(
+          "div",
+          { style: "padding-left:96px; display:grid; gap:4px" },
+          info.reason ? el("div", {}, `理由：${info.reason}`) : null,
+          info.basis ? el("div", {}, `依据：${info.basis}`) : null,
+          el("pre", { style: `${muted}; white-space:pre-wrap; margin:0; font:inherit` }, item.description || "（正文未加载）"),
+        )
+      : null,
+  );
+}
+
+function proposalSection(group) {
+  const tags = proposalTags(group.items);
+  const visible = filterProposals(group.items, { tags: state.tagFilter, query: state.query });
+  const allOn = visible.length > 0 && visible.every((item) => state.selected.has(item.id));
+  const search = el("input", { placeholder: "搜索标题", value: state.query, style: "min-width:160px" });
+  search.onchange = () => {
+    state.query = search.value;
+    render();
+  };
+  const chips = tags.map(({ tag, count }) => {
+    const on = state.tagFilter.has(tag);
+    return el(
+      "button",
+      {
+        style: on ? "background:var(--primary); color:var(--primary-foreground)" : "",
+        onclick: () => {
+          if (on) state.tagFilter.delete(tag);
+          else state.tagFilter.add(tag);
+          render();
+        },
+      },
+      `[${tag}] ${count}`,
+    );
+  });
+  const filters = el(
+    "div",
+    { style: "display:flex; gap:6px; align-items:center; flex-wrap:wrap" },
+    checkbox(allOn, (on) => select(visible, on)),
+    el("span", { style: muted }, `筛选结果 ${visible.length} 条`),
+    chips,
+    search,
+  );
+  const groups = groupProposals(visible).map(({ path, items }) => {
+    const open = state.openGroups.has(path);
+    const groupOn = items.every((item) => state.selected.has(item.id));
+    return el(
+      "li",
+      { style: "padding:4px 0; border-bottom:1px solid var(--border)" },
+      el(
+        "div",
+        { style: "display:flex; gap:8px; align-items:center" },
+        checkbox(groupOn, (on) => select(items, on)),
+        el(
+          "button",
+          {
+            style: "flex:1; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit",
+            onclick: () => {
+              if (open) state.openGroups.delete(path);
+              else state.openGroups.add(path);
+              render();
+            },
+          },
+          `${open ? "▾" : "▸"} ${path}`,
+        ),
+        el("span", { style: muted }, `${items.length} 条`),
+      ),
+      open ? el("ul", { style: "list-style:none; margin:0; padding:0 0 0 24px" }, items.map(proposalRow)) : null,
+    );
+  });
+  return el(
+    "section",
+    {},
+    el("h3", {}, `${group.label}（${group.items.length}）`),
+    filters,
+    el("ul", { style: "list-style:none; margin:0; padding:0" }, groups),
+  );
+}
+
+function draftSection(group) {
+  const supersededIds = new Set(state.superseded.map(({ item }) => item.id));
+  const current = group.items.filter((item) => !supersededIds.has(item.id));
+  const chosen = state.superseded.filter(({ item }) => !state.supersededOff.has(item.id));
+  const sub = state.superseded.length
+    ? el(
+        "div",
+        { style: "padding:8px 0 0 16px" },
+        el(
+          "h4",
+          { style: "display:flex; gap:8px; align-items:center; margin:0" },
+          `疑似被覆盖（${state.superseded.length}）`,
+          armed("superseded", `作废选中的 ${chosen.length} 条`, () => rejectSuperseded(chosen)),
+        ),
+        el("p", { style: `${muted}; margin:4px 0` }, "同一收件人、同一 REQ/WK 单号（或 10 分钟内）的旧版本。发出「不要 已被新草稿 Dxxx 替代」。"),
+        el(
+          "ul",
+          { style: "list-style:none; margin:0; padding:0" },
+          state.superseded.map(({ item, kept }) =>
+            el(
+              "li",
+              { style: "display:flex; gap:8px; align-items:baseline" },
+              checkbox(!state.supersededOff.has(item.id), (on) => {
+                if (on) state.supersededOff.delete(item.id);
+                else state.supersededOff.add(item.id);
+                render();
+              }),
+              el("div", { style: "flex:1; min-width:0" }, row(item, { selectable: false, marks: [`→ ${draftNumber(kept.title) ?? kept.identifier}`] })),
+            ),
+          ),
+        ),
+      )
+    : null;
+  return el(
+    "section",
+    {},
+    el("h3", {}, `${group.label}（${group.items.length}）`),
+    el("ul", { style: "list-style:none; margin:0; padding:0" }, current.map((item) => row(item, { selectable: true, marks: draftMarks(item) }))),
+    sub,
   );
 }
 
@@ -480,8 +946,9 @@ function askRow(item) {
   const reply = el("input", { placeholder: "直接写答案", style: "flex:1; min-width:120px" });
   return el(
     "li",
-    { style: "display:grid; gap:4px; padding:6px 0; border-bottom:1px solid var(--border)" },
-    row(item, { selectable: false }),
+    { id: `row-${item.id}`, style: "display:grid; gap:4px; padding:6px 0; border-bottom:1px solid var(--border)" },
+    row(item, { selectable: false, anchor: false }),
+    draftLinks(item),
     options.map((option) =>
       el("div", { style: `${muted}; padding-left:72px` }, `${option.letter}. ${option.text}`),
     ),
@@ -510,7 +977,7 @@ function render() {
     el("span", { style: muted }, `已选 ${selectedCount} 条`),
     armed("approve", "同意", () => batchDecision(DECISION_APPROVE, "")),
     reason,
-    armed("reject", "不要", () => {
+    armed("reject", "不要 / 拒绝", () => {
       if (!String(state.reason ?? "").trim()) {
         state.armed = null;
         state.message = "批量不要需要填写统一理由";
@@ -538,12 +1005,20 @@ function render() {
         el(
           "ul",
           { style: "list-style:none; margin:0; padding:0" },
-          state.stale.map((item) => row({ ...item, title: `${item.title}（${item.order} ${item.ending}）` }, { selectable: false })),
+          state.stale.map((item) => row({ ...item, title: `${item.title}（${item.order} ${item.ending}）` }, { selectable: false, anchor: false })),
         ),
       ),
     );
   }
   for (const group of state.groups) {
+    if (group.type === CARD_DRAFT) {
+      sections.push(draftSection(group));
+      continue;
+    }
+    if (group.type === CARD_PROPOSAL) {
+      sections.push(proposalSection(group));
+      continue;
+    }
     sections.push(
       el(
         "section",
