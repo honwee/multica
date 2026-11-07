@@ -88,6 +88,18 @@ closes missed-event and reordering gaps, while missing-member warnings surface
 visibility problems without applying them. Keep manual replay as recovery and
 audit history as the watermark.
 
+## Automatic sync and admit on sign-in
+
+Two switches under the organization configuration act independently, and both
+are cleared when organization sync is turned off:
+
+- **Automatic sync** applies the plan hourly and on Feishu contact events. It
+  keeps existing members' roles and groups current and never adds members.
+- **Admit on sign-in** (`admit_on_login`, off by default) lets a person who
+  matches a rule become a member when they sign in with Feishu, without an
+  invitation. When it is off, an invitation is still required. An owner rule
+  admits the person as admin. Seat-limited deployments never admit on sign-in.
+
 ## Production review, backup, and rollback
 
 No production operation is part of the code change. A human operator must:
