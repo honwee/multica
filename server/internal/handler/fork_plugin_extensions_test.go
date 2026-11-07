@@ -156,6 +156,19 @@ func installForkPlugin(t *testing.T, endpoint *forkHookEndpoint, scopes []string
 	return installed.ID
 }
 
+// createForkTestIssue creates an issue and deletes it after the test, so the
+// shared workspace does not grow past other suites' list limits.
+func createForkTestIssue(t *testing.T, title, status, priority string) string {
+	t.Helper()
+	id := createTestIssue(t, title, status, priority)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, id)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+	})
+	return id
+}
+
 func cleanupForkPluginRows(t *testing.T) {
 	t.Helper()
 	remove := func() {
@@ -215,7 +228,7 @@ func TestPluginPageEndpointsRefusedWhileSwitchedOff(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installationID := installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, false)
-	issueID := createTestIssue(t, "page switch off", "todo", "none")
+	issueID := createForkTestIssue(t, "page switch off", "todo", "none")
 
 	list := httptest.NewRecorder()
 	testHandler.ListPluginPageIssues(list, pluginActionRequest(http.MethodGet, "/issues", installationID, nil, nil))
@@ -241,7 +254,7 @@ func TestPluginPageListIssuesFiltersAndPages(t *testing.T) {
 	setPluginExtensions(t, true, false)
 	marker := "page-list-" + uuid.NewString()[:8]
 	for i := 0; i < 3; i++ {
-		createTestIssue(t, marker+"-"+strconv.Itoa(i), "in_review", "none")
+		createForkTestIssue(t, marker+"-"+strconv.Itoa(i), "in_review", "none")
 	}
 
 	type page struct {
@@ -291,7 +304,7 @@ func TestPluginPageBatchCommentChecksEachItem(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installationID := installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, true, false)
-	issueID := createTestIssue(t, "batch comment", "todo", "none")
+	issueID := createForkTestIssue(t, "batch comment", "todo", "none")
 	missing := uuid.NewString()
 
 	recorder := httptest.NewRecorder()
@@ -326,7 +339,7 @@ func TestPluginPageBatchRequiresTheScopeAndAMember(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installationID := installForkPlugin(t, endpoint, []string{"issues:read", "net:" + endpoint.host()})
 	setPluginExtensions(t, true, false)
-	issueID := createTestIssue(t, "batch scope", "todo", "none")
+	issueID := createForkTestIssue(t, "batch scope", "todo", "none")
 
 	recorder := httptest.NewRecorder()
 	testHandler.BatchSetStatusPluginPageIssues(recorder, pluginActionRequest(http.MethodPost, "/issue-batches/status", installationID,
@@ -349,8 +362,8 @@ func TestPluginPageBatchSetStatusGoesThroughIssueRules(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installationID := installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, true, false)
-	first := createTestIssue(t, "batch status 1", "todo", "none")
-	second := createTestIssue(t, "batch status 2", "todo", "none")
+	first := createForkTestIssue(t, "batch status 1", "todo", "none")
+	second := createForkTestIssue(t, "batch status 2", "todo", "none")
 
 	recorder := httptest.NewRecorder()
 	testHandler.BatchSetStatusPluginPageIssues(recorder, pluginActionRequest(http.MethodPost, "/issue-batches/status", installationID,
@@ -489,8 +502,8 @@ func buttonToken(t *testing.T, blocks []feishunotify.CardButtonBlock, key string
 func TestPluginCardButtonsFollowSwitchAndRules(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installationID := installForkPlugin(t, endpoint, nil)
-	matching := createTestIssue(t, "[审批] 调课", "todo", "none")
-	other := createTestIssue(t, "普通任务", "todo", "none")
+	matching := createForkTestIssue(t, "[审批] 调课", "todo", "none")
+	other := createForkTestIssue(t, "普通任务", "todo", "none")
 	actions := cardActions(t)
 
 	setPluginExtensions(t, false, false)
@@ -518,7 +531,7 @@ func TestPluginCardActionRunsOnceAsTheClicker(t *testing.T) {
 	endpoint.reply.Store(`{"effects":[{"type":"comment","content":"同意执行"},{"type":"set_status","status":"in_review"}],"status_text":"已同意"}`)
 	installationID := installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, true)
-	issueID := createTestIssue(t, "[审批] 请假", "todo", "none")
+	issueID := createForkTestIssue(t, "[审批] 请假", "todo", "none")
 	inst := agentBotInstallation()
 	bindFeishuUser(t, inst, testUserID, "ou_member")
 	actions := cardActions(t)
@@ -566,7 +579,7 @@ func TestPluginCardActionRefusesUnknownClickerAndUnauthorizedAccess(t *testing.T
 	endpoint := newForkHookEndpoint(t)
 	installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, true)
-	issueID := createTestIssue(t, "[审批] 采购", "todo", "none")
+	issueID := createForkTestIssue(t, "[审批] 采购", "todo", "none")
 	inst := agentBotInstallation()
 	actions := cardActions(t)
 	token := buttonToken(t, actions.CardButtons(context.Background(), testWorkspaceID, issueID, testUserID), "approve")
@@ -616,7 +629,7 @@ func TestPluginCardActionTimeoutFailsAndAllowsRetry(t *testing.T) {
 	endpoint.delay.Store(int64(3 * time.Second))
 	installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, true)
-	issueID := createTestIssue(t, "[审批] 超时", "todo", "none")
+	issueID := createForkTestIssue(t, "[审批] 超时", "todo", "none")
 	inst := agentBotInstallation()
 	bindFeishuUser(t, inst, testUserID, "ou_member_timeout")
 	actions := cardActions(t)
@@ -647,7 +660,7 @@ func TestPluginCardActionRequiresInputForInputButtons(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, true)
-	issueID := createTestIssue(t, "[审批] 修改", "todo", "none")
+	issueID := createForkTestIssue(t, "[审批] 修改", "todo", "none")
 	inst := agentBotInstallation()
 	bindFeishuUser(t, inst, testUserID, "ou_member_input")
 	actions := cardActions(t)
@@ -677,7 +690,7 @@ func TestPluginCardActionSwitchedOffRefuses(t *testing.T) {
 	endpoint := newForkHookEndpoint(t)
 	installForkPlugin(t, endpoint, nil)
 	setPluginExtensions(t, false, true)
-	issueID := createTestIssue(t, "[审批] 关闭", "todo", "none")
+	issueID := createForkTestIssue(t, "[审批] 关闭", "todo", "none")
 	inst := agentBotInstallation()
 	bindFeishuUser(t, inst, testUserID, "ou_member_off")
 	actions := cardActions(t)
