@@ -1,0 +1,103 @@
+{
+  "manifest_version": 1,
+  "key": "com.lumistedu.jiaowu-review",
+  "name": "教务审批",
+  "description": "审批教务分身的草稿、请教和经验提案：审批队列页、飞书卡片一键审批、问课单结束后给遗留卡片打收口评论。只按分身卡片上写明的协议发评论，不改状态。",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lumist",
+    "url": "https://fde.lumistedu.com"
+  },
+  "scopes": [
+    "issues:read",
+    "comments:read",
+    "comments:write",
+    "storage:workspace",
+    "net:jiaowu-hooks.fde.lumistedu.com"
+  ],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "queue",
+        "type": "workspace_page",
+        "name": "审批队列",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "card",
+        "name": "飞书卡片审批",
+        "description": "把飞书卡片上的点击换成分身协议要求的评论，以点击者身份发出。",
+        "triggers": ["card_action"],
+        "transport": {
+          "type": "http",
+          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/card"
+        },
+        "timeout_ms": 1500
+      },
+      {
+        "key": "track",
+        "name": "记录问课单与挂靠卡片",
+        "description": "记录问课单、它的导师卡和引用它的草稿；问课单停止或确定时记下待收口。只写插件存储。",
+        "triggers": ["event"],
+        "events": ["issue.created", "issue.status_changed"],
+        "transport": {
+          "type": "http",
+          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/track"
+        },
+        "timeout_ms": 5000
+      },
+      {
+        "key": "sweep",
+        "name": "问课单结束后收口",
+        "description": "每 10 分钟检查已结束的问课单，给仍在等待的草稿和导师卡发一条 // 开头的收口评论。不改状态。",
+        "triggers": ["schedule"],
+        "schedule": {
+          "cron": "*/10 * * * *",
+          "timezone": "Asia/Shanghai"
+        },
+        "transport": {
+          "type": "http",
+          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/sweep"
+        },
+        "timeout_ms": 30000
+      }
+    ],
+    "card_buttons": [
+      {
+        "key": "draft",
+        "hook": "card",
+        "match": { "projects": ["待我处理"], "title_prefixes": ["D"] },
+        "buttons": [
+          { "key": "approve", "label": "同意", "style": "primary" },
+          { "key": "revise", "label": "修改", "input": { "placeholder": "修改后的内容 / 不要的理由", "required": true } },
+          { "key": "reject", "label": "不要", "style": "danger", "input": { "placeholder": "修改后的内容 / 不要的理由", "required": true } }
+        ]
+      },
+      {
+        "key": "proposal",
+        "hook": "card",
+        "match": { "projects": ["经验积累"], "title_prefixes": ["#"] },
+        "buttons": [
+          { "key": "approve", "label": "同意", "style": "primary" },
+          { "key": "revise", "label": "修改", "input": { "placeholder": "修改后的内容 / 拒绝的理由", "required": true } },
+          { "key": "reject", "label": "拒绝", "style": "danger", "input": { "placeholder": "修改后的内容 / 拒绝的理由", "required": true } }
+        ]
+      },
+      {
+        "key": "ask",
+        "hook": "card",
+        "match": { "projects": ["待我处理"], "title_prefixes": ["Q"] },
+        "buttons": [
+          { "key": "a", "label": "A" },
+          { "key": "b", "label": "B" },
+          { "key": "c", "label": "C" },
+          { "key": "d", "label": "D" },
+          { "key": "reply", "label": "回复", "style": "primary", "input": { "placeholder": "直接写答案", "required": true } }
+        ]
+      }
+    ]
+  }
+}

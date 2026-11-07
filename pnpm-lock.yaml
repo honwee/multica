@@ -1175,6 +1175,8 @@ importers:
 
   packages/vitest-setup: {}
 
+  plugins/jiaowu-review: {}
+
 packages:
 
   7zip-bin@5.2.0:
