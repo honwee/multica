@@ -1,8 +1,9 @@
 // Package feishunotify pushes a member's inbox notifications to Feishu as
-// direct messages. When the issue is assigned to an agent that owns a Feishu
-// bot in the workspace, the bot sends them, so they land in the member's chat
-// with that agent; otherwise, or when the bot cannot reach the member, the
-// deployment's Feishu login app sends them.
+// direct messages. Only the Feishu bot of the agent the issue is assigned to
+// sends them, so they land in the member's chat with that agent. Issues
+// assigned to a member or unassigned, agents without a bot, and members the
+// bot cannot reach get no push; the deployment's Feishu login app never sends
+// notifications.
 //
 // Delivery is opt-in per member and workspace through the
 // `feishu_notifications` preference and follows the member's inbox group
@@ -68,16 +69,14 @@ type Queries interface {
 
 // BotRouter resolves an agent's Feishu bot and how a member is addressed
 // through it. lark.ErrNoAgentBot and lark.ErrAgentBotRecipientUnreachable
-// mean the login app should send instead.
+// mean the notification is not pushed.
 type BotRouter interface {
 	Route(ctx context.Context, workspaceID, agentID pgtype.UUID, user db.User) (lark.AgentBotRoute, error)
 }
 
 // Config tunes a Notifier. Zero values take the defaults.
 type Config struct {
-	// Credentials are the login app's, used when no agent bot sends.
-	Credentials lark.InstallationCredentials
-	// Bots resolves agent bots. Nil sends everything through the login app.
+	// Bots resolves agent bots. Nil pushes nothing.
 	Bots BotRouter
 	// AppURL is the web origin issue links point at.
 	AppURL string
@@ -113,8 +112,7 @@ type windowKey struct {
 	workspaceID string
 	recipientID string
 	issueID     string
-	// agentID is the assigned agent whose bot is tried first; empty means
-	// the login app.
+	// agentID is the assigned agent whose bot sends.
 	agentID string
 }
 
@@ -205,11 +203,17 @@ func (n *Notifier) accept(ctx context.Context, ev event) {
 	if !n.eligible(lookupCtx, ev) {
 		return
 	}
+	agentID, reason := n.assignedAgent(lookupCtx, ev)
+	if agentID == "" {
+		n.logger.Info("feishu notify: not sent",
+			"recipient_id", ev.RecipientID, "issue_id", ev.IssueID, "inbox_item_id", ev.ItemID, "reason", reason)
+		return
+	}
 	key := windowKey{
 		workspaceID: ev.WorkspaceID,
 		recipientID: ev.RecipientID,
 		issueID:     ev.IssueID,
-		agentID:     n.assignedAgent(lookupCtx, ev),
+		agentID:     agentID,
 	}
 
 	n.mu.Lock()
@@ -292,38 +296,36 @@ func Enabled(prefs map[string]string) bool {
 	return prefs[PreferenceKey] == "all"
 }
 
-// Recipient picks the Feishu identity a user is addressed by. open_id is
-// issued by the login app that sends, so it is preferred; union_id covers a
-// user linked through another app of the same developer.
-func Recipient(u db.User) (receiveIDType, receiveID string, ok bool) {
-	if u.FeishuOpenID.Valid && u.FeishuOpenID.String != "" {
-		return lark.ReceiveIDTypeOpenID, u.FeishuOpenID.String, true
-	}
-	if u.FeishuUnionID.Valid && u.FeishuUnionID.String != "" {
-		return lark.ReceiveIDTypeUnionID, u.FeishuUnionID.String, true
-	}
-	return "", "", false
-}
+// Reasons a notification is not pushed, logged at INFO.
+const (
+	reasonNoBotRouter      = "agent bots not configured"
+	reasonIssueLookup      = "issue lookup failed"
+	reasonNotAgentAssigned = "issue not assigned to an agent"
+	reasonNoAgentBot       = "no agent bot for issue"
+	reasonUnreachable      = "recipient unreachable via bot"
+	reasonBotLookup        = "bot lookup failed"
+	reasonBotSendFailed    = "bot send failed"
+)
 
-// assignedAgent returns the issue's assigned agent when a bot router is
-// configured, or "" to send through the login app.
-func (n *Notifier) assignedAgent(ctx context.Context, ev event) string {
+// assignedAgent returns the issue's assigned agent, or "" and the reason no
+// bot can send.
+func (n *Notifier) assignedAgent(ctx context.Context, ev event) (string, string) {
 	if n.cfg.Bots == nil {
-		return ""
+		return "", reasonNoBotRouter
 	}
 	issueID, err := util.ParseUUID(ev.IssueID)
 	if err != nil {
-		return ""
+		return "", reasonIssueLookup
 	}
 	issue, err := n.q.GetIssue(ctx, issueID)
 	if err != nil {
-		n.logger.Warn("feishu notify: load issue assignee failed; using login app", "issue_id", ev.IssueID, "error", err)
-		return ""
+		n.logger.Warn("feishu notify: load issue assignee failed", "issue_id", ev.IssueID, "error", err)
+		return "", reasonIssueLookup
 	}
 	if issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return ""
+		return "", reasonNotAgentAssigned
 	}
-	return util.UUIDToString(issue.AssigneeID)
+	return util.UUIDToString(issue.AssigneeID), ""
 }
 
 func (n *Notifier) deliver(ctx context.Context, key windowKey, batch []event) {
@@ -345,49 +347,32 @@ func (n *Notifier) deliver(ctx context.Context, key windowKey, batch []event) {
 		return
 	}
 
-	if key.agentID != "" {
-		if n.sendViaAgentBot(ctx, lookupCtx, key, user, card, len(batch)) {
-			return
-		}
-	}
-
-	receiveIDType, receiveID, ok := Recipient(user)
-	if !ok {
-		n.logger.Debug("feishu notify: recipient has no Feishu identity; skipping", "recipient_id", first.RecipientID)
-		return
-	}
-	err = n.send(ctx, lark.SendUserCardParams{
-		Credentials:   n.cfg.Credentials,
-		ReceiveIDType: receiveIDType,
-		ReceiveID:     receiveID,
-		CardJSON:      card,
-	})
-	if err != nil {
-		n.logger.Warn("feishu notify: send failed",
-			"recipient_id", first.RecipientID, "issue_id", first.IssueID, "notifications", len(batch), "error", err)
-	}
+	n.sendViaAgentBot(ctx, lookupCtx, key, user, card, len(batch))
 }
 
-// sendViaAgentBot tries the assigned agent's bot and reports whether it
-// delivered. Every miss is logged with the reason the login app takes over.
-func (n *Notifier) sendViaAgentBot(ctx, lookupCtx context.Context, key windowKey, user db.User, card string, count int) bool {
+// sendViaAgentBot sends through the assigned agent's bot. Every miss is
+// logged with its reason; nothing else sends in its place.
+func (n *Notifier) sendViaAgentBot(ctx, lookupCtx context.Context, key windowKey, user db.User, card string, count int) {
+	logArgs := []any{"recipient_id", key.recipientID, "issue_id", key.issueID, "agent_id", key.agentID, "notifications", count}
 	workspaceID, err := util.ParseUUID(key.workspaceID)
 	if err != nil {
-		return false
+		return
 	}
 	agentID, err := util.ParseUUID(key.agentID)
 	if err != nil {
-		return false
+		return
 	}
-	logArgs := []any{"recipient_id", key.recipientID, "issue_id", key.issueID, "agent_id", key.agentID}
 	route, err := n.cfg.Bots.Route(lookupCtx, workspaceID, agentID, user)
 	if err != nil {
-		reason := "bot lookup failed"
-		if errors.Is(err, lark.ErrNoAgentBot) || errors.Is(err, lark.ErrAgentBotRecipientUnreachable) {
-			reason = err.Error()
+		reason := reasonBotLookup
+		switch {
+		case errors.Is(err, lark.ErrNoAgentBot):
+			reason = reasonNoAgentBot
+		case errors.Is(err, lark.ErrAgentBotRecipientUnreachable):
+			reason = reasonUnreachable
 		}
-		n.logger.Info("feishu notify: falling back to login app", append(logArgs, "reason", reason, "error", err)...)
-		return false
+		n.logger.Info("feishu notify: not sent", append(logArgs, "reason", reason, "error", err)...)
+		return
 	}
 	logArgs = append(logArgs, "installation_id", util.UUIDToString(route.InstallationID), "receive_id_type", route.ReceiveIDType)
 	err = n.send(ctx, lark.SendUserCardParams{
@@ -397,12 +382,10 @@ func (n *Notifier) sendViaAgentBot(ctx, lookupCtx context.Context, key windowKey
 		CardJSON:      card,
 	})
 	if err != nil {
-		n.logger.Info("feishu notify: falling back to login app",
-			append(logArgs, "reason", lark.ErrAgentBotRecipientUnreachable.Error(), "error", err)...)
-		return false
+		n.logger.Info("feishu notify: not sent", append(logArgs, "reason", reasonBotSendFailed, "error", err)...)
+		return
 	}
-	n.logger.Info("feishu notify: sent via agent bot", append(logArgs, "notifications", count)...)
-	return true
+	n.logger.Info("feishu notify: sent via agent bot", logArgs...)
 }
 
 // send posts one card, retrying transient failures with backoff.

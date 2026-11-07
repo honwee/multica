@@ -36,12 +36,6 @@ func feishuLoginApp() (lark.InstallationCredentials, bool) {
 	return lark.InstallationCredentials{AppID: appID, AppSecret: appSecret, Region: lark.RegionFeishu}, true
 }
 
-// FeishuLoginAppCredentials exposes the login app to server wiring outside
-// the handler package, such as the Feishu inbox notifier.
-func FeishuLoginAppCredentials() (lark.InstallationCredentials, bool) {
-	return feishuLoginApp()
-}
-
 func feishuOrgLoginAppDirectoryKey(appID string) pgtype.UUID {
 	return pgtype.UUID{Bytes: uuid.NewSHA1(feishuOrgLoginAppDirectoryNamespace, []byte("feishu-login-app:"+appID)), Valid: true}
 }

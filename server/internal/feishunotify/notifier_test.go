@@ -122,9 +122,10 @@ func actorUser() db.User {
 	return db.User{ID: util.MustParseUUID(testActorID), Name: "张三"}
 }
 
+// newTestNotifier routes through the default agent's bot.
 func newTestNotifier(q *fakeQueries, s *fakeSender, window time.Duration) *Notifier {
 	return New(q, s, Config{
-		Credentials:  lark.InstallationCredentials{AppID: "cli_login"},
+		Bots:         defaultBots(),
 		AppURL:       "https://fde.lumistedu.com",
 		Window:       window,
 		MaxAttempts:  3,
@@ -170,7 +171,12 @@ func enabledQueries(extra map[string]string) *fakeQueries {
 	for k, v := range extra {
 		prefs[k] = v
 	}
-	return &fakeQueries{prefs: prefs, users: map[string]db.User{testRecipientID: linkedUser(), testActorID: actorUser()}}
+	return &fakeQueries{
+		prefs:        prefs,
+		users:        map[string]db.User{testRecipientID: linkedUser(), testActorID: actorUser()},
+		assignee:     testAgentID,
+		assigneeType: "agent",
+	}
 }
 
 func TestNotifier_DisabledByDefault(t *testing.T) {
@@ -207,31 +213,6 @@ func TestNotifier_MutedGroupIsNotPushed(t *testing.T) {
 	}
 }
 
-func TestNotifier_SkipsRecipientWithoutFeishuIdentity(t *testing.T) {
-	q := enabledQueries(nil)
-	q.users[testRecipientID] = db.User{ID: util.MustParseUUID(testRecipientID), Name: "no feishu"}
-	s := &fakeSender{}
-	n := newTestNotifier(q, s, 20*time.Millisecond)
-	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
-	n.Wait()
-	if got := len(s.sent()); got != 0 {
-		t.Fatalf("sent %d messages to an unlinked user", got)
-	}
-}
-
-func TestNotifier_FallsBackToUnionID(t *testing.T) {
-	q := enabledQueries(nil)
-	q.users[testRecipientID] = db.User{ID: util.MustParseUUID(testRecipientID), FeishuUnionID: pgtype.Text{String: "on_u", Valid: true}}
-	s := &fakeSender{}
-	n := newTestNotifier(q, s, 20*time.Millisecond)
-	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
-	n.Wait()
-	sent := s.sent()
-	if len(sent) != 1 || sent[0].ReceiveIDType != lark.ReceiveIDTypeUnionID || sent[0].ReceiveID != "on_u" {
-		t.Fatalf("unexpected sends: %+v", sent)
-	}
-}
-
 func TestNotifier_SendsCardWithIssueEventExcerptAndLink(t *testing.T) {
 	s := &fakeSender{}
 	n := newTestNotifier(enabledQueries(nil), s, 20*time.Millisecond)
@@ -242,7 +223,7 @@ func TestNotifier_SendsCardWithIssueEventExcerptAndLink(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent %d, want 1", len(sent))
 	}
-	if sent[0].ReceiveIDType != lark.ReceiveIDTypeOpenID || sent[0].ReceiveID != "ou_honwee" || sent[0].Credentials.AppID != "cli_login" {
+	if sent[0].ReceiveIDType != lark.ReceiveIDTypeOpenID || sent[0].ReceiveID != testBotOpenID || sent[0].Credentials.AppID != testBotAppID {
 		t.Fatalf("wrong addressing: %+v", sent[0])
 	}
 	card := sent[0].CardJSON
@@ -394,6 +375,12 @@ func (b *fakeBots) Route(_ context.Context, _, agentID pgtype.UUID, _ db.User) (
 	return route, nil
 }
 
+func defaultBots() *fakeBots {
+	return &fakeBots{routes: map[string]lark.AgentBotRoute{
+		testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeOpenID, testBotOpenID),
+	}}
+}
+
 func botRoute(appID, receiveIDType, receiveID string) lark.AgentBotRoute {
 	return lark.AgentBotRoute{
 		Credentials:   lark.InstallationCredentials{AppID: appID},
@@ -404,7 +391,6 @@ func botRoute(appID, receiveIDType, receiveID string) lark.AgentBotRoute {
 
 func newBotNotifier(q *fakeQueries, s *fakeSender, bots *fakeBots, window time.Duration) *Notifier {
 	return New(q, s, Config{
-		Credentials:  lark.InstallationCredentials{AppID: "cli_login"},
 		Bots:         bots,
 		AppURL:       "https://fde.lumistedu.com",
 		Window:       window,
@@ -453,29 +439,41 @@ func TestNotifier_AgentBotByUnionIDWhenNoChat(t *testing.T) {
 	}
 }
 
-func TestNotifier_AgentBotFailureFallsBackToLoginApp(t *testing.T) {
-	s := &fakeSender{failApps: map[string]error{
-		testBotAppID: &lark.APIError{Op: "send user card", Code: 230013, Msg: "no availability"},
-	}}
-	bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
-		testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeUnionID, "on_honwee"),
-	}}
-	n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
-	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
-	n.Wait()
-	sent := s.sent()
-	if len(sent) != 2 {
-		t.Fatalf("sent %d, want bot attempt then login app: %+v", len(sent), sent)
+// The login app never sends: when the bot cannot, nothing is pushed. The
+// fake sender records every attempt, so any send outside the bot's app
+// would show up in sent().
+func assertOnlyBotAttempts(t *testing.T, sent []lark.SendUserCardParams, want int) {
+	t.Helper()
+	if len(sent) != want {
+		t.Fatalf("send attempts = %d, want %d: %+v", len(sent), want, sent)
 	}
-	if sent[0].Credentials.AppID != testBotAppID {
-		t.Errorf("first attempt app = %q, want the bot", sent[0].Credentials.AppID)
-	}
-	if sent[1].Credentials.AppID != "cli_login" || sent[1].ReceiveIDType != lark.ReceiveIDTypeOpenID || sent[1].ReceiveID != "ou_honwee" {
-		t.Errorf("fallback not addressed through the login app: %+v", sent[1])
+	for _, p := range sent {
+		if p.Credentials.AppID != testBotAppID {
+			t.Fatalf("send outside the agent bot: %+v", p)
+		}
 	}
 }
 
-func TestNotifier_AgentWithoutBotUsesLoginApp(t *testing.T) {
+func TestNotifier_AgentBotFailureIsNotRetriedElsewhere(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		// Business errors are not retried; transient ones use every attempt.
+		"business error":  {&lark.APIError{Op: "send user card", Code: 230013, Msg: "no availability"}, 1},
+		"transient error": {errors.New("connection reset"), 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &fakeSender{failApps: map[string]error{testBotAppID: tc.err}}
+			n := newBotNotifier(agentAssigned(testAgentID), s, defaultBots(), 20*time.Millisecond)
+			process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+			n.Wait()
+			assertOnlyBotAttempts(t, s.sent(), tc.want)
+		})
+	}
+}
+
+func TestNotifier_AgentWithoutReachableBotSendsNothing(t *testing.T) {
 	for name, bots := range map[string]*fakeBots{
 		"no bot":       {},
 		"unreachable":  {err: lark.ErrAgentBotRecipientUnreachable},
@@ -486,35 +484,37 @@ func TestNotifier_AgentWithoutBotUsesLoginApp(t *testing.T) {
 			n := newBotNotifier(agentAssigned(testAgentID), s, bots, 20*time.Millisecond)
 			process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
 			n.Wait()
-			sent := s.sent()
-			if len(sent) != 1 || sent[0].Credentials.AppID != "cli_login" {
-				t.Fatalf("unexpected sends: %+v", sent)
-			}
+			assertOnlyBotAttempts(t, s.sent(), 0)
 		})
 	}
 }
 
-func TestNotifier_MemberOrUnassignedIssueUsesLoginApp(t *testing.T) {
+func TestNotifier_MemberOrUnassignedIssueSendsNothing(t *testing.T) {
 	member := enabledQueries(nil)
 	member.assignee, member.assigneeType = testActorID, "member"
-	for name, q := range map[string]*fakeQueries{"member": member, "unassigned": enabledQueries(nil)} {
+	unassigned := enabledQueries(nil)
+	unassigned.assignee, unassigned.assigneeType = "", ""
+	for name, q := range map[string]*fakeQueries{"member": member, "unassigned": unassigned} {
 		t.Run(name, func(t *testing.T) {
 			s := &fakeSender{}
-			bots := &fakeBots{routes: map[string]lark.AgentBotRoute{
-				testAgentID: botRoute(testBotAppID, lark.ReceiveIDTypeOpenID, testBotOpenID),
-			}}
+			bots := defaultBots()
 			n := newBotNotifier(q, s, bots, 20*time.Millisecond)
 			process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
 			n.Wait()
-			sent := s.sent()
-			if len(sent) != 1 || sent[0].Credentials.AppID != "cli_login" {
-				t.Fatalf("unexpected sends: %+v", sent)
-			}
+			assertOnlyBotAttempts(t, s.sent(), 0)
 			if len(bots.calls) != 0 {
 				t.Errorf("bot router consulted for a non-agent assignee: %v", bots.calls)
 			}
 		})
 	}
+}
+
+func TestNotifier_WithoutBotRouterSendsNothing(t *testing.T) {
+	s := &fakeSender{}
+	n := New(enabledQueries(nil), s, Config{Window: 20 * time.Millisecond, MaxAttempts: 1})
+	process(n, inboxEvent(testIssueID, "new_comment", "hello", nil))
+	n.Wait()
+	assertOnlyBotAttempts(t, s.sent(), 0)
 }
 
 // A reassignment inside an open window must not fold the new sender's
