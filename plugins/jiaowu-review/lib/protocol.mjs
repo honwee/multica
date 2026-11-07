@@ -221,3 +221,187 @@ export function planBatch(selected, decision, input) {
     refused,
   };
 }
+
+// ---- 经验提案 grouping ------------------------------------------------------
+//
+// A proposal body starts with "#924 [能力] 【缺信息】…" and then indented lines
+// 改动：<path>（追加）/ 内容：… / 理由：… / 依据：…, ending in the footer. Live
+// bodies are multi-line, but a body flattened onto one line still parses: each
+// field runs until the next field label or the footer.
+
+const PROPOSAL_FIELD_STOP = String.raw`(?=\s*(?:改动|内容|理由|依据)[:：]|\s*_评论|$)`;
+
+function proposalField(text, label) {
+  const match = text.match(new RegExp(`${label}[:：]\\s*([\\s\\S]*?)${PROPOSAL_FIELD_STOP}`));
+  const value = match ? match[1].trim() : "";
+  return value || null;
+}
+
+export function parseProposal(title, description) {
+  const head = String(title ?? "");
+  const body = String(description ?? "");
+  const firstLine = body.split("\n", 1)[0];
+  const tag = (head.match(/\[([^\[\]\s]{1,12})\]/) ?? firstLine.match(/\[([^\[\]\s]{1,12})\]/))?.[1] ?? null;
+  const change = body.match(/改动[:：]\s*([^\s（(]+)\s*(?:[（(]([^）)\n]+)[）)])?/);
+  return {
+    tag,
+    path: change ? change[1] : null,
+    change: change?.[2] ?? null,
+    content: proposalField(body, "内容"),
+    reason: proposalField(body, "理由"),
+    basis: proposalField(body, "依据"),
+  };
+}
+
+export const UNGROUPED = "未分组";
+
+// Proposals (already carrying `.proposal` from parseProposal) grouped by the
+// file they change, largest group first; proposals without a readable body or
+// path go last under 未分组.
+export function groupProposals(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = item.proposal?.path ?? UNGROUPED;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups]
+    .map(([path, list]) => ({ path, items: list }))
+    .sort((a, b) => {
+      if ((a.path === UNGROUPED) !== (b.path === UNGROUPED)) return a.path === UNGROUPED ? 1 : -1;
+      return b.items.length - a.items.length || a.path.localeCompare(b.path);
+    });
+}
+
+// Tags present on the proposals with their counts, most frequent first.
+export function proposalTags(items) {
+  const counts = new Map();
+  for (const item of items) {
+    const tag = item.proposal?.tag;
+    if (tag) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+// tags: a Set of selected tags (empty = all); query: substring of the title.
+export function filterProposals(items, { tags, query } = {}) {
+  const needle = String(query ?? "").trim().toLowerCase();
+  return items.filter((item) => {
+    if (tags?.size && !tags.has(item.proposal?.tag)) return false;
+    if (needle && !String(item.title ?? "").toLowerCase().includes(needle)) return false;
+    return true;
+  });
+}
+
+// ---- superseded drafts ------------------------------------------------------
+//
+// Hermes often rewrites a draft before the first one is decided: D176–D181 are
+// six replies to the same person within a minute, D184/D188/D190 chase the
+// same REQ field three times. Only the newest is "current"; the others are
+// offered for a bulk 「不要 已被新草稿 Dxxx 替代」.
+
+export const SUPERSEDE_WINDOW_MINUTES = 10;
+
+const REF_ID = /REQ-\d{8}-[0-9A-F]{8}|WK-\d{8}-[0-9A-F]{6}/;
+
+// "D190 待确认：…" → "D190".
+export function draftNumber(title) {
+  const match = String(title ?? "").match(/^(D\d+)\s/);
+  return match ? match[1] : null;
+}
+
+// Who a draft is addressed to. `explicit` is false for 当前会话, whose
+// conversation the title does not name.
+//   发给 dm:gabby：…         → dm:gabby
+//   回复 Lumist.Grace（私聊） → dm:Lumist.Grace
+//   发给 当前会话：…          → 当前会话 (not explicit)
+export function draftRecipient(title) {
+  const text = String(title ?? "").replace(/^D\d+\s*待确认[:：]\s*/, "");
+  const reply = text.match(/^回复\s+(.+?)\s*[（(]私聊[）)]/);
+  if (reply) return { key: `dm:${reply[1]}`, explicit: true };
+  const send = text.match(/^发给\s+(.+?)：/);
+  if (!send) return null;
+  const name = send[1].trim();
+  if (name === "当前会话") return { key: name, explicit: false };
+  return { key: name, explicit: true };
+}
+
+// The REQ-/WK- order a draft is about: the title wins over the body.
+export function draftReference(title, description) {
+  return String(title ?? "").match(REF_ID)?.[0] ?? String(description ?? "").match(REF_ID)?.[0] ?? null;
+}
+
+// Waiting drafts → { current: Map(keptId → older[]), superseded: [{ item, kept }] }.
+// Same recipient AND (same REQ/WK reference, or neither has one and the older
+// was created within the window of the kept one). A 当前会话 draft only merges
+// on a shared reference.
+export function findSupersededDrafts(drafts, windowMinutes = SUPERSEDE_WINDOW_MINUTES) {
+  const buckets = new Map();
+  for (const item of drafts) {
+    const recipient = draftRecipient(item.title);
+    if (!recipient) continue;
+    const ref = draftReference(item.title, item.description);
+    if (!ref && !recipient.explicit) continue;
+    const key = `${recipient.key}\u0000${ref ?? ""}`;
+    if (!buckets.has(key)) buckets.set(key, { ref, items: [] });
+    buckets.get(key).items.push(item);
+  }
+  const current = new Map();
+  const superseded = [];
+  const windowMs = windowMinutes * 60000;
+  for (const { ref, items } of buckets.values()) {
+    const sorted = [...items].sort((a, b) => newestFirst(a, b));
+    let rest = sorted;
+    while (rest.length) {
+      const [kept, ...older] = rest;
+      const keptAt = Date.parse(kept.created_at);
+      const covered = ref ? older : older.filter((item) => keptAt - Date.parse(item.created_at) <= windowMs);
+      if (covered.length) {
+        current.set(kept.id, covered);
+        for (const item of covered) superseded.push({ item, kept });
+      }
+      rest = older.filter((item) => !covered.includes(item));
+    }
+  }
+  return { current, superseded };
+}
+
+function newestFirst(a, b) {
+  const delta = Date.parse(b.created_at) - Date.parse(a.created_at);
+  if (delta) return delta;
+  return (Number(draftNumber(b.title)?.slice(1)) || 0) - (Number(draftNumber(a.title)?.slice(1)) || 0);
+}
+
+export function supersededReason(kept) {
+  return `已被新草稿 ${draftNumber(kept.title) ?? kept.identifier} 替代`;
+}
+
+// ---- asks that reference drafts ---------------------------------------------
+
+// "Q30 分身请教：D165 待确认：…" / "B. B 继续用本单，批准 D187 催销售补三样" →
+// ["D165"], ["D187"]. A D inside an id like REQ-…-D1234567 does not count.
+export function referencedDrafts(title, description) {
+  const text = `${title ?? ""}\n${description ?? ""}`;
+  const found = [];
+  for (const match of text.matchAll(/(?<![\w-])(D\d+)(?![\w-])/g)) {
+    if (!found.includes(match[1])) found.push(match[1]);
+  }
+  return found;
+}
+
+// First line of the newest comment that carries a protocol decision on a
+// draft, e.g. "同意" or "不要 已被新草稿 D190 替代"; null if none.
+export function draftDecisionLine(comments, description) {
+  const verbs = protocolVerbs(CARD_DRAFT, description);
+  const sorted = [...(comments ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const comment of sorted) {
+    const line = String(comment.content ?? "").trim().split("\n", 1)[0].trim();
+    if (line === verbs.approve || line.startsWith(`${verbs.revise} `) || line.startsWith(`${verbs.reject} `)) return line;
+  }
+  return null;
+}
+
+export function truncateText(text, max) {
+  const chars = [...String(text ?? "")];
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : chars.join("");
+}

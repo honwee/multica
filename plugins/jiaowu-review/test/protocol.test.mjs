@@ -5,18 +5,31 @@ import {
   CARD_DRAFT,
   CARD_OTHER,
   CARD_PROPOSAL,
+  UNGROUPED,
   askAnswerComment,
   canBatch,
   classifyCard,
   closeoutComment,
   decisionComment,
+  draftDecisionLine,
+  draftNumber,
+  draftRecipient,
+  draftReference,
+  filterProposals,
+  findSupersededDrafts,
   formatWaiting,
+  groupProposals,
   groupQueue,
   isCloseoutComment,
   parseAskOptions,
+  parseProposal,
   planBatch,
+  proposalTags,
   protocolVerbs,
+  referencedDrafts,
   referencedWenkeId,
+  supersededReason,
+  truncateText,
   wenkeEnding,
   wenkeOrderId,
 } from "../lib/protocol.mjs";
@@ -157,4 +170,130 @@ test("batch plan splits by comment and refuses asks", () => {
   const missingReason = planBatch(selected.slice(0, 1), "reject", "  ");
   assert.deepEqual(missingReason.calls, []);
   assert.equal(missingReason.refused.length, 1);
+});
+
+// ---- 1.0.2: proposals, superseded drafts, asks → drafts ---------------------
+
+const PROPOSAL_924 = [
+  "#924 [能力] 【缺信息】状态需以 missing 非空为前提，不得仅凭字段缺省判定",
+  "    改动：capabilities/intake-review/capability.md（追加）",
+  "    内容：判定【缺信息】前先检查 missing 列表非空",
+  "    理由：Q35 里 25ABFF98 被误判缺信息 32 小时",
+  "    依据：REQ-20261106-25ABFF98 的处理记录",
+  PROPOSAL_FOOTER,
+].join("\n");
+
+test("parses a proposal body: tag, changed file, reason and basis", () => {
+  assert.deepEqual(parseProposal("#924 经验提案：【缺信息】状态需以 missing 非空为前提", PROPOSAL_924), {
+    tag: "能力",
+    path: "capabilities/intake-review/capability.md",
+    change: "追加",
+    content: "判定【缺信息】前先检查 missing 列表非空",
+    reason: "Q35 里 25ABFF98 被误判缺信息 32 小时",
+    basis: "REQ-20261106-25ABFF98 的处理记录",
+  });
+  // A tag in the title wins; a flattened body still splits on the labels.
+  const flat = parseProposal("#930 [规则] 经验提案：x", "#930 改动：rules/sales.md（修改） 内容：a 理由：b 依据：c _评论「同意」写入规范_");
+  assert.equal(flat.tag, "规则");
+  assert.equal(flat.path, "rules/sales.md");
+  assert.equal(flat.change, "修改");
+  assert.equal(flat.reason, "b");
+  assert.equal(flat.basis, "c");
+  // No body: nothing to group by.
+  assert.deepEqual(parseProposal("#931 经验提案：y", ""), { tag: null, path: null, change: null, content: null, reason: null, basis: null });
+});
+
+test("groups proposals by changed file, filters by tag and title", () => {
+  const items = [
+    { id: "p1", title: "#924 经验提案：缺信息", description: PROPOSAL_924 },
+    { id: "p2", title: "#925 经验提案：缺信息 2", description: PROPOSAL_924.replace("[能力]", "[规则]") },
+    { id: "p3", title: "#926 经验提案：报价", description: "#926 [规则] x\n改动：rules/price.md（追加）" },
+    { id: "p4", title: "#927 经验提案：无正文", description: "" },
+  ].map((item) => ({ ...item, proposal: parseProposal(item.title, item.description) }));
+  const groups = groupProposals(items);
+  assert.deepEqual(groups.map((group) => [group.path, group.items.map((item) => item.id)]), [
+    ["capabilities/intake-review/capability.md", ["p1", "p2"]],
+    ["rules/price.md", ["p3"]],
+    [UNGROUPED, ["p4"]],
+  ]);
+  assert.deepEqual(proposalTags(items), [{ tag: "规则", count: 2 }, { tag: "能力", count: 1 }]);
+  assert.deepEqual(filterProposals(items, { tags: new Set(["规则"]) }).map((item) => item.id), ["p2", "p3"]);
+  assert.deepEqual(filterProposals(items, { query: "报价" }).map((item) => item.id), ["p3"]);
+  assert.deepEqual(filterProposals(items, { tags: new Set(), query: " " }).length, 4);
+});
+
+test("reads a draft's recipient and order reference from the title", () => {
+  const d190 = "D190 待确认：发给 dm:gabby：REQ-20261105-B37C1422（诺丁汉宁波 ECONF003）现在只缺一个信息…";
+  assert.deepEqual(draftRecipient(d190), { key: "dm:gabby", explicit: true });
+  assert.deepEqual(draftRecipient("D181 待确认：回复 Lumist.Grace（私聊）"), { key: "dm:Lumist.Grace", explicit: true });
+  assert.deepEqual(draftRecipient("D183 待确认：发给 当前会话：宝，BIO120 这单…"), { key: "当前会话", explicit: false });
+  assert.equal(draftRecipient("D158 待确认：问课确定导师 WK-20261106-397B60 裴浩博"), null);
+  assert.equal(draftReference(d190, ""), "REQ-20261105-B37C1422");
+  assert.equal(draftReference("D94 待确认：发给 dm:DongFan：宝", "问课单：WK-20261105-21C8EB"), "WK-20261105-21C8EB");
+  assert.equal(draftReference("D181 待确认：回复 Lumist.Grace（私聊）", "好的"), null);
+  assert.equal(draftNumber(d190), "D190");
+});
+
+test("merges superseded drafts: same recipient and order, or within 10 minutes", () => {
+  const grace = [176, 177, 178, 179, 180, 181].map((n, index) => ({
+    id: `d${n}`,
+    title: index % 2 ? "D" + n + " 待确认：回复 Lumist.Grace（私聊）" : "D" + n + " 待确认：发给 dm:Lumist.Grace：老师好，这单…",
+    description: DRAFT_FOOTER,
+    created_at: `2026-11-06T08:30:${String(index * 5).padStart(2, "0")}Z`,
+  }));
+  const gabby = [
+    ["d184", "D184 待确认：发给 dm:gabby：REQ-20261105-B37C1422 还缺学校邮箱", "2026-11-05T10:00:00Z"],
+    ["d188", "D188 待确认：发给 dm:gabby：REQ-20261105-B37C1422 再催一下学校邮箱", "2026-11-06T02:00:00Z"],
+    ["d190", "D190 待确认：发给 dm:gabby：REQ-20261105-B37C1422（诺丁汉宁波 ECONF003）现在只缺一个信息…", "2026-11-06T09:00:00Z"],
+  ].map(([id, title, created_at]) => ({ id, title, description: DRAFT_FOOTER, created_at }));
+  const others = [
+    // 当前会话 without a shared order never merges.
+    { id: "d183", title: "D183 待确认：发给 当前会话：宝，BIO120 这单…", created_at: "2026-11-06T08:30:10Z" },
+    { id: "d185", title: "D185 待确认：发给 当前会话：宝，另一单", created_at: "2026-11-06T08:31:00Z" },
+    // Same recipient, no order, but an hour apart: both stay.
+    { id: "d150", title: "D150 待确认：回复 Lumist.Grace（私聊）", created_at: "2026-11-06T07:20:00Z" },
+    // Same recipient, one with an order, one without: no merge.
+    { id: "d186", title: "D186 待确认：发给 dm:gabby：周末好", created_at: "2026-11-06T09:01:00Z" },
+  ];
+  const { current, superseded } = findSupersededDrafts([...grace, ...gabby, ...others]);
+  assert.equal(current.size, 2);
+  assert.deepEqual(current.get("d181").map((item) => item.id), ["d180", "d179", "d178", "d177", "d176"]);
+  assert.deepEqual(current.get("d190").map((item) => item.id), ["d188", "d184"]);
+  assert.equal(superseded.length, 7);
+  assert.ok(superseded.every(({ item, kept }) => item.id !== kept.id));
+  assert.equal(supersededReason(gabby[2]), "已被新草稿 D190 替代");
+  // The bulk comment is the draft's own reject verb.
+  assert.deepEqual(planBatch(superseded.filter(({ kept }) => kept.id === "d190").map(({ item }) => item), "reject", supersededReason(gabby[2])).calls, [
+    { content: "不要 已被新草稿 D190 替代", issue_ids: ["d188", "d184"] },
+  ]);
+  // 当前会话 merges once both drafts name the same order.
+  const sameOrder = findSupersededDrafts([
+    { id: "a", title: "D200 待确认：发给 当前会话：REQ-20261105-B37C1422 一", created_at: "2026-11-06T01:00:00Z" },
+    { id: "b", title: "D201 待确认：发给 当前会话：REQ-20261105-B37C1422 二", created_at: "2026-11-06T05:00:00Z" },
+  ]);
+  assert.deepEqual([...sameOrder.current.keys()], ["b"]);
+});
+
+test("links asks to the drafts they name", () => {
+  assert.deepEqual(referencedDrafts("Q35 分身请教：25ABFF98 缺信息 32 小时 + 已提换导师，这单怎么走？", ASK_BODY), ["D187"]);
+  assert.deepEqual(
+    referencedDrafts("Q30 分身请教：D165 待确认：给销售 … 的三单缺信息催补（已等 24 小时），请选", "A. A 同意发出 D165（三单合并催补销售） B. B 先不发"),
+    ["D165"],
+  );
+  // Option letter "D." and hex inside an id are not draft numbers.
+  assert.deepEqual(referencedDrafts("Q1 分身请教：x", "A. A 一 D. D 四 REQ-20261105-D1234567 BD12"), []);
+});
+
+test("reads the decision comment of a referenced draft", () => {
+  const comments = [
+    { content: "// 备注 先等等", created_at: "2026-11-06T01:00:00Z" },
+    { content: "不要 已被新草稿 D190 替代\n补充说明", created_at: "2026-11-06T02:00:00Z" },
+    { content: "已执行", created_at: "2026-11-06T03:00:00Z" },
+  ];
+  assert.equal(draftDecisionLine(comments, DRAFT_FOOTER), "不要 已被新草稿 D190 替代");
+  assert.equal(draftDecisionLine([{ content: "同意", created_at: "2026-11-06T01:00:00Z" }], ""), "同意");
+  assert.equal(draftDecisionLine([{ content: "同意一下再说", created_at: "2026-11-06T01:00:00Z" }], ""), null);
+  assert.equal(draftDecisionLine([], ""), null);
+  assert.equal(truncateText("一二三四五", 3), "一二三…");
+  assert.equal(truncateText("一二", 3), "一二");
 });
