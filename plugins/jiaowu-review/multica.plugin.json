@@ -3,7 +3,7 @@
   "key": "com.lumistedu.jiaowu-review",
   "name": "教务审批",
   "description": "审批教务分身的草稿、请教和经验提案：审批队列页、飞书卡片一键审批、问课单结束后给遗留卡片打收口评论。只按分身卡片上写明的协议发评论，不改状态。",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Lumist",
     "url": "https://fde.lumistedu.com"
@@ -13,7 +13,7 @@
     "comments:read",
     "comments:write",
     "storage:workspace",
-    "net:jiaowu-hooks.fde.lumistedu.com"
+    "net:fde-hooks.lumistedu.com"
   ],
   "contributes": {
     "surfaces": [
@@ -33,7 +33,7 @@
         "triggers": ["card_action"],
         "transport": {
           "type": "http",
-          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/card"
+          "url": "https://fde-hooks.lumistedu.com/hooks/card"
         },
         "timeout_ms": 1500
       },
@@ -45,7 +45,7 @@
         "events": ["issue.created", "issue.status_changed"],
         "transport": {
           "type": "http",
-          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/track"
+          "url": "https://fde-hooks.lumistedu.com/hooks/track"
         },
         "timeout_ms": 5000
       },
@@ -60,7 +60,7 @@
         },
         "transport": {
           "type": "http",
-          "url": "https://jiaowu-hooks.fde.lumistedu.com/hooks/sweep"
+          "url": "https://fde-hooks.lumistedu.com/hooks/sweep"
         },
         "timeout_ms": 30000
       }

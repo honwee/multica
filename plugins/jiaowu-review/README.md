@@ -33,12 +33,12 @@
 node plugins/jiaowu-review/build.mjs --zip   # 生成 ui/main.js 和 dist/jiaowu-review-<版本>.zip
 ```
 
-`ui/main.js` 由 `ui/page.mjs` 和 `lib/protocol.mjs` 生成，不要手改。钩子服务的地址写在 manifest 里（`jiaowu-hooks.fde.lumistedu.com`），换地址就要改 manifest、升版本号、重新打包。
+`ui/main.js` 由 `ui/page.mjs` 和 `lib/protocol.mjs` 生成，不要手改。钩子服务的地址写在 manifest 里（`fde-hooks.lumistedu.com`），换地址就要改 manifest、升版本号、重新打包。线上证书是 `*.lumistedu.com` 通配证书，只覆盖一级子域，所以钩子主机必须是 `xxx.lumistedu.com` 这种一级子域，不能用 `xxx.fde.lumistedu.com`。
 
 ## 安装（教务FDE 管理员）
 
 1. 线上先配好 `MULTICA_PLUGIN_SECRET_KEY` 和 `MULTICA_PLUGIN_SURFACE_ORIGIN`（见 LUM-33 的待决问题 1）。没配时插件页面打不开，钩子也不会运行。
-2. 教务FDE →「设置 → 插件」→ 上传 `jiaowu-review-1.0.0.zip` → 安装，同意权限：`issues:read`、`comments:read`、`comments:write`、`storage:workspace`、`net:jiaowu-hooks.fde.lumistedu.com`。
+2. 教务FDE →「设置 → 插件」→ 上传 `jiaowu-review-1.0.1.zip` → 安装，同意权限：`issues:read`、`comments:read`、`comments:write`、`storage:workspace`、`net:fde-hooks.lumistedu.com`。
 3. 「设置 → 插件 → 工作区扩展」打开「侧边栏插件页面」；要用飞书按钮时再打开「飞书通知卡片上的插件按钮」。
 4. 在插件详情里轮换 token，记下 signing secret（只显示一次），交给部署钩子服务的人。
 
@@ -50,7 +50,7 @@ node plugins/jiaowu-review/build.mjs --zip   # 生成 ui/main.js 和 dist/jiaowu
 MULTICA_SIGNING_SECRET=whsec_… PORT=8787 node plugins/jiaowu-review/server/handler.mjs
 ```
 
-- Multica 必须能通过 HTTPS 访问 `https://jiaowu-hooks.fde.lumistedu.com/hooks/{card,track,sweep}`，所以需要 DNS、证书和反向代理；也可以用 `MULTICA_HOOK_TLS_CERT` / `MULTICA_HOOK_TLS_KEY` 直接提供 HTTPS。
+- Multica 必须能通过 HTTPS 访问 `https://fde-hooks.lumistedu.com/hooks/{card,track,sweep}`，所以需要 DNS、证书和反向代理；也可以用 `MULTICA_HOOK_TLS_CERT` / `MULTICA_HOOK_TLS_KEY` 直接提供 HTTPS。
 - `GET /healthz` 用来做健康检查。
 - `card` 钩子必须在 1.5 秒内返回；点击无效时（例如请教没有选项 D）返回 422，卡片保持可点。
 
