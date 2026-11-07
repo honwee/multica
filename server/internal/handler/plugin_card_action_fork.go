@@ -144,7 +144,7 @@ func (c *PluginCardActions) verifyToken(token string) (pluginCardClaims, error) 
 
 // CardButtons implements feishunotify.CardButtonProvider.
 func (c *PluginCardActions) CardButtons(ctx context.Context, workspaceID, issueID, _ string) []feishunotify.CardButtonBlock {
-	if _, ok := c.signingKey(); !ok {
+	if _, ok := c.signingKey(); !ok || !c.h.pluginsV1Enabled(ctx) {
 		return nil
 	}
 	wsID, err := util.ParseUUID(workspaceID)
@@ -252,7 +252,7 @@ func (c *PluginCardActions) HandleCardAction(ctx context.Context, inst lark.Inst
 	if err != nil || uuidToString(inst.WorkspaceID) != claims.WorkspaceID {
 		return cardToast(lark.CardToastError, "按钮与当前机器人不匹配")
 	}
-	if !c.h.workspacePluginExtensions(ctx, workspaceID).CardButtons {
+	if !c.h.pluginsV1Enabled(ctx) || !c.h.workspacePluginExtensions(ctx, workspaceID).CardButtons {
 		return cardToast(lark.CardToastWarning, "该工作区已关闭卡片按钮")
 	}
 

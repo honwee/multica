@@ -520,6 +520,12 @@ func TestPluginCardButtonsFollowSwitchAndRules(t *testing.T) {
 		t.Fatalf("non-matching issue rendered %+v", blocks)
 	}
 
+	withPluginsV1Flag(t, testHandler, false)
+	if blocks := actions.CardButtons(context.Background(), testWorkspaceID, matching, testUserID); blocks != nil {
+		t.Fatalf("Plugins flag off rendered %+v", blocks)
+	}
+	withPluginsV1Flag(t, testHandler, true)
+
 	testPool.Exec(context.Background(), `UPDATE plugin_installation SET enabled = false WHERE id = $1`, installationID)
 	if blocks := actions.CardButtons(context.Background(), testWorkspaceID, matching, testUserID); blocks != nil {
 		t.Fatalf("disabled plugin rendered %+v", blocks)
