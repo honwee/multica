@@ -85,6 +85,7 @@ export function LarkOrganizationMapping({
   const [sourceValue, setSourceValue] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
+  const [admitOnLogin, setAdmitOnLogin] = useState(false);
   const [mappings, setMappings] = useState<LarkOrganizationMappingValue[]>([]);
   const [run, setRun] = useState<LarkOrganizationSyncRun | null>(null);
   const [pending, setPending] = useState<OrganizationPendingAction>(null);
@@ -104,6 +105,7 @@ export function LarkOrganizationMapping({
     else setSourceValue(loginApp ? LOGIN_APP_SOURCE : activeInstallations[0]?.id ?? "");
     setEnabled(config?.enabled ?? false);
     setAutoSync(config?.auto_sync ?? false);
+    setAdmitOnLogin(config?.admit_on_login ?? false);
     setMappings(
       (data?.mappings ?? []).map((mapping) => ({ ...mapping })),
     );
@@ -133,12 +135,13 @@ export function LarkOrganizationMapping({
   const displayedRun = run ?? latestStoredRun;
   const config = data?.config ?? null;
   const catalog = data?.catalog ?? null;
-  const draftSignature = JSON.stringify({ source: sourceValue, enabled, auto_sync: autoSync, mappings });
+  const draftSignature = JSON.stringify({ source: sourceValue, enabled, auto_sync: autoSync, admit_on_login: admitOnLogin, mappings });
   const savedSignature = config
     ? JSON.stringify({
         source: config.source === "login_app" ? LOGIN_APP_SOURCE : config.installation_id,
         enabled: config.enabled,
         auto_sync: config.auto_sync ?? false,
+        admit_on_login: config.admit_on_login ?? false,
         mappings: data?.mappings ?? [],
       })
     : null;
@@ -184,6 +187,7 @@ export function LarkOrganizationMapping({
         ...(usesLoginApp ? { source: "login_app" as const } : { source: "installation" as const, installation_id: sourceValue }),
         enabled,
         auto_sync: autoSync,
+        admit_on_login: admitOnLogin,
         mappings: nextMappings,
       });
       setMappings(nextMappings);
@@ -350,9 +354,13 @@ export function LarkOrganizationMapping({
                         checked={enabled}
                         onCheckedChange={(checked) => {
                           setEnabled(checked === true);
-                          // Automatic sync has no meaning while sync is off; clear it
-                          // so re-enabling later does not silently resume unattended applies.
-                          if (checked !== true) setAutoSync(false);
+                          // Automatic sync and admit on login have no meaning while sync is
+                          // off; clear them so re-enabling later does not silently resume
+                          // unattended applies or admissions.
+                          if (checked !== true) {
+                            setAutoSync(false);
+                            setAdmitOnLogin(false);
+                          }
                         }}
                         disabled={pending !== null}
                       />
@@ -362,6 +370,12 @@ export function LarkOrganizationMapping({
                     <div className="flex items-center gap-2 pb-2" title={t(($) => $.lark.organization.auto_sync_hint)}>
                       <Label htmlFor={`${id}-auto-sync`}>{t(($) => $.lark.organization.auto_sync)}</Label>
                       <Switch id={`${id}-auto-sync`} checked={autoSync} onCheckedChange={(checked) => setAutoSync(checked === true)} disabled={pending !== null || !enabled} />
+                    </div>
+                  )}
+                  {canManage && (
+                    <div className="flex items-center gap-2 pb-2" title={t(($) => $.lark.organization.admit_on_login_hint)}>
+                      <Label htmlFor={`${id}-admit-on-login`}>{t(($) => $.lark.organization.admit_on_login)}</Label>
+                      <Switch id={`${id}-admit-on-login`} checked={admitOnLogin} onCheckedChange={(checked) => setAdmitOnLogin(checked === true)} disabled={pending !== null || !enabled} />
                     </div>
                   )}
                 </div>

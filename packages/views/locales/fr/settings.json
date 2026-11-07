@@ -1126,6 +1126,8 @@
       "department_includes_children": "Couvre le service et tous ses sous-services.",
       "auto_sync": "Synchronisation automatique",
       "auto_sync_hint": "Appliquée toutes les heures et quand Feishu signale un changement. Les changements de propriétaire sont ignorés jusqu'à ce qu'un propriétaire les applique ici.",
+      "admit_on_login": "Rejoindre à la connexion",
+      "admit_on_login_hint": "Les personnes couvertes par une règle deviennent membres en se connectant avec Feishu, sans invitation. Désactivé, une invitation reste nécessaire.",
       "history_mode_auto": "Automatique"
     },
     "bound_label": "Associé",

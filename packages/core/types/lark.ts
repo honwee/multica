@@ -105,6 +105,9 @@ export interface LarkOrganizationConfig {
   /** Apply the plan hourly and on Feishu contact events without a manual
    * review. Optional so older servers still parse. */
   auto_sync?: boolean;
+  /** A Feishu sign-in matching a rule becomes a member without an
+   * invitation. Defaults to false for servers that predate it. */
+  admit_on_login: boolean;
   revision: number;
   updated_at: string;
 }
@@ -230,6 +233,8 @@ export interface UpdateLarkOrganizationRequest {
   installation_id?: string;
   enabled: boolean;
   auto_sync: boolean;
+  /** Omitted by older clients; the server then keeps the stored value. */
+  admit_on_login?: boolean;
   mappings: LarkOrganizationMapping[];
 }
 

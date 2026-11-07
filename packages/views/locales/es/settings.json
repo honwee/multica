@@ -1109,6 +1109,8 @@
       "department_includes_children": "Cubre el departamento y todos sus subdepartamentos.",
       "auto_sync": "Sincronización automática",
       "auto_sync_hint": "Se aplica cada hora y cuando Feishu informa un cambio. Los cambios de propietario se omiten hasta que un propietario los aplique aquí.",
+      "admit_on_login": "Unirse al iniciar sesión",
+      "admit_on_login_hint": "Quien coincida con una regla se convierte en miembro al iniciar sesión con Feishu, sin invitación. Si está desactivado, se necesita una invitación.",
       "history_mode_auto": "Automática"
     },
     "bound_label": "Vinculado",

@@ -3508,6 +3508,7 @@ export const LarkOrganizationConfigSchema = z.object({
   installation_id: z.string().default(""),
   enabled: z.boolean(),
   auto_sync: z.boolean().optional(),
+  admit_on_login: z.boolean().catch(false).default(false),
   revision: z.number().int().nonnegative(),
   updated_at: z.string().default(""),
 }).loose();

@@ -1121,6 +1121,8 @@
       "department_includes_children": "规则覆盖该部门及其所有子部门。",
       "auto_sync": "自动同步",
       "auto_sync_hint": "每小时以及飞书通讯录变动时自动应用。涉及所有者的变更会跳过，需由所有者在此手动应用。",
+      "admit_on_login": "登录时自动加入",
+      "admit_on_login_hint": "命中映射规则的人用飞书登录即成为成员，无需邀请。关闭时仍需邀请。",
       "history_mode_auto": "自动"
     },
     "bound_label": "已绑定",

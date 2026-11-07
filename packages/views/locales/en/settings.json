@@ -1127,6 +1127,8 @@
       "department_includes_children": "Covers the department and every sub-department beneath it.",
       "auto_sync": "Automatic sync",
       "auto_sync_hint": "Applies hourly and when Feishu reports a change. Owner changes are skipped until an owner applies them here.",
+      "admit_on_login": "Admit on sign-in",
+      "admit_on_login_hint": "People matching a rule become members when they sign in with Feishu, without an invitation. When off, an invitation is still required.",
       "history_mode_auto": "Automatic"
     },
     "bound_label": "Bound",
