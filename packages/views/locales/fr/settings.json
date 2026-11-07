@@ -689,9 +689,10 @@
     "feishu": {
       "title": "Notifications Feishu",
       "label": "Recevoir les notifications de la boîte de réception en messages directs Feishu",
-      "hint": "Suit les groupes de la boîte de réception ci-dessus. Les mises à jour d'une même tâche en une minute arrivent en un seul message.",
+      "hint": "Envoyées par le bot Feishu de l'agent assigné à la tâche ; les tâches assignées à une personne ou non assignées ne sont pas envoyées. Suit les groupes de la boîte de réception ci-dessus. Les mises à jour d'une même tâche en une minute arrivent en un seul message.",
       "not_linked": "Votre compte n'est pas lié à Feishu. Connectez-vous une fois avec Feishu pour l'activer.",
-      "not_configured": "Feishu n'est pas configuré sur ce déploiement."
+      "not_configured": "Feishu n'est pas configuré sur ce déploiement.",
+      "no_agent_bot": "Aucun agent de cet espace de travail n'a de bot Feishu. Liez un bot Feishu à un agent pour l'activer."
     },
     "browser": {
       "label": "Notifications du navigateur",
