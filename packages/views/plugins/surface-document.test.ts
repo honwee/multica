@@ -1,6 +1,67 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
-import { buildSurfaceFrameDocument } from "./surface-document";
+import { readFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SURFACE_THEME_TOKENS, buildSurfaceFrameDocument, readThemeTokens } from "./surface-document";
+
+describe("plugin surface theme tokens", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the eleven tokens older clients forwarded at the head of the list", () => {
+    expect(SURFACE_THEME_TOKENS.slice(0, 11)).toEqual([
+      "--background",
+      "--foreground",
+      "--muted",
+      "--muted-foreground",
+      "--border",
+      "--primary",
+      "--primary-foreground",
+      "--destructive",
+      "--radius",
+      "--text-caption",
+      "--text-body",
+    ]);
+  });
+
+  it("forwards the surface, geometry and type tokens a list page needs", () => {
+    expect(SURFACE_THEME_TOKENS).toEqual(expect.arrayContaining([
+      "--card",
+      "--accent",
+      "--input",
+      "--ring",
+      "--success",
+      "--surface-hover",
+      "--surface-selected",
+      "--surface-selected-foreground",
+      "--radius-md",
+      "--issue-row-height",
+      "--button-height-sm",
+      "--font-mono",
+      "--text-label",
+      "--text-label--line-height",
+      "--text-title--line-height",
+    ]));
+    expect(new Set(SURFACE_THEME_TOKENS).size).toBe(SURFACE_THEME_TOKENS.length);
+  });
+
+  it("only forwards tokens the shared stylesheet defines", () => {
+    const css = readFileSync(new URL("../../ui/styles/tokens.css", import.meta.url), "utf8");
+    const missing = SURFACE_THEME_TOKENS.filter((name) => !css.includes(`${name}:`));
+    expect(missing).toEqual([]);
+  });
+
+  it("reads trimmed computed values and skips tokens the page does not define", () => {
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: (name: string) =>
+        ({ "--surface-hover": " oklch(0.967 0.001 286.375) ", "--issue-row-height": "36px" })[name] ?? "",
+    }));
+
+    expect(readThemeTokens({} as Element)).toEqual({
+      "--surface-hover": "oklch(0.967 0.001 286.375)",
+      "--issue-row-height": "36px",
+    });
+    expect(readThemeTokens(null)).toEqual({});
+  });
+});
 
 describe("plugin surface frame document", () => {
   it("allows the nested frame to navigate only to the hosted content origin", () => {

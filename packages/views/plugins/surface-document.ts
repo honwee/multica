@@ -1,4 +1,9 @@
-/** Design tokens forwarded over the bridge so a surface looks native. */
+/**
+ * Design tokens forwarded over the bridge so a surface looks native.
+ *
+ * Older desktop clients forward only the first eleven, so plugin pages must
+ * give every later token a fallback in `var(--name, fallback)`.
+ */
 export const SURFACE_THEME_TOKENS = [
   "--background",
   "--foreground",
@@ -11,6 +16,47 @@ export const SURFACE_THEME_TOKENS = [
   "--radius",
   "--text-caption",
   "--text-body",
+  // Colors
+  "--secondary",
+  "--secondary-foreground",
+  "--accent",
+  "--accent-foreground",
+  "--card",
+  "--card-foreground",
+  "--popover",
+  "--popover-foreground",
+  "--input",
+  "--ring",
+  "--faint-foreground",
+  "--success",
+  "--warning",
+  "--info",
+  "--surface",
+  "--surface-border",
+  "--surface-hover",
+  "--surface-raised",
+  "--surface-selected",
+  "--surface-selected-foreground",
+  // Radius and control geometry
+  "--radius-sm",
+  "--radius-md",
+  "--radius-lg",
+  "--issue-row-height",
+  "--button-height-sm",
+  "--button-height-default",
+  // Typography
+  "--font-sans",
+  "--font-mono",
+  "--text-micro",
+  "--text-micro--line-height",
+  "--text-caption--line-height",
+  "--text-label",
+  "--text-label--line-height",
+  "--text-body--line-height",
+  "--text-title-sm",
+  "--text-title-sm--line-height",
+  "--text-title",
+  "--text-title--line-height",
 ] as const;
 
 export const SURFACE_BRIDGE_CONNECT_MESSAGE = "multica:plugin-bridge-connect";
