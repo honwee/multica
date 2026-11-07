@@ -729,6 +729,7 @@ type FeishuOrgConfig struct {
 	AutoSync       bool               `json:"auto_sync"`
 	UpdatedBy      pgtype.UUID        `json:"updated_by"`
 	Source         string             `json:"source"`
+	AdmitOnLogin   bool               `json:"admit_on_login"`
 }
 
 type FeishuOrgDirectory struct {

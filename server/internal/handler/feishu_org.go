@@ -33,9 +33,12 @@ type LarkOrganizationConfigResponse struct {
 	Enabled        bool   `json:"enabled"`
 	// AutoSync applies the plan on a schedule and whenever the directory
 	// changes, without a manual preview and apply.
-	AutoSync  bool   `json:"auto_sync"`
-	Revision  int64  `json:"revision"`
-	UpdatedAt string `json:"updated_at"`
+	AutoSync bool `json:"auto_sync"`
+	// AdmitOnLogin makes a Feishu sign-in matching a rule a member without
+	// an invitation. AutoSync never adds members.
+	AdmitOnLogin bool   `json:"admit_on_login"`
+	Revision     int64  `json:"revision"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // LarkOrganizationMappingResponse is one organization rule. Agent access is
@@ -82,11 +85,14 @@ type LarkOrganizationLoginAppResponse struct {
 
 type UpdateLarkOrganizationRequest struct {
 	// Source defaults to "installation" for clients that predate it.
-	Source         string                            `json:"source"`
-	InstallationID string                            `json:"installation_id"`
-	Enabled        bool                              `json:"enabled"`
-	AutoSync       bool                              `json:"auto_sync"`
-	Mappings       []LarkOrganizationMappingResponse `json:"mappings"`
+	Source         string `json:"source"`
+	InstallationID string `json:"installation_id"`
+	Enabled        bool   `json:"enabled"`
+	AutoSync       bool   `json:"auto_sync"`
+	// AdmitOnLogin is a pointer so clients that predate it keep the stored
+	// value when they save.
+	AdmitOnLogin *bool                             `json:"admit_on_login"`
+	Mappings     []LarkOrganizationMappingResponse `json:"mappings"`
 }
 
 type feishuOrgActor struct {
@@ -152,6 +158,7 @@ func (h *Handler) loadLarkOrganizationResponse(ctx context.Context, workspaceID 
 			InstallationID: uuidToString(config.InstallationID),
 			Enabled:        config.Enabled,
 			AutoSync:       config.AutoSync,
+			AdmitOnLogin:   config.AdmitOnLogin,
 			Revision:       config.Revision,
 			UpdatedAt:      timestampToString(config.UpdatedAt),
 		}
@@ -373,9 +380,18 @@ func (h *Handler) UpdateLarkOrganization(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusForbidden, "only a workspace owner can configure owner role mappings")
 		return
 	}
+	admitOnLogin := false
+	if request.AdmitOnLogin != nil {
+		admitOnLogin = *request.AdmitOnLogin
+	} else if current, err := qtx.GetFeishuOrgConfig(r.Context(), actor.workspaceID); err == nil {
+		admitOnLogin = current.AdmitOnLogin
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
+		return
+	}
 	if _, err := qtx.UpsertFeishuOrgConfig(r.Context(), db.UpsertFeishuOrgConfigParams{
 		WorkspaceID: actor.workspaceID, Source: source, InstallationID: installationID, Enabled: request.Enabled,
-		AutoSync: request.AutoSync, UpdatedBy: actor.userID,
+		AutoSync: request.AutoSync, AdmitOnLogin: admitOnLogin, UpdatedBy: actor.userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save organization sync configuration")
 		return

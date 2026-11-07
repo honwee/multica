@@ -14,8 +14,8 @@ import (
 )
 
 // joinFeishuOrganizationWorkspaces adds a freshly signed-in Feishu user to
-// every workspace whose automatic organization sync has a rule covering
-// them, so the organization decides membership instead of a manual invite.
+// every workspace that admits on login and has a rule covering them, so the
+// organization decides membership instead of a manual invite.
 // It never blocks the login: failures are logged and the hourly sync
 // reconciles later. Owner is never granted unattended; an owner rule joins
 // the user as admin.
@@ -34,7 +34,7 @@ func (h *Handler) joinFeishuOrganizationWorkspaces(ctx context.Context, user db.
 	}
 	directories := make(map[string]*lark.OrgSnapshot)
 	for _, config := range configs {
-		if !config.AutoSync {
+		if !config.Enabled || !config.AdmitOnLogin {
 			continue
 		}
 		// Membership is the cheap check; only load a directory for a

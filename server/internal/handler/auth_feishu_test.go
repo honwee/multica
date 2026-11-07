@@ -342,7 +342,7 @@ func TestFeishuLoginUsesLinkedUnionID(t *testing.T) {
 	}
 }
 
-// TestFeishuLoginJoinsWorkspaceByOrganizationRule: with automatic sync on,
+// TestFeishuLoginJoinsWorkspaceByOrganizationRule: with admit on login on,
 // a first sign-in from someone the rules cover lands them in the workspace
 // with the mapped role; someone outside every rule is not admitted.
 func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
@@ -350,7 +350,7 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 	t.Setenv("FEISHU_APP_SECRET", "test-secret")
 	fixture := newFeishuOrgHandlerFixture(t)
 	req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", UpdateLarkOrganizationRequest{
-		InstallationID: fixture.installationID, Enabled: true, AutoSync: true,
+		InstallationID: fixture.installationID, Enabled: true, AdmitOnLogin: feishuOrgBool(true),
 		Mappings: []LarkOrganizationMappingResponse{
 			{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("admin")},
 			{Kind: "department", ExternalID: "d3", ExternalName: "Leadership", MemberRole: feishuOrgRole("owner")},
@@ -382,18 +382,7 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 
 	login := func(unionID, openID, email string) LoginResponse {
 		t.Helper()
-		h := *testHandler
-		h.cfg = Config{AllowSignup: true}
-		h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
-			if strings.HasSuffix(req.URL.Path, "/oauth/token") {
-				return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
-			}
-			return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"Person","enterprise_email":"`+email+`","open_id":"`+openID+`","union_id":"`+unionID+`","tenant_key":"tenant_join"}}`), nil
-		})}
-		req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
-		var got LoginResponse
-		testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
-		return got
+		return feishuOrgJoinLogin(t, unionID, openID, email)
 	}
 
 	joiner := login("on_joiner", "ou_joiner_login", joinerEmail)
@@ -426,5 +415,95 @@ func TestFeishuLoginJoinsWorkspaceByOrganizationRule(t *testing.T) {
 	}
 	if role != "admin" || managed.Valid {
 		t.Fatalf("leader role = %q managed = %+v, want unmanaged admin", role, managed)
+	}
+}
+
+func feishuOrgBool(value bool) *bool { return &value }
+
+// feishuOrgJoinLogin signs a Feishu user in through FeishuLogin with stubbed
+// OAuth responses.
+func feishuOrgJoinLogin(t *testing.T, unionID, openID, email string) LoginResponse {
+	t.Helper()
+	h := *testHandler
+	h.cfg = Config{AllowSignup: true}
+	h.feishuOAuthHTTPClient = &http.Client{Transport: feishuRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/oauth/token") {
+			return feishuResponse(req, http.StatusOK, `{"code":0,"access_token":"u-test-token","token_type":"Bearer"}`), nil
+		}
+		return feishuResponse(req, http.StatusOK, `{"code":0,"msg":"success","data":{"name":"Person","enterprise_email":"`+email+`","open_id":"`+openID+`","union_id":"`+unionID+`","tenant_key":"tenant_join"}}`), nil
+	})}
+	req := httptest.NewRequest(http.MethodPost, "/auth/feishu", strings.NewReader(`{"code":"test-code"}`))
+	var got LoginResponse
+	testutil.Call(t, h.FeishuLogin, req).Want(http.StatusOK).JSON(&got)
+	return got
+}
+
+// TestFeishuLoginAdmitsOnlyWhenAdmitOnLoginIsOn: automatic sync alone never
+// admits a sign-in, and neither does admit on login while the organization
+// sync is disabled. A save that omits admit_on_login keeps the stored value.
+func TestFeishuLoginAdmitsOnlyWhenAdmitOnLoginIsOn(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "test-secret")
+	fixture := newFeishuOrgHandlerFixture(t)
+	mappings := []LarkOrganizationMappingResponse{
+		{Kind: "department", ExternalID: "d1", ExternalName: "Engineering", MemberRole: feishuOrgRole("member")},
+	}
+	save := func(request UpdateLarkOrganizationRequest) LarkOrganizationResponse {
+		t.Helper()
+		request.InstallationID = fixture.installationID
+		request.Mappings = mappings
+		req := feishuOrgRequest(fixture.ownerID, http.MethodPut, fixture.workspaceID, "/api/workspaces/"+fixture.workspaceID+"/lark/organization", request)
+		w := httptest.NewRecorder()
+		testHandler.UpdateLarkOrganization(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("save status = %d, body=%s", w.Code, w.Body.String())
+		}
+		var saved LarkOrganizationResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil || saved.Config == nil {
+			t.Fatalf("saved config = %s err=%v", w.Body.String(), err)
+		}
+		return saved
+	}
+	emails := []string{
+		"feishu-sync-only-" + fixture.workspaceID + "@corp.example.com",
+		"feishu-disabled-" + fixture.workspaceID + "@corp.example.com",
+	}
+	dbfx.Cleanup(t, `DELETE FROM "user" WHERE email = $1 OR email = $2`, emails[0], emails[1])
+	snapshot, _ := json.Marshal(lark.OrgSnapshot{
+		Complete:    true,
+		Departments: []lark.OrgDepartment{{ID: "d1", Name: "Engineering", ParentID: "0"}},
+		Users: []lark.OrgUser{
+			{OpenID: "ou_sync_only_dir", UnionID: "on_sync_only", EnterpriseEmail: emails[0], Name: "Sync Only", DepartmentIDs: []string{"d1"}, Active: true},
+			{OpenID: "ou_disabled_dir", UnionID: "on_disabled", EnterpriseEmail: emails[1], Name: "Disabled", DepartmentIDs: []string{"d1"}, Active: true},
+		},
+	})
+	if _, err := testHandler.Queries.UpsertFeishuOrgDirectory(context.Background(), db.UpsertFeishuOrgDirectoryParams{
+		InstallationID: parseUUID(fixture.installationID), Snapshot: snapshot, FetchedBy: parseUUID(fixture.ownerID),
+	}); err != nil {
+		t.Fatalf("seed directory: %v", err)
+	}
+	isMember := func(userID string) bool {
+		t.Helper()
+		return dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2 AND disabled_at IS NULL`, fixture.workspaceID, userID) > 0
+	}
+
+	if saved := save(UpdateLarkOrganizationRequest{Enabled: true, AutoSync: true}); saved.Config.AdmitOnLogin {
+		t.Fatal("admit_on_login must default to off")
+	}
+	if syncOnly := feishuOrgJoinLogin(t, "on_sync_only", "ou_sync_only_login", emails[0]); isMember(syncOnly.User.ID) {
+		t.Fatal("automatic sync alone must not admit a sign-in")
+	}
+
+	save(UpdateLarkOrganizationRequest{Enabled: false, AutoSync: true, AdmitOnLogin: feishuOrgBool(true)})
+	if disabled := feishuOrgJoinLogin(t, "on_disabled", "ou_disabled_login", emails[1]); isMember(disabled.User.ID) {
+		t.Fatal("a disabled organization sync must not admit a sign-in")
+	}
+
+	// A client that predates admit_on_login omits it; the stored value stays.
+	if saved := save(UpdateLarkOrganizationRequest{Enabled: true, AutoSync: true}); !saved.Config.AdmitOnLogin {
+		t.Fatal("a save without admit_on_login must keep the stored value")
+	}
+	if saved := save(UpdateLarkOrganizationRequest{Enabled: true, AutoSync: true, AdmitOnLogin: feishuOrgBool(false)}); saved.Config.AdmitOnLogin {
+		t.Fatal("an explicit admit_on_login=false must turn it off")
 	}
 }
