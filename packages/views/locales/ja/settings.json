@@ -1121,6 +1121,8 @@
       "department_includes_children": "この部署とその配下のすべてのサブ部署が対象になります。",
       "auto_sync": "自動同期",
       "auto_sync_hint": "1 時間ごと、および Feishu の連絡先が変わったときに自動で適用します。オーナーに関わる変更はスキップされ、オーナーがここで手動で適用する必要があります。",
+      "admit_on_login": "ログイン時に自動参加",
+      "admit_on_login_hint": "ルールに一致する人は Feishu でログインすると招待なしでメンバーになります。オフの場合は招待が必要です。",
       "history_mode_auto": "自動"
     },
     "bound_label": "連携済み",

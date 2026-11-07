@@ -271,7 +271,7 @@ func (q *Queries) FeishuOrgInstallationIsSource(ctx context.Context, installatio
 }
 
 const getFeishuOrgBootstrapSource = `-- name: GetFeishuOrgBootstrapSource :one
-SELECT c.workspace_id, c.installation_id, c.enabled, c.revision, c.created_at, c.updated_at, c.auto_sync, c.updated_by, c.source
+SELECT c.workspace_id, c.installation_id, c.enabled, c.revision, c.created_at, c.updated_at, c.auto_sync, c.updated_by, c.source, c.admit_on_login
 FROM feishu_org_config c
 JOIN member m
   ON m.workspace_id = c.workspace_id
@@ -306,12 +306,13 @@ func (q *Queries) GetFeishuOrgBootstrapSource(ctx context.Context, userID pgtype
 		&i.AutoSync,
 		&i.UpdatedBy,
 		&i.Source,
+		&i.AdmitOnLogin,
 	)
 	return i, err
 }
 
 const getFeishuOrgConfig = `-- name: GetFeishuOrgConfig :one
-SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source FROM feishu_org_config
+SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source, admit_on_login FROM feishu_org_config
 WHERE workspace_id = $1
 `
 
@@ -328,6 +329,7 @@ func (q *Queries) GetFeishuOrgConfig(ctx context.Context, workspaceID pgtype.UUI
 		&i.AutoSync,
 		&i.UpdatedBy,
 		&i.Source,
+		&i.AdmitOnLogin,
 	)
 	return i, err
 }
@@ -527,7 +529,7 @@ func (q *Queries) ListActiveOwnerUserIDs(ctx context.Context, workspaceID pgtype
 }
 
 const listEnabledFeishuOrgConfigs = `-- name: ListEnabledFeishuOrgConfigs :many
-SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source FROM feishu_org_config
+SELECT workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source, admit_on_login FROM feishu_org_config
 WHERE enabled
 ORDER BY source, installation_id, workspace_id
 `
@@ -553,6 +555,7 @@ func (q *Queries) ListEnabledFeishuOrgConfigs(ctx context.Context) ([]FeishuOrgC
 			&i.AutoSync,
 			&i.UpdatedBy,
 			&i.Source,
+			&i.AdmitOnLogin,
 		); err != nil {
 			return nil, err
 		}
@@ -1053,17 +1056,18 @@ func (q *Queries) UpdateFeishuOrgSyncRun(ctx context.Context, arg UpdateFeishuOr
 }
 
 const upsertFeishuOrgConfig = `-- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, admit_on_login, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (workspace_id) DO UPDATE SET
     source = EXCLUDED.source,
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
     auto_sync = EXCLUDED.auto_sync,
+    admit_on_login = EXCLUDED.admit_on_login,
     updated_by = EXCLUDED.updated_by,
     revision = feishu_org_config.revision + 1,
     updated_at = now()
-RETURNING workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source
+RETURNING workspace_id, installation_id, enabled, revision, created_at, updated_at, auto_sync, updated_by, source, admit_on_login
 `
 
 type UpsertFeishuOrgConfigParams struct {
@@ -1072,6 +1076,7 @@ type UpsertFeishuOrgConfigParams struct {
 	InstallationID pgtype.UUID `json:"installation_id"`
 	Enabled        bool        `json:"enabled"`
 	AutoSync       bool        `json:"auto_sync"`
+	AdmitOnLogin   bool        `json:"admit_on_login"`
 	UpdatedBy      pgtype.UUID `json:"updated_by"`
 }
 
@@ -1082,6 +1087,7 @@ func (q *Queries) UpsertFeishuOrgConfig(ctx context.Context, arg UpsertFeishuOrg
 		arg.InstallationID,
 		arg.Enabled,
 		arg.AutoSync,
+		arg.AdmitOnLogin,
 		arg.UpdatedBy,
 	)
 	var i FeishuOrgConfig
@@ -1095,6 +1101,7 @@ func (q *Queries) UpsertFeishuOrgConfig(ctx context.Context, arg UpsertFeishuOrg
 		&i.AutoSync,
 		&i.UpdatedBy,
 		&i.Source,
+		&i.AdmitOnLogin,
 	)
 	return i, err
 }

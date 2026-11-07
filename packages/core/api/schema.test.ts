@@ -1851,6 +1851,23 @@ describe("workspace subscription contract", () => {
       expect(run.plan.changes[0]?.user_name).toBe("Ada");
     });
 
+    it("defaults admit_on_login to false when the server omits it or sends a malformed value", async () => {
+      const client = new ApiClient("https://api.example.test");
+      const organization = (config: Record<string, unknown>) => ({
+        config: { installation_id: "installation-1", enabled: true, revision: 1, updated_at: "", ...config },
+        mappings: [],
+        required_scopes: [],
+        requirements: [],
+        sync_runs: [],
+      });
+      stubFetchJson(organization({}));
+      expect((await client.getLarkOrganization("ws-1")).config?.admit_on_login).toBe(false);
+      stubFetchJson(organization({ admit_on_login: "yes" }));
+      expect((await client.getLarkOrganization("ws-1")).config?.admit_on_login).toBe(false);
+      stubFetchJson(organization({ admit_on_login: true }));
+      expect((await client.getLarkOrganization("ws-1")).config?.admit_on_login).toBe(true);
+    });
+
     it("rejects a malformed save response instead of reporting a successful write", async () => {
       stubFetchJson({});
       const client = new ApiClient("https://api.example.test");

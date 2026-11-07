@@ -6,13 +6,14 @@ WHERE workspace_id = $1;
 SELECT pg_advisory_xact_lock(hashtext($1::text));
 
 -- name: UpsertFeishuOrgConfig :one
-INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, updated_by)
-VALUES (@workspace_id, @source, @installation_id, @enabled, @auto_sync, @updated_by)
+INSERT INTO feishu_org_config (workspace_id, source, installation_id, enabled, auto_sync, admit_on_login, updated_by)
+VALUES (@workspace_id, @source, @installation_id, @enabled, @auto_sync, @admit_on_login, @updated_by)
 ON CONFLICT (workspace_id) DO UPDATE SET
     source = EXCLUDED.source,
     installation_id = EXCLUDED.installation_id,
     enabled = EXCLUDED.enabled,
     auto_sync = EXCLUDED.auto_sync,
+    admit_on_login = EXCLUDED.admit_on_login,
     updated_by = EXCLUDED.updated_by,
     revision = feishu_org_config.revision + 1,
     updated_at = now()

@@ -1121,6 +1121,8 @@
       "department_includes_children": "規則涵蓋該部門及其所有子部門。",
       "auto_sync": "自動同步",
       "auto_sync_hint": "每小時以及飛書通訊錄變動時自動套用。涉及擁有者的變更會略過，需由擁有者在此手動套用。",
+      "admit_on_login": "登入時自動加入",
+      "admit_on_login_hint": "符合對應規則的人以飛書登入即成為成員，無需邀請。關閉時仍需邀請。",
       "history_mode_auto": "自動"
     },
     "bound_label": "已綁定",

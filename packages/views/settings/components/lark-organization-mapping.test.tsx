@@ -236,6 +236,7 @@ describe("LarkOrganizationMapping", () => {
       installation_id: installation.id,
       enabled: true,
       auto_sync: false,
+      admit_on_login: false,
       mappings: [{
         kind: "department",
         external_id: "dep-2",
@@ -307,6 +308,7 @@ describe("LarkOrganizationMapping", () => {
       installation_id: installation.id,
       enabled: true,
       auto_sync: false,
+      admit_on_login: false,
       mappings: [
         {
           kind: "department",
@@ -334,6 +336,23 @@ describe("LarkOrganizationMapping", () => {
     await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
     await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
     expect(mockUpdate).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ enabled: true, auto_sync: true }));
+  }, 30000);
+
+  it("saves the admit on sign-in switch and clears it when sync is turned off", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockResolvedValue(baseOrganization());
+    renderUI();
+    const admit = screen.getByRole("switch", { name: enSettings.lark.organization.admit_on_login });
+    expect(admit).toHaveAttribute("aria-checked", "false");
+    await user.click(admit);
+    expect(admit).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: enSettings.lark.organization.save }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockUpdate).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ enabled: true, admit_on_login: true }));
+
+    await user.click(screen.getByRole("switch", { name: enSettings.lark.organization.enabled }));
+    expect(admit).toHaveAttribute("aria-checked", "false");
+    expect(admit).toHaveAttribute("aria-disabled", "true");
   }, 30000);
 
   it("filters catalog sources before adding a rule", async () => {

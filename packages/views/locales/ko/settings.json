@@ -1393,6 +1393,8 @@
       "department_includes_children": "해당 부서와 그 아래 모든 하위 부서에 적용됩니다.",
       "auto_sync": "자동 동기화",
       "auto_sync_hint": "매시간, 그리고 Feishu 연락처가 변경될 때 자동으로 적용합니다. 소유자 관련 변경은 건너뛰며 소유자가 여기에서 직접 적용해야 합니다.",
+      "admit_on_login": "로그인 시 자동 참여",
+      "admit_on_login_hint": "규칙에 해당하는 사람은 Feishu로 로그인하면 초대 없이 멤버가 됩니다. 끄면 초대가 필요합니다.",
       "history_mode_auto": "자동"
     },
     "bound_label": "연결 등록됨",
