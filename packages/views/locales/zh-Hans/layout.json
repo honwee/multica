@@ -139,7 +139,9 @@
       "view_remove": "从侧栏移除",
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
-      "view_delete": "删除视图"
+      "view_delete": "删除视图",
+      "plugin_pages": "插件",
+      "plugin_page_unavailable": "这个插件页面不可用。可能本工作区未开启插件页面，或插件已停用、已卸载。"
     },
     "team": {
       "new_agent": "新建智能体",

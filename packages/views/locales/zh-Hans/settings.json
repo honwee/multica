@@ -516,6 +516,12 @@
       "installed_version": "使用中",
       "review_install": "查看并安装",
       "review_upgrade": "查看并升级"
+    },
+    "extensions": {
+      "title": "工作区扩展",
+      "workspace_pages": "在侧边栏显示插件页面",
+      "card_buttons": "在飞书通知卡片上显示插件按钮",
+      "card_buttons_description": "只有 agent 飞书机器人发送的通知会带按钮。机器人应用需要用长连接订阅「卡片回传交互」（card.action.trigger）。"
     }
   },
   "properties": {

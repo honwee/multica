@@ -516,6 +516,12 @@
       "installed_version": "사용 중",
       "review_install": "확인 후 설치",
       "review_upgrade": "확인 후 업그레이드"
+    },
+    "extensions": {
+      "title": "워크스페이스 확장",
+      "workspace_pages": "사이드바에 플러그인 페이지 표시",
+      "card_buttons": "Feishu 알림 카드에 플러그인 버튼 표시",
+      "card_buttons_description": "에이전트의 Feishu 봇이 보낸 알림에만 버튼이 붙습니다. 봇 앱에서 장기 연결로 카드 콜백(card.action.trigger)을 구독해야 합니다."
     }
   },
   "properties": {

@@ -140,7 +140,9 @@
       "view_remove": "Quitar de la barra lateral",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "plugin_pages": "Plugins",
+      "plugin_page_unavailable": "Esta página del plugin no está disponible. Puede que esté desactivada en este espacio de trabajo o que el plugin esté desactivado o desinstalado."
     },
     "team": {
       "new_agent": "Nuevo agente",

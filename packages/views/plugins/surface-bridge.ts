@@ -33,6 +33,10 @@ const ALLOWED_PATHS: RegExp[] = [
   // this bridge was created for — a surface cannot reach another plugin's
   // hook by naming it here.
   /^\/hooks\/[^/]+$/,
+  // Fork workspace-page endpoints (FORK.md). The server refuses them unless
+  // the workspace switched pages on.
+  /^\/issues(\?[^#]*)?$/,
+  /^\/issue-batches\/(comments|status)$/,
 ];
 
 const MAX_RESIZE_PX = 4000;

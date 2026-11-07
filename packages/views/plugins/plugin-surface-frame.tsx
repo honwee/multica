@@ -17,6 +17,8 @@ interface PluginSurfaceFrameProps {
   surface: PluginSurface;
   issueId?: string;
   className?: string;
+  /** Initial frame height before the surface asks for its own. */
+  defaultHeight?: number;
 }
 
 /**
@@ -26,10 +28,10 @@ interface PluginSurfaceFrameProps {
  * boundary and is always `sandbox="allow-scripts"` without
  * `allow-same-origin`; see buildSurfaceFrameDocument.
  */
-export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className }: PluginSurfaceFrameProps) {
+export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className, defaultHeight }: PluginSurfaceFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [height, setHeight] = useState(defaultHeight ?? DEFAULT_HEIGHT);
   const launchInstance = useId();
 
   // Every mounted frame gets its own launch. The artifact is immutable, but the

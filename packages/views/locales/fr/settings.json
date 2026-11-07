@@ -520,6 +520,12 @@
       "installed_version": "Utilisés",
       "review_install": "Vérifier et installer",
       "review_upgrade": "Vérifier et mettre à niveau"
+    },
+    "extensions": {
+      "title": "Extensions de l'espace de travail",
+      "workspace_pages": "Pages de plugins dans la barre latérale",
+      "card_buttons": "Boutons de plugins sur les cartes de notification Feishu",
+      "card_buttons_description": "Seules les notifications envoyées par le bot Feishu d'un agent portent des boutons. L'app du bot doit s'abonner aux rappels de carte (card.action.trigger) via la connexion persistante."
     }
   },
   "properties": {

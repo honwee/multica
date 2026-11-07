@@ -140,7 +140,9 @@
       "view_remove": "Remove from sidebar",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
-      "view_delete": "Delete view"
+      "view_delete": "Delete view",
+      "plugin_pages": "Plugins",
+      "plugin_page_unavailable": "This plugin page isn't available. It may be turned off for this workspace, disabled, or uninstalled."
     },
     "team": {
       "new_agent": "New agent",

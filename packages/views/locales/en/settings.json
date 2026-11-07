@@ -520,6 +520,12 @@
       "installed_version": "In use",
       "review_install": "Review and install",
       "review_upgrade": "Review and upgrade"
+    },
+    "extensions": {
+      "title": "Workspace extensions",
+      "workspace_pages": "Plugin pages in the sidebar",
+      "card_buttons": "Plugin buttons on Feishu notification cards",
+      "card_buttons_description": "Only notifications sent by an agent's Feishu bot carry buttons. The bot app must subscribe to card callbacks (card.action.trigger) over the long connection."
     }
   },
   "properties": {

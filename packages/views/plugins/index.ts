@@ -19,3 +19,10 @@ export {
 export type { PluginModalTarget } from "./plugin-modal-surface";
 export { PluginHookActivity, PluginScheduleActivity, summarizeInvocations } from "./plugin-hook-activity";
 export { PluginMCPApproval, mcpHooks, initialSelection } from "./plugin-mcp-approval";
+export {
+  PluginPagesSection,
+  PluginWorkspacePage,
+  collectWorkspacePages,
+  useWorkspacePluginPages,
+} from "./plugin-workspace-pages";
+export type { PluginWorkspacePageEntry } from "./plugin-workspace-pages";

@@ -54,6 +54,8 @@ vi.mock("@multica/core/permissions", () => ({
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// Fork switches have their own suite (plugin-extensions-section.test.tsx).
+vi.mock("./plugin-extensions-section", () => ({ PluginExtensionsSection: () => null }));
 
 import { PluginsTab } from "./plugins-tab";
 

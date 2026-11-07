@@ -19,7 +19,7 @@ export interface PluginConfigField {
   multiline?: boolean;
 }
 
-export type PluginSurfaceType = "issue_panel" | "sidebar_panel" | "modal";
+export type PluginSurfaceType = "issue_panel" | "sidebar_panel" | "modal" | "workspace_page";
 
 export interface PluginSurface {
   key: string;
@@ -29,7 +29,7 @@ export interface PluginSurface {
   platforms?: string[];
 }
 
-export type PluginHookTrigger = "ui" | "manual" | "agent" | "event" | "schedule";
+export type PluginHookTrigger = "ui" | "manual" | "agent" | "event" | "schedule" | "card_action";
 
 export interface PluginHookSchedule {
   cron: string;
