@@ -3,7 +3,7 @@
   "key": "com.lumistedu.jiaowu-review",
   "name": "教务审批",
   "description": "审批教务分身的草稿、请教和经验提案：审批队列页、飞书卡片一键审批、问课单结束后给遗留卡片打收口评论。只按分身卡片上写明的协议发评论，不改状态。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "Lumist",
     "url": "https://fde.lumistedu.com"
@@ -69,7 +69,7 @@
       {
         "key": "draft",
         "hook": "card",
-        "match": { "projects": ["待我处理"], "title_prefixes": ["D"] },
+        "match": { "title_prefixes": ["D"] },
         "buttons": [
           { "key": "approve", "label": "同意", "style": "primary" },
           { "key": "revise", "label": "修改", "input": { "placeholder": "修改后的内容 / 不要的理由", "required": true } },
@@ -79,7 +79,7 @@
       {
         "key": "proposal",
         "hook": "card",
-        "match": { "projects": ["经验积累"], "title_prefixes": ["#"] },
+        "match": { "title_prefixes": ["#"] },
         "buttons": [
           { "key": "approve", "label": "同意", "style": "primary" },
           { "key": "revise", "label": "修改", "input": { "placeholder": "修改后的内容 / 拒绝的理由", "required": true } },
@@ -89,7 +89,7 @@
       {
         "key": "ask",
         "hook": "card",
-        "match": { "projects": ["待我处理"], "title_prefixes": ["Q"] },
+        "match": { "title_prefixes": ["Q"] },
         "buttons": [
           { "key": "a", "label": "A" },
           { "key": "b", "label": "B" },
