@@ -13,7 +13,9 @@
 
 ## 数据库迁移编号
 
-- fork 自己的新迁移从 **`9000_`** 开始编号（`9000_xxx.up.sql`、`9001_xxx.up.sql`……），和上游的编号段永远分开。
+- fork 自己的新迁移从 **`90000_`** 开始编号（`90000_xxx.up.sql`、`90001_xxx.up.sql`……），和上游的编号段永远分开。编号固定 5 位，保证按文件名排序与按数字排序一致。
+- `9000_feishu_org_admit_on_login` 是按旧规则（`9000_`）编号且已上线的迁移，**不改名**，列在 `server/internal/migrations/fork_migrations_test.go` 的 `forkPre90000MigrationStems` 里。迁移运行器按文件名的字典序执行，`90000_…` 排在 `9000_…` **之前**，所以从空库建库时新的 `90000+` 迁移会先于它执行：新迁移不能依赖 `feishu_org_config.admit_on_login` 列；确实需要时用 `ADD COLUMN IF NOT EXISTS` 等幂等写法自己保证。
+- `fork_migrations_test.go` 会拒绝 9000–89999 之间新出现的迁移编号。
 - 迁移运行器按完整文件名排序，`schema_migrations` 记录完整文件名，所以同号不同名的迁移两边都会执行。
 - 已上线的 fork 迁移 `614_feishu_*` 到 `637_feishu_*`（含 `627_lark_workspace_app_connection`）与上游 614 起的编号重叠，**不改名**。它们列在 `server/internal/migrations/fork_migrations_test.go`，编号唯一性检查对它们豁免。不要往这个列表里加新迁移。
 - fork 迁移不能依赖上游未来才会有的对象；如果上游迁移依赖了 fork 迁移建的对象，或反过来，必须在同步记录里写明。

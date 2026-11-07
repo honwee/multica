@@ -1,10 +1,17 @@
 package migrations
 
+import (
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+)
+
 // forkLegacyMigrationStems lists the Lumist fork migrations that were deployed
-// to production before the fork adopted the 9000+ numbering rule (see FORK.md).
+// to production before the fork adopted its own numbering range (see FORK.md).
 // Their numbers overlap upstream's 614+ range; schema_migrations records the
 // full stem, so both sides apply and these stems must never be renamed. New
-// fork migrations start at 9000 and are not listed here.
+// fork migrations start at 90000 and are not listed here.
 var forkLegacyMigrationStems = map[string]bool{
 	"614_feishu_user_identity":                        true,
 	"615_feishu_org_model":                            true,
@@ -30,4 +37,39 @@ var forkLegacyMigrationStems = map[string]bool{
 	"635_feishu_org_sync_run_directory_version":       true,
 	"636_feishu_org_config_source":                    true,
 	"637_feishu_org_source_from_bot_binding":          true,
+}
+
+// forkPre90000MigrationStems lists fork migrations deployed while the range
+// started at 9000. They keep their names. The runner orders files lexically,
+// so "90000_" sorts before "9000_": new 90000+ migrations must not depend on
+// objects these create.
+var forkPre90000MigrationStems = map[string]bool{
+	"9000_feishu_org_admit_on_login": true,
+}
+
+// firstForkMigrationNumber is where the fork's own migrations start. Five
+// digits keep lexical and numeric order the same within the range.
+const firstForkMigrationNumber = 90000
+
+// TestForkMigrationsUseTheForkRange rejects new migrations numbered between
+// the retired 9000 start and the 90000 range: their lexical order would not
+// match their numeric order against the fork range.
+func TestForkMigrationsUseTheForkRange(t *testing.T) {
+	for _, file := range migrationFilesForLint(t, "*.up.sql") {
+		stem, _, ok := splitMigrationFilename(filepath.Base(file))
+		if !ok {
+			continue
+		}
+		prefix, _, ok := strings.Cut(stem, "_")
+		if !ok {
+			continue
+		}
+		number, err := strconv.Atoi(prefix)
+		if err != nil || number < 9000 || forkPre90000MigrationStems[stem] {
+			continue
+		}
+		if number < firstForkMigrationNumber || number > 99999 {
+			t.Errorf("migration %s: fork migrations are numbered %d–99999 (see FORK.md)", stem, firstForkMigrationNumber)
+		}
+	}
 }
