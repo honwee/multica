@@ -664,6 +664,15 @@ deleted_invocations AS (
     DELETE FROM plugin_invocation
     WHERE workspace_id = $1
 ),
+-- Fork extension tables (FORK.md), both workspace-scoped.
+deleted_card_actions AS (
+    DELETE FROM plugin_card_action
+    WHERE workspace_id = $1
+),
+deleted_batch_actions AS (
+    DELETE FROM plugin_batch_action
+    WHERE workspace_id = $1
+),
 -- Published artifacts are workspace-scoped too, and independent of whether
 -- anything installed them. Deleting the workspace without these would leave the
 -- stored bundles as the largest orphan the plugin surface can produce.

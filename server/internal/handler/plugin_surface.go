@@ -180,6 +180,9 @@ func (h *Handler) GetPluginSurfaceLaunch(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusForbidden, "this Plugin is disabled")
 		return
 	}
+	if !h.pluginSurfaceLaunchAllowed(w, r, workspaceID, installation, chi.URLParam(r, "surfaceKey")) {
+		return
+	}
 	script, err := h.PluginService.SurfaceScript(r.Context(), installation, chi.URLParam(r, "surfaceKey"))
 	if err != nil {
 		writePluginError(w, err, "failed to load the Plugin surface")

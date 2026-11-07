@@ -34,6 +34,8 @@ func HostCapabilities() Capabilities {
 		SurfaceTypes: map[string]bool{
 			SurfaceIssuePanel: true,
 			SurfaceModal:      true,
+			// Fork: workspace pages render behind workspace.settings.plugin_extensions.
+			SurfaceWorkspacePage: true,
 		},
 		// The agent trigger is not a call site the host drives: the hook is
 		// offered to an agent as an MCP tool and the agent decides. The
@@ -44,6 +46,8 @@ func HostCapabilities() Capabilities {
 			TriggerEvent:    true,
 			TriggerAgent:    true,
 			TriggerSchedule: true,
+			// Fork: Feishu card buttons; see handler/plugin_card_action_fork.go.
+			TriggerCardAction: true,
 		},
 		// http calls one declared endpoint; mcp adopts an external MCP server's
 		// tools, which is why it ships with an approval step that pins them by

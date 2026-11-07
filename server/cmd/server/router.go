@@ -696,7 +696,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// to the engine — no engine edit.
 				// Contact events refresh the organization directory between
 				// scheduled syncs; the sink debounces per installation.
-				connector, connectorLabel := buildLarkConnector(installSvc, larkClient, handler.NewFeishuOrgContactSync(h))
+				connector, connectorLabel := buildLarkConnector(installSvc, larkClient, handler.NewFeishuOrgContactSync(h), h.PluginCardActions())
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
 					APIClient:   larkClient,
@@ -1714,6 +1714,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// ui / manual only. `event` is dispatched by the host off the event
 			// bus; `agent` arrives over MCP rather than this HTTP endpoint.
 			r.Post("/hooks/{key}", h.InvokePluginHook)
+			// Fork: workspace-page endpoints, off unless the workspace enables them.
+			handler.RegisterPluginForkBridgeRoutes(r, h)
 		})
 	})
 
@@ -2640,7 +2642,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 //
 // Returns the connector plus a short label for the boot log:
 // "ws-long-conn" in the healthy case, "noop" in the fallback case.
-func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient, contactEvents lark.ContactEventSink) (lark.EventConnector, string) {
+func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient, contactEvents lark.ContactEventSink, cardActions lark.CardActionHandler) (lark.EventConnector, string) {
 	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
 		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 		Logger:  slog.Default(),
@@ -2686,6 +2688,7 @@ func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.API
 		CredentialsProvider: credsProvider,
 		InboundVerifier:     installSvc,
 		ContactEvents:       contactEvents,
+		CardActions:         cardActions,
 		Logger:              slog.Default(),
 	})
 	if err != nil {
