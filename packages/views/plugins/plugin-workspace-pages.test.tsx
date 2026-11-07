@@ -11,11 +11,12 @@ const data = vi.hoisted(() => ({
   settings: {} as Record<string, unknown>,
   flagEnabled: true,
   queried: [] as boolean[],
+  launch: null as { url: string; bridge_token: string } | null,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[]; enabled?: boolean }) => {
-    if (options?.queryKey?.[0] === "surface") return { data: null, isPending: true, isError: false };
+    if (options?.queryKey?.[0] === "surface") return { data: data.launch, isPending: !data.launch, isError: false };
     data.queried.push(options.enabled !== false);
     return { data: options.enabled === false ? undefined : data.installed, isPending: false, isError: false };
   },
@@ -125,6 +126,17 @@ describe("PluginWorkspacePage", () => {
   beforeEach(() => {
     data.installed.plugins = [installation()];
     data.flagEnabled = true;
+    data.launch = null;
+  });
+
+  it("fills the page with the frame and leaves scrolling to the plugin", () => {
+    data.settings = { plugin_extensions: { workspace_pages: true } };
+    data.launch = { url: "https://plugin-content.example.test/plugin-surfaces/opaque", bridge_token: "proof" };
+    render(<PluginWorkspacePage installationId="installation-1" surfaceKey="board" />, { wrapper: Wrapper });
+    const frame = screen.getByTitle("Review — Review board");
+    expect(frame).toHaveClass("flex-1");
+    expect(frame.style.height).toBe("");
+    expect(frame.parentElement).toHaveClass("h-full");
   });
 
   it("explains instead of mounting a frame when pages are off", () => {

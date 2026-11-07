@@ -19,6 +19,11 @@ interface PluginSurfaceFrameProps {
   className?: string;
   /** Initial frame height before the surface asks for its own. */
   defaultHeight?: number;
+  /**
+   * Fill the parent's height and ignore `ui.resize`. Full pages scroll inside
+   * the frame so their own sticky toolbars and floating bars stay in view.
+   */
+  fill?: boolean;
 }
 
 /**
@@ -28,7 +33,7 @@ interface PluginSurfaceFrameProps {
  * boundary and is always `sandbox="allow-scripts"` without
  * `allow-same-origin`; see buildSurfaceFrameDocument.
  */
-export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className, defaultHeight }: PluginSurfaceFrameProps) {
+export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className, defaultHeight, fill = false }: PluginSurfaceFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(defaultHeight ?? DEFAULT_HEIGHT);
@@ -67,9 +72,9 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
       installationId: installation.id,
       bridgeToken: launch?.bridge_token ?? "",
       issueId,
-      onResize: setHeight,
+      onResize: fill ? undefined : setHeight,
     }),
-    [installation.id, launch?.bridge_token, issueId],
+    [installation.id, launch?.bridge_token, issueId, fill],
   );
 
   // The listener is armed BEFORE srcdoc is assigned. That makes the guest-first
@@ -126,7 +131,10 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
   }
 
   return (
-    <div ref={anchorRef} className={cn("overflow-hidden rounded-lg border border-surface-border", className)}>
+    <div
+      ref={anchorRef}
+      className={cn("overflow-hidden rounded-lg border border-surface-border", fill && "flex h-full flex-col", className)}
+    >
       {failed ? (
         <div className="px-4 py-3 text-caption text-muted-foreground">
           <PluginSurfaceNotice installation={installation} kind="failed" />
@@ -142,8 +150,8 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
         // This is the host-authored wrapper, so same-origin is intentional. Its
         // nested plugin iframe remains opaque and owns no app credential.
         sandbox="allow-scripts allow-same-origin"
-        className="w-full border-0 bg-transparent"
-        style={{ height }}
+        className={cn("w-full border-0 bg-transparent", fill && "min-h-0 flex-1")}
+        style={fill ? undefined : { height }}
       />
     </div>
   );

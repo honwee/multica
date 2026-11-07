@@ -83,8 +83,6 @@ export function PluginPagesSection({ pathname }: { pathname: string }) {
   );
 }
 
-const PAGE_FRAME_HEIGHT = 640;
-
 /** The route body for `/{slug}/plugins/{installationId}/{surfaceKey}`. */
 export function PluginWorkspacePage({ installationId, surfaceKey }: { installationId: string; surfaceKey: string }) {
   const { t } = useT("layout");
@@ -98,14 +96,14 @@ export function PluginWorkspacePage({ installationId, surfaceKey }: { installati
       <PageHeader>
         <h1 className="min-w-0 truncate text-body font-medium">{entry?.surface.name ?? ""}</h1>
       </PageHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 p-4">
         {entry ? (
           <PluginSurfaceFrame
             key={`${entry.installation.id}:${entry.surface.key}`}
             wsId={wsId}
             installation={entry.installation}
             surface={entry.surface}
-            defaultHeight={PAGE_FRAME_HEIGHT}
+            fill
           />
         ) : ready ? (
           <p className="text-caption text-muted-foreground">{t(($) => $.panels.work.plugin_page_unavailable)}</p>
