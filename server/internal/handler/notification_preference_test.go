@@ -7,7 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -215,14 +218,22 @@ func TestNotificationPreferencesFeishuToggleAndStatus(t *testing.T) {
 		return out
 	}
 
-	t.Setenv("FEISHU_APP_ID", "")
-	t.Setenv("FEISHU_APP_SECRET", "")
-	if got := get().Feishu; got.Available || got.Reason != "not_configured" {
-		t.Fatalf("without login app: %+v", got)
-	}
-
+	// The login app is configured throughout: it must not make Feishu
+	// notifications available, because only agent bots send them.
 	t.Setenv("FEISHU_APP_ID", "cli_test")
 	t.Setenv("FEISHU_APP_SECRET", "secret")
+	box, err := secretbox.New(make([]byte, secretbox.KeySize))
+	if err != nil {
+		t.Fatalf("secretbox.New: %v", err)
+	}
+	installations, err := lark.NewInstallationService(testHandler.Queries, box)
+	if err != nil {
+		t.Fatalf("NewInstallationService: %v", err)
+	}
+	previousInstallations := testHandler.LarkInstallations
+	testHandler.LarkInstallations = installations
+	t.Cleanup(func() { testHandler.LarkInstallations = previousInstallations })
+
 	if got := get().Feishu; got.Available || got.Reason != "not_linked" {
 		t.Fatalf("unlinked user: %+v", got)
 	}
@@ -230,9 +241,28 @@ func TestNotificationPreferencesFeishuToggleAndStatus(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE "user" SET feishu_open_id = 'ou_pref_test' WHERE id = $1`, testUserID); err != nil {
 		t.Fatalf("link user: %v", err)
 	}
-	if got := get().Feishu; !got.Available || got.Reason != "" {
-		t.Fatalf("linked user: %+v", got)
+	if got := get().Feishu; got.Available || got.Reason != "no_agent_bot" {
+		t.Fatalf("linked user, no agent bot: %+v", got)
 	}
+
+	agentID := dbfx.Agent(t, "Feishu notify status agent", "", testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID})
+	installation, err := installations.Upsert(ctx, lark.InstallationParams{
+		WorkspaceID: parseUUID(testWorkspaceID), AgentID: parseUUID(agentID), AppID: "cli_notify_status_test",
+		AppSecret: "notify-status-secret", BotOpenID: "ou_notify_status_bot", InstallerUserID: parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create Lark installation: %v", err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM channel_installation WHERE id = $1`, uuidToString(installation.ID))
+	if got := get().Feishu; !got.Available || got.Reason != "" {
+		t.Fatalf("linked user with an agent bot: %+v", got)
+	}
+
+	testHandler.LarkInstallations = nil
+	if got := get().Feishu; got.Available || got.Reason != "no_agent_bot" {
+		t.Fatalf("lark integration disabled: %+v", got)
+	}
+	testHandler.LarkInstallations = installations
 
 	recorder := httptest.NewRecorder()
 	testHandler.PatchNotificationPreferences(recorder, notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
