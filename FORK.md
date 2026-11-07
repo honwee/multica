@@ -19,6 +19,12 @@
 - **飞书通知卡片按钮**（manifest 的 `card_buttons` + `card_action` 触发）：只出现在 agent 机器人发送的通知卡片上。点击经机器人长连接回调（`card.action.trigger`），平台校验签名、点击者身份和 issue 权限，每张卡片只执行一次（`plugin_card_action`），再调用插件钩子并以点击者身份执行它返回的动作。机器人应用需要在飞书开放平台用长连接订阅「卡片回传交互」。代码：`server/internal/handler/plugin_card_action_fork.go`、`server/internal/feishunotify/buttons_fork.go`、`server/internal/integrations/lark/ws_card_action_fork.go`。
 - 最小示例：`examples/plugins/workspace-review/`。
 
+## 工作区插件
+
+各工作区的业务插件放在 `plugins/<名字>/`，每个目录是一个 pnpm workspace 包（`pnpm test` 会跑它的测试），并在 `server/pkg/plugincontract/fork_plugins_test.go` 里登记，用平台的打包校验器检查。上线方式是在对应工作区的「设置 → 插件」上传安装，不随服务端发版。
+
+- `plugins/jiaowu-review/`：教务FDE 的审批插件（审批队列页、飞书一键审批、问课单结束后的收口评论）。
+
 ## 数据库迁移编号
 
 - fork 自己的新迁移从 **`90000_`** 开始编号（`90000_xxx.up.sql`、`90001_xxx.up.sql`……），和上游的编号段永远分开。编号固定 5 位，保证按文件名排序与按数字排序一致。
