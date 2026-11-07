@@ -120,7 +120,22 @@ describe("NotificationsTab Feishu toggle", () => {
     expect(toggle).not.toBeChecked();
   });
 
-  it("explains when the deployment has no Feishu app", async () => {
+  it("is disabled with the reason when no agent in the workspace has a Feishu bot", async () => {
+    renderTab({
+      workspace_id: "ws-1",
+      preferences: { feishu_notifications: "all" },
+      feishu: { available: false, reason: "no_agent_bot" },
+    });
+
+    expect(
+      await screen.findByText(enSettings.notifications.feishu.no_agent_bot),
+    ).toBeInTheDocument();
+    const toggle = screen.getByRole("switch", { name: feishuLabel });
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).not.toBeChecked();
+  });
+
+  it("explains when an older server reports no Feishu app", async () => {
     renderTab({
       workspace_id: "ws-1",
       preferences: {},

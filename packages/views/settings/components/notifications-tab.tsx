@@ -65,9 +65,11 @@ export function NotificationsTab() {
   const feishuReason = data?.feishu?.reason;
   const feishuDescription = feishuAvailable
     ? t(($) => $.notifications.feishu.hint)
-    : feishuReason === "not_configured"
-      ? t(($) => $.notifications.feishu.not_configured)
-      : t(($) => $.notifications.feishu.not_linked);
+    : feishuReason === "no_agent_bot"
+      ? t(($) => $.notifications.feishu.no_agent_bot)
+      : feishuReason === "not_configured"
+        ? t(($) => $.notifications.feishu.not_configured)
+        : t(($) => $.notifications.feishu.not_linked);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">

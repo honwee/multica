@@ -689,9 +689,10 @@
     "feishu": {
       "title": "Feishu notifications",
       "label": "Receive inbox notifications as Feishu direct messages",
-      "hint": "Follows the inbox groups above. Updates to one issue within a minute arrive as one message.",
+      "hint": "Sent by the Feishu bot of the agent the issue is assigned to; issues assigned to a person or unassigned aren't pushed. Follows the inbox groups above. Updates to one issue within a minute arrive as one message.",
       "not_linked": "Your account isn't linked to Feishu. Sign in with Feishu once to turn this on.",
-      "not_configured": "Feishu isn't configured on this deployment."
+      "not_configured": "Feishu isn't configured on this deployment.",
+      "no_agent_bot": "No agent in this workspace has a Feishu bot. Bind a Feishu bot to an agent to turn this on."
     },
     "browser": {
       "label": "Browser notifications",

@@ -13,9 +13,11 @@ export type NotificationGroupValue = "all" | "muted";
 export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>>;
 
 /**
- * Whether the caller can receive Feishu direct messages. `reason` is
- * "not_configured" (no Feishu login app on this deployment), "not_linked"
- * (the account has no Feishu identity), or a value from a newer server.
+ * Whether the caller can receive Feishu direct messages, which only agent
+ * Feishu bots send. `reason` is "not_linked" (the account has no Feishu
+ * identity), "no_agent_bot" (no agent in the workspace has a Feishu bot),
+ * "not_configured" (older servers: no Feishu login app), or a value from a
+ * newer server.
  */
 export interface FeishuNotificationStatus {
   available: boolean;
