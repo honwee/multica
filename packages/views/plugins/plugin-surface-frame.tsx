@@ -4,6 +4,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pluginSurfaceLaunchOptions } from "@multica/core/plugins";
 import type { PluginInstallation, PluginSurface } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
+import { XIcon } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { buildSurfaceFrameDocument, readThemeTokens } from "./surface-document";
@@ -60,7 +62,11 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
   const surfaceInstance = useMemo(() => ({ issueId, surfaceDocument }), [issueId, surfaceDocument]);
   const [failedSurfaceInstance, setFailedSurfaceInstance] = useState<typeof surfaceInstance | null>(null);
   const [navigatedSurfaceInstance, setNavigatedSurfaceInstance] = useState<typeof surfaceInstance | null>(null);
+  const [dismissedSurfaceInstance, setDismissedSurfaceInstance] = useState<typeof surfaceInstance | null>(null);
   const failed = failedSurfaceInstance === surfaceInstance;
+  // The frame keeps rendering after an error, so the notice is dismissible;
+  // a new document or issue brings it back if that one fails too.
+  const showFailure = failed && dismissedSurfaceInstance !== surfaceInstance;
   const navigated = navigatedSurfaceInstance === surfaceInstance;
 
   // One bridge per rendered document. srcDoc changing reloads the frame — and
@@ -135,10 +141,8 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
       ref={anchorRef}
       className={cn("overflow-hidden rounded-lg border border-surface-border", fill && "flex h-full flex-col", className)}
     >
-      {failed ? (
-        <div className="px-4 py-3 text-caption text-muted-foreground">
-          <PluginSurfaceNotice installation={installation} kind="failed" />
-        </div>
+      {showFailure ? (
+        <PluginSurfaceFailure installation={installation} onDismiss={() => setDismissedSurfaceInstance(surfaceInstance)} />
       ) : null}
       <iframe
         // Keyed on the issue as well: a new bridge is created when issueId
@@ -153,6 +157,20 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
         className={cn("w-full border-0 bg-transparent", fill && "min-h-0 flex-1")}
         style={fill ? undefined : { height }}
       />
+    </div>
+  );
+}
+
+function PluginSurfaceFailure({ installation, onDismiss }: { installation: PluginInstallation; onDismiss: () => void }) {
+  const { t } = useT("issues");
+  return (
+    <div role="status" className="flex items-center gap-2 py-1.5 pr-1.5 pl-4 text-caption text-muted-foreground">
+      <span className="min-w-0 flex-1">
+        <PluginSurfaceNotice installation={installation} kind="failed" />
+      </span>
+      <Button type="button" variant="ghost" size="icon-xs" aria-label={t(($) => $.plugins.surface_failed_dismiss)} onClick={onDismiss}>
+        <XIcon />
+      </Button>
     </div>
   );
 }

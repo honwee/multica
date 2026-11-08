@@ -1054,7 +1054,8 @@
   },
   "plugins": {
     "panels": "Plugins",
-    "surface_failed": "{{name}} 的介面載入失敗。",
+    "surface_failed": "{{name}} 執行時出錯，部分功能可能無法使用。",
+    "surface_failed_dismiss": "關閉提示",
     "hook_succeeded": "{{name}} 已完成。",
     "hook_failed": "{{name}} 執行失敗。",
     "hook_refused": "{{name}} 未被執行。",
