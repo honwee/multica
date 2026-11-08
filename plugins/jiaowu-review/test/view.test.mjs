@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { QUEUE_TABS, cardNumber, displayTitle, matchesQuery, rejectLabel, resultToast } from "../ui/view.mjs";
+import { QUEUE_TABS, cardNumber, displayTitle, failureText, guarded, matchesQuery, rejectLabel, resultToast } from "../ui/view.mjs";
 
 test("tabs run 提案 / 草稿 / 请教 / 其他", () => {
   assert.deepEqual(QUEUE_TABS.map((tab) => tab.label), ["提案", "草稿", "请教", "其他"]);
@@ -48,4 +48,40 @@ test("batch results become success, partial or error toasts", () => {
   assert.equal(failed.kind, "error");
   assert.equal(failed.sticky, true);
   assert.equal(failed.details.length, 2);
+});
+
+test("guarded handlers report sync throws and async rejections instead of escaping", async () => {
+  const seen = [];
+  const report = (error) => seen.push(error.message);
+
+  assert.doesNotThrow(() => guarded(() => {
+    throw new Error("sync");
+  }, report)());
+  await guarded(async () => {
+    throw new Error("async");
+  }, report)();
+  assert.deepEqual(seen, ["sync", "async"]);
+
+  assert.equal(guarded((a, b) => a + b, report)(2, 3), 5);
+  assert.equal(await guarded(async () => "ok", report)(), "ok");
+  assert.deepEqual(seen, ["sync", "async"]);
+});
+
+test("a failing reporter never turns a guarded failure into an uncaught one", async () => {
+  const report = () => {
+    throw new Error("reporter broke");
+  };
+  assert.doesNotThrow(() => guarded(() => {
+    throw new Error("sync");
+  }, report)());
+  await guarded(async () => {
+    throw new Error("async");
+  }, report)();
+});
+
+test("failure text is readable for errors, strings and empty reasons", () => {
+  assert.equal(failureText(new Error("403: plugin_extension_disabled")), "403: plugin_extension_disabled");
+  assert.equal(failureText("plain"), "plain");
+  assert.equal(failureText(undefined), "未知错误");
+  assert.equal(failureText(new Error("")), "Error");
 });

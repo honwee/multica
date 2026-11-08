@@ -70,7 +70,7 @@ node plugins/jiaowu-review/build.mjs --zip   # 生成 ui/main.js 和 dist/jiaowu
 ## 安装（教务FDE 管理员）
 
 1. 线上先配好 `MULTICA_PLUGIN_SECRET_KEY` 和 `MULTICA_PLUGIN_SURFACE_ORIGIN`（见 LUM-33 的待决问题 1）。没配时插件页面打不开，钩子也不会运行。
-2. 教务FDE →「设置 → 插件」→ 上传 `jiaowu-review-1.0.3.zip` → 安装，同意权限：`issues:read`、`comments:read`、`comments:write`、`storage:workspace`、`net:fde-hooks.lumistedu.com`。
+2. 教务FDE →「设置 → 插件」→ 上传 `jiaowu-review-1.0.4.zip` → 安装，同意权限：`issues:read`、`comments:read`、`comments:write`、`storage:workspace`、`net:fde-hooks.lumistedu.com`。
 3. 「设置 → 插件 → 工作区扩展」打开「侧边栏插件页面」；要用飞书按钮时再打开「飞书通知卡片上的插件按钮」。
 4. 在插件详情里轮换 token，记下 signing secret（只显示一次），交给部署钩子服务的人。
 

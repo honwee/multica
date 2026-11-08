@@ -58,3 +58,35 @@ export function resultToast(label, ok, failed) {
   }
   return { kind: "error", title: `${label}失败：${failed.length} 条都没有发出`, details: failed, sticky: true };
 }
+
+export function failureText(error) {
+  if (error == null || error === "") return "未知错误";
+  if (typeof error === "string") return error;
+  return String(error.message || error.name || error);
+}
+
+// Wraps an event handler, timer or bridge callback so neither a throw nor a
+// rejected promise escapes to the frame: the page reports it in place.
+export function guarded(fn, report) {
+  const safeReport = (error) => {
+    try {
+      report(error);
+    } catch {
+      // Reporting must never become the uncaught error it is reporting.
+    }
+  };
+  return function (...args) {
+    try {
+      const result = fn.apply(this, args);
+      if (result && typeof result.then === "function") {
+        return result.then(undefined, (error) => {
+          safeReport(error);
+        });
+      }
+      return result;
+    } catch (error) {
+      safeReport(error);
+      return undefined;
+    }
+  };
+}
