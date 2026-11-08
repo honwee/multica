@@ -306,8 +306,9 @@ func buildPluginSurfaceDocument(code, challenge string) string {
   var codeElement = document.getElementById("multica-surface-code");
   var bootstrapElement = document.currentScript;
   var failed = false;
-  function reportSurfaceError() {
-    if (failed) return;
+  %s
+  function reportSurfaceError(event) {
+    if (failed || isForeignSurfaceError(event)) return;
     failed = true;
     parent.postMessage({ type: "multica:plugin-surface-error" }, "*");
   }
@@ -342,7 +343,7 @@ func buildPluginSurfaceDocument(code, challenge string) string {
   } catch (error) {
     reportSurfaceError();
   }
-})();`, strconv.Quote(challenge), strconv.Quote(pluginSurfacePortGlobal), strconv.Quote(pluginSurfaceConnectMessage), pluginSurfaceProtocolVersion)
+})();`, strconv.Quote(challenge), pluginSurfaceForeignErrorJS, strconv.Quote(pluginSurfacePortGlobal), strconv.Quote(pluginSurfaceConnectMessage), pluginSurfaceProtocolVersion)
 
 	return `<!doctype html>
 <html>
