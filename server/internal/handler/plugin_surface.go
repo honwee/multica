@@ -229,8 +229,8 @@ func (h *Handler) ServePluginSurface(w http.ResponseWriter, r *http.Request) {
 	// Enforce the deployment promise at the request boundary. A broad parent-
 	// domain auth cookie must make the surface fail visibly, not quietly arrive
 	// on a host that was supposed to be cookie-free.
-	if r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" {
-		writeError(w, http.StatusBadRequest, "the Plugin content origin must not receive app credentials")
+	if pluginSurfaceRequestCarriesAppCredentials(r) {
+		h.writePluginSurfaceCredentialRejection(w)
 		return
 	}
 	claims, err := h.openPluginSurfaceToken(chi.URLParam(r, "token"))
