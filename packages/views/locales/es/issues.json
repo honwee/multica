@@ -1013,7 +1013,8 @@
   },
   "plugins": {
     "panels": "Plugins",
-    "surface_failed": "{{name}} no pudo cargar su interfaz.",
+    "surface_failed": "{{name}} tuvo un error al ejecutarse. Puede que algunas funciones no estén disponibles.",
+    "surface_failed_dismiss": "Cerrar",
     "hook_succeeded": "{{name}} terminó.",
     "hook_failed": "{{name}} falló.",
     "hook_refused": "{{name}} no se ejecutó.",

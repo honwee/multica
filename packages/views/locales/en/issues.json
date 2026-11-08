@@ -1099,7 +1099,8 @@
   },
   "plugins": {
     "panels": "Plugins",
-    "surface_failed": "{{name}} could not load its interface.",
+    "surface_failed": "{{name}} hit an error while running. Some features may not work.",
+    "surface_failed_dismiss": "Dismiss",
     "hook_succeeded": "{{name}} finished.",
     "hook_failed": "{{name}} failed.",
     "hook_refused": "{{name}} was not run.",

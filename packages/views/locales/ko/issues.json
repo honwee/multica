@@ -1054,7 +1054,8 @@
   },
   "plugins": {
     "panels": "Plugins",
-    "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
+    "surface_failed": "{{name}} 실행 중 오류가 발생했습니다. 일부 기능을 사용하지 못할 수 있습니다.",
+    "surface_failed_dismiss": "닫기",
     "hook_succeeded": "{{name}} 완료됨.",
     "hook_failed": "{{name}} 실패함.",
     "hook_refused": "{{name}}이(가) 실행되지 않았습니다.",

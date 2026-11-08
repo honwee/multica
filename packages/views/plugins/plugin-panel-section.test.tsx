@@ -181,7 +181,22 @@ describe("PluginPanelSection", () => {
     Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
     act(() => window.dispatchEvent(event));
 
-    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+    expect(screen.getByText("Hello Panel hit an error while running. Some features may not work.")).toBeInTheDocument();
+  });
+
+  it("lets the reader dismiss a runtime failure while the surface keeps rendering", () => {
+    data.installed.plugins = [installation()];
+    render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+
+    const frame = screen.getByTitle("Hello Panel — Hello") as HTMLIFrameElement;
+    const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
+    Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
+    act(() => window.dispatchEvent(event));
+    expect(screen.getByText("Hello Panel hit an error while running. Some features may not work.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("Hello Panel hit an error while running. Some features may not work.")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Hello Panel — Hello")).toBe(frame);
   });
 
   it("clears a previous surface failure when the issue changes", () => {
@@ -192,10 +207,10 @@ describe("PluginPanelSection", () => {
     const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
     Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
     act(() => window.dispatchEvent(event));
-    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+    expect(screen.getByText("Hello Panel hit an error while running. Some features may not work.")).toBeInTheDocument();
 
     rerender(<PluginPanelSection issueId="issue-2" />);
-    expect(screen.queryByText("Hello Panel could not load its interface.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hello Panel hit an error while running. Some features may not work.")).not.toBeInTheDocument();
     expect(screen.getByTitle("Hello Panel — Hello")).toBeInTheDocument();
   });
 
@@ -208,7 +223,7 @@ describe("PluginPanelSection", () => {
     const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
     Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
     act(() => window.dispatchEvent(event));
-    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+    expect(screen.getByText("Hello Panel hit an error while running. Some features may not work.")).toBeInTheDocument();
 
     data.launch = {
       url: "https://plugin-content.example.test/plugin-surfaces/replacement",
@@ -217,7 +232,7 @@ describe("PluginPanelSection", () => {
       digest: "def",
     };
     rerender(<PluginPanelSection issueId="issue-1" />);
-    expect(screen.queryByText("Hello Panel could not load its interface.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hello Panel hit an error while running. Some features may not work.")).not.toBeInTheDocument();
     expect(screen.getByTitle("Hello Panel — Hello").getAttribute("srcdoc")).not.toBe(originalDocument);
   });
 });
