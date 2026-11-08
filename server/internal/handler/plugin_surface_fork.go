@@ -85,3 +85,31 @@ const pluginSurfaceCredentialRejectionDocument = `<!doctype html>
 <body><p>This Plugin could not load: the Plugin content origin received app credentials (an app sign-in cookie or Authorization header). Check that the app's cookie domain does not cover the Plugin content origin.</p>
 <p>插件无法加载：插件内容域名收到了应用的登录凭据（登录 cookie 或 Authorization 头）。请检查应用 cookie 的作用域名是否覆盖了插件内容域名。</p></body></html>
 `
+
+// pluginSurfaceForeignErrorJS defines isForeignSurfaceError(event) for the
+// surface bootstrap. Browser extensions inject scripts into every frame, the
+// sandboxed plugin frame included, and many of them throw there (no storage,
+// no same-origin, a wallet that cannot connect). Those errors are not the
+// plugin's, but they reach the same window listeners and used to light the
+// "failed to load" banner over a page that rendered fine. An error counts as
+// foreign when the script that threw it is an extension's: the event filename
+// for errors, the top stack frame for rejections. Everything else — the
+// plugin's own code, inline scripts, errors without a location — is reported
+// as before. The page's own listeners cannot do this filtering: on the window
+// target Chromium runs listeners in registration order, capture or not, and
+// the bootstrap's run first.
+const pluginSurfaceForeignErrorJS = `var extensionScriptURL = /^(?:chrome|moz|safari-web|ms-browser)-extension:\/\//;
+  function isForeignSurfaceError(event) {
+    if (!event) return false;
+    if (event.filename) return extensionScriptURL.test(event.filename);
+    var thrown = event.error || event.reason;
+    var stack = thrown && typeof thrown.stack === "string" ? thrown.stack : "";
+    var lines = stack.split("\n");
+    for (var index = 0; index < lines.length; index++) {
+      var line = lines[index];
+      if (!/^\s*at\s|@/.test(line)) continue;
+      var frame = /([a-z][a-z0-9+.-]*:\/\/[^\s()]+?)(?::\d+){1,2}\)?\s*$/i.exec(line);
+      if (frame) return extensionScriptURL.test(frame[1]);
+    }
+    return false;
+  }`

@@ -469,6 +469,38 @@ function resultToast(label, ok, failed) {
   return { kind: "error", title: `${label}失败：${failed.length} 条都没有发出`, details: failed, sticky: true };
 }
 
+function failureText(error) {
+  if (error == null || error === "") return "未知错误";
+  if (typeof error === "string") return error;
+  return String(error.message || error.name || error);
+}
+
+// Wraps an event handler, timer or bridge callback so neither a throw nor a
+// rejected promise escapes to the frame: the page reports it in place.
+function guarded(fn, report) {
+  const safeReport = (error) => {
+    try {
+      report(error);
+    } catch {
+      // Reporting must never become the uncaught error it is reporting.
+    }
+  };
+  return function (...args) {
+    try {
+      const result = fn.apply(this, args);
+      if (result && typeof result.then === "function") {
+        return result.then(undefined, (error) => {
+          safeReport(error);
+        });
+      }
+      return result;
+    } catch (error) {
+      safeReport(error);
+      return undefined;
+    }
+  };
+}
+
 // 审批队列 — the plugin's workspace page.
 //
 // Source of ui/main.js; `node build.mjs` inlines lib/protocol.mjs and
@@ -775,6 +807,22 @@ button:disabled { cursor: default; opacity: 0.5; }
 .toast-details li { overflow-wrap: anywhere; }
 `;
 
+// ---- errors ---------------------------------------------------------------
+//
+// The host shows a "failed to load" banner for any uncaught error or unhandled
+// rejection in this frame. Every entry point of the page — handlers, timers,
+// bridge replies, the first load — goes through `guard`, so the page's own
+// failures are reported here as a toast instead.
+
+function reportFailure(error) {
+  console.error("[jiaowu-review]", error);
+  toast({ kind: "error", title: `页面出错：${failureText(error)}`, details: [], sticky: true });
+}
+
+function guard(fn) {
+  return guarded(fn, reportFailure);
+}
+
 // ---- bridge ---------------------------------------------------------------
 
 const pending = new Map();
@@ -782,7 +830,7 @@ const port = globalThis.__multicaPluginBridgePortV2;
 let sequence = 0;
 if (!(port instanceof MessagePort)) throw new Error("Multica surface bridge is unavailable");
 delete globalThis.__multicaPluginBridgePortV2;
-port.onmessage = (message) => {
+port.onmessage = guard((message) => {
   const payload = message.data;
   if (payload?.kind === "theme") {
     for (const [name, value] of Object.entries(payload.theme ?? {})) {
@@ -795,7 +843,7 @@ port.onmessage = (message) => {
   pending.delete(payload.id);
   if (payload.ok) entry.resolve(payload.data);
   else entry.reject(new Error(`${payload.status}: ${payload.error}`));
-};
+});
 port.start();
 
 function call(method, path, body) {
@@ -1012,7 +1060,7 @@ async function linkAsks(waitingDrafts, otherIssues) {
 }
 
 // "Other" cards are not read on load; their body is fetched when a row opens.
-async function ensureDetail(item) {
+const ensureDetail = guard(async (item) => {
   if (state.details.has(item.id)) return;
   try {
     const detail = await call("GET", `/issues/${item.id}`);
@@ -1021,7 +1069,7 @@ async function ensureDetail(item) {
     state.details.set(item.id, { description: null });
   }
   renderList();
-}
+});
 
 // ---- actions --------------------------------------------------------------
 
@@ -1139,10 +1187,10 @@ let armTimer = null;
 function arm(key) {
   state.armed = key;
   clearTimeout(armTimer);
-  armTimer = setTimeout(() => {
+  armTimer = setTimeout(guard(() => {
     state.armed = null;
     render();
-  }, ARM_MS);
+  }), ARM_MS);
 }
 
 function disarm() {
@@ -1164,7 +1212,7 @@ function armedButton(key, label, action, { variant = "", count } = {}) {
         return;
       }
       disarm();
-      action();
+      return action();
     },
   }, text);
 }
@@ -1175,7 +1223,7 @@ let toastId = 0;
 function toast({ kind, title, details, sticky }) {
   const entry = { id: ++toastId, kind, title, details, open: false };
   state.toasts = [...state.toasts.slice(-3), entry];
-  if (!sticky) setTimeout(() => dismiss(entry.id), TOAST_MS);
+  if (!sticky) setTimeout(guard(() => dismiss(entry.id)), TOAST_MS);
   renderToasts();
 }
 
@@ -1188,8 +1236,10 @@ function dismiss(id) {
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
-  for (const [name, value] of Object.entries(props)) {
-    if (value == null || value === false) continue;
+  for (const [name, raw] of Object.entries(props)) {
+    if (raw == null || raw === false) continue;
+    // Every handler the page attaches goes through here, so none can throw past it.
+    const value = name.startsWith("on") && typeof raw === "function" ? guard(raw) : raw;
     if (name in node && !name.includes("-")) node[name] = value;
     else node.setAttribute(name, value === true ? "" : value);
   }
@@ -1421,7 +1471,7 @@ function askBlock(item) {
     disabled: state.busy,
     oninput: (event) => state.askReplies.set(item.id, event.target.value),
     onkeydown: (event) => {
-      if (event.key === "Enter" && !event.isComposing) answerAsk(item, null, reply.value);
+      if (event.key === "Enter" && !event.isComposing) return answerAsk(item, null, reply.value);
     },
   });
   return el(
@@ -1444,7 +1494,7 @@ function askBlock(item) {
                   return;
                 }
                 disarm();
-                answerAsk(item, option.letter);
+                return answerAsk(item, option.letter);
               },
             },
             el("span", { class: "option-key" }, option.letter),
@@ -1669,14 +1719,14 @@ function renderToasts() {
 let progressFrame = 0;
 function scheduleProgress() {
   if (progressFrame) return;
-  progressFrame = requestAnimationFrame(() => {
+  progressFrame = requestAnimationFrame(guard(() => {
     progressFrame = 0;
     const progress = state.progress;
     progressNode.hidden = !progress;
     progressNode.classList.toggle("indeterminate", Boolean(progress?.indeterminate));
     const bar = progressNode.firstChild;
     bar.style.width = progress && !progress.indeterminate && progress.total ? `${Math.round((progress.done / progress.total) * 100)}%` : "";
-  });
+  }));
 }
 
 function render() {
@@ -1690,7 +1740,7 @@ function render() {
 
 // ---- keyboard -------------------------------------------------------------
 
-document.addEventListener("keydown", (event) => {
+document.addEventListener("keydown", guard((event) => {
   const inField = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && !inField) {
     const visible = visibleSelectable();
@@ -1705,10 +1755,12 @@ document.addEventListener("keydown", (event) => {
     if (state.selected.size) state.selected.clear();
     render();
   }
-});
+}));
 
-requestHeight();
-render();
-load();
+guard(() => {
+  requestHeight();
+  render();
+  return load();
+})();
 
 })();
