@@ -10,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // TestDispatchAutopilotForPlanIsIdempotent locks in the
@@ -219,6 +220,87 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("recent duplicate autopilot dispatch should leave 1 matching issue, got %d", count)
+	}
+}
+
+// TestDispatchAutopilotWebhookDeliveriesBypassRecentDuplicateGuard: two
+// distinct webhook deliveries arriving within the recent-duplicate window must
+// each create an issue, even when the title template renders the same title
+// for both (e.g. "Triage {{date}}"). Replaying the same delivery still reuses
+// its run (webhook_delivery_id idempotency).
+func TestDispatchAutopilotWebhookDeliveriesBypassRecentDuplicateGuard(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	title := "Autopilot webhook same title " + time.Now().UTC().Format("20060102150405.000000000")
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Webhook deliveries bypass recent duplicate guard",
+		Description:        pgtype.Text{String: "webhook dedupe test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: title, Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = testPool.Exec(bg, `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+		_, _ = testPool.Exec(bg, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	})
+
+	trigger := seedAutopilotScheduleTrigger(t, queries, ap)
+	firstDelivery, secondDelivery := dbid.NewV7(), dbid.NewV7()
+	first, err := autopilotSvc.DispatchAutopilotForWebhookDelivery(ctx, ap, trigger, []byte(`{"demandUuid":"a"}`), firstDelivery)
+	if err != nil {
+		t.Fatalf("first webhook dispatch: %v", err)
+	}
+	second, err := autopilotSvc.DispatchAutopilotForWebhookDelivery(ctx, ap, trigger, []byte(`{"demandUuid":"b"}`), secondDelivery)
+	if err != nil {
+		t.Fatalf("second webhook dispatch: %v", err)
+	}
+	for i, run := range []*db.AutopilotRun{first, second} {
+		if run == nil || run.Status == "skipped" || !run.IssueID.Valid {
+			t.Fatalf("delivery %d run = %+v, want an issue per distinct delivery", i+1, run)
+		}
+	}
+	if first.IssueID == second.IssueID {
+		t.Fatalf("distinct deliveries linked the same issue %s", util.UUIDToString(first.IssueID))
+	}
+
+	replay, err := autopilotSvc.DispatchAutopilotForWebhookDelivery(ctx, ap, trigger, []byte(`{"demandUuid":"a"}`), firstDelivery)
+	if err != nil {
+		t.Fatalf("replayed webhook dispatch: %v", err)
+	}
+	if replay == nil || replay.ID != first.ID {
+		t.Fatalf("replayed delivery run = %+v, want original run %s", replay, util.UUIDToString(first.ID))
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`,
+		testWorkspaceID, title,
+	).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("two distinct webhook deliveries should create 2 issues, got %d", count)
 	}
 }
 
