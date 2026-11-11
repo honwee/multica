@@ -51,6 +51,12 @@ const DefaultAutopilotTriggerTimezone = "UTC"
 
 const autopilotRecentDuplicateWindow = 60 * time.Second
 
+// isWebhookDeliveryRun reports whether the run was admitted from a durable
+// webhook delivery, whose idempotency is anchored on webhook_delivery_id.
+func isWebhookDeliveryRun(run *db.AutopilotRun) bool {
+	return run != nil && run.Source == "webhook" && run.WebhookDeliveryID.Valid
+}
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -712,12 +718,21 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	}
 	projectID := currentAutopilot.ProjectID
 
-	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
-		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
-	); err != nil {
-		return fmt.Errorf("recent duplicate guard: %w", err)
-	} else if found {
-		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
+	// The recent-duplicate guard catches the same trigger firing twice (e.g. a
+	// schedule tick replayed). Webhook deliveries do not need it: each delivery
+	// is its own external event and is already idempotent by
+	// webhook_delivery_id (unique index, see AdmitAutopilotWebhookDelivery).
+	// Matching on the templated title instead silently drops distinct payloads
+	// that arrive within the window — a title template like "Triage {{date}}"
+	// is identical for every delivery on the same day.
+	if !isWebhookDeliveryRun(run) {
+		if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
+			ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
+		); err != nil {
+			return fmt.Errorf("recent duplicate guard: %w", err)
+		} else if found {
+			return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
+		}
 	}
 
 	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, issueCountPolicy)
